@@ -49,6 +49,39 @@ export default {
       return discoverSource(sourceKey, env);
     }
 
+    if (url.pathname === "/api/debug/tjk") {
+      const targetUrl =
+        "https://www.tjk.org/TR/YarisSever/Info/Page/GunlukYarisProgrami";
+
+      try {
+        const response = await env.BROWSER.quickAction("content", {
+          url: targetUrl,
+          gotoOptions: {
+            waitUntil: "networkidle2",
+            timeout: 30000
+          }
+        });
+
+        const body = await response.text();
+
+        return json({
+          ok: response.ok,
+          targetUrl,
+          browserStatus: response.status,
+          bodyLength: body.length,
+          preview: body.slice(0, 1000)
+        });
+      } catch (error) {
+        return json(
+          {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          },
+          500
+        );
+      }
+    }
+
     return json(
       {
         error: "not_found",
