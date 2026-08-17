@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "two-horse-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-17",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "ai": {
+    "binding": "AI"
+  },
+
+  "browser": {
+    "binding": "BROWSER"
+  },
+
+  "vars": {
+    "APP_NAME": "Two Horse Backend",
+    "APP_VERSION": "0.1.0"
+  }
+}

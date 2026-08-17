@@ -1,0 +1,15 @@
+{
+  "name": "two-horse-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260817.0",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.0.0"
+  }
+}
