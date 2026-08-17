@@ -16,7 +16,19 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   return json({date:turkeyDate(),meetings,servedFrom:"d1",refreshingInBackground:true});
  }
  if(url.pathname==="/api/history") return json({history:await getHistory(env)});
- if(url.pathname==="/api/admin/refresh" && request.method==="POST") {
+ if(url.pathname==="/api/admin/refresh-tjk" && request.method==="POST") {
+        try {
+            const program = await refreshProgramIfDue(env, true);
+            return json({ ok:true, program });
+        } catch (error) {
+            return json({
+                ok:false,
+                error:error instanceof Error ? error.message : String(error)
+            }, 500);
+        }
+    }
+
+    if(url.pathname==="/api/admin/refresh" && request.method==="POST") {
   try { const program=await refreshProgramIfDue(env,true); const experts=await refreshExpertsIfDue(env,true); return json({ok:true,program,experts}); }
   catch(e){ return json({ok:false,error:errorMessage(e)},502); }
  }
