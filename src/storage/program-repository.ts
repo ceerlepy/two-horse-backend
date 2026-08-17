@@ -10,7 +10,17 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
       VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(race_date,city) DO UPDATE SET source_hash=excluded.source_hash,updated_at=CURRENT_TIMESTAMP`)
       .bind(date, meeting.city, sourceHash));
     for (const race of meeting.races) {
-      const startsAt = turkeyDateTime(date, race.time)?.toISOString() ?? null;
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(race.time ?? "")) {
+          throw new Error(`Refusing incomplete race: ${meeting.city} R${race.raceNumber} invalid time`);
+        }
+        if (!race.runners?.length) {
+          throw new Error(`Refusing incomplete race: ${meeting.city} R${race.raceNumber} no runners`);
+        }
+        const startsAtDate = turkeyDateTime(date, race.time);
+        if (!startsAtDate) {
+          throw new Error(`Unable to build starts_at: ${meeting.city} R${race.raceNumber}`);
+        }
+        const startsAt = startsAtDate.toISOString();
       statements.push(env.DB.prepare(`INSERT INTO races(race_date,city,race_number,start_time,starts_at,distance_meters,track,updated_at)
         VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(race_date,city,race_number) DO UPDATE SET
         start_time=excluded.start_time,starts_at=excluded.starts_at,distance_meters=excluded.distance_meters,track=excluded.track,updated_at=CURRENT_TIMESTAMP`)
