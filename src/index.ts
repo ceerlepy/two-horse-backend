@@ -49,6 +49,10 @@ export default {
       return discoverSource(sourceKey, env);
     }
 
+    if (url.pathname === "/api/debug/tjk-json") {
+      return extractTjkProgram(env);
+    }
+
     if (url.pathname === "/api/debug/tjk-source") {
       try {
         const result = await discoverTjkProgramUrl(env);
@@ -472,4 +476,141 @@ async function discoverTjkProgramUrl(env: Env): Promise<{
   `).bind(failedAt).run();
 
   throw new Error("TJK program URL could not be discovered");
+}
+
+async function extractTjkProgram(env: Env): Promise<Response> {
+  const source = await discoverTjkProgramUrl(env);
+
+  const response = await env.BROWSER.quickAction("json", {
+    url: source.url,
+    gotoOptions: {
+      waitUntil: "networkidle2",
+      timeout: 30000
+    },
+    prompt: `
+Bu sayfa Türkiye Jokey Kulübü günlük yarış programıdır.
+
+Sadece sayfada gerçekten görünen bugünkü yarış programını çıkar.
+
+Kurallar:
+- Uydurma veri üretme.
+- Hipodromları meetings altında grupla.
+- Her meeting içinde races olsun.
+- Her race içinde runners olsun.
+- At numarası programdaki gerçek at numarasıdır.
+- raceNumber gerçek koşu numarasıdır.
+- Saat görünüyorsa HH:mm biçiminde döndür.
+- Mesafe sayısal metre olsun.
+- Pist türünü "Çim", "Kum" veya "Sentetik" olarak döndür.
+- AGF yoksa null.
+- HP yoksa null.
+- Jokey adı görünmüyorsa null.
+- Kilo görünmüyorsa null.
+- At adı birebir sayfadaki ad olsun.
+`,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        type: "object",
+        properties: {
+          meetings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                city: { type: "string" },
+                races: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      raceNumber: { type: "integer" },
+                      time: {
+                        anyOf: [
+                          { type: "string" },
+                          { type: "null" }
+                        ]
+                      },
+                      distanceMeters: {
+                        anyOf: [
+                          { type: "integer" },
+                          { type: "null" }
+                        ]
+                      },
+                      track: {
+                        anyOf: [
+                          { type: "string" },
+                          { type: "null" }
+                        ]
+                      },
+                      runners: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            number: { type: "integer" },
+                            name: { type: "string" },
+                            jockey: {
+                              anyOf: [
+                                { type: "string" },
+                                { type: "null" }
+                              ]
+                            },
+                            weight: {
+                              anyOf: [
+                                { type: "number" },
+                                { type: "null" }
+                              ]
+                            },
+                            hp: {
+                              anyOf: [
+                                { type: "integer" },
+                                { type: "null" }
+                              ]
+                            },
+                            agfPercent: {
+                              anyOf: [
+                                { type: "number" },
+                                { type: "null" }
+                              ]
+                            }
+                          },
+                          required: [
+                            "number",
+                            "name",
+                            "jockey",
+                            "weight",
+                            "hp",
+                            "agfPercent"
+                          ]
+                        }
+                      }
+                    },
+                    required: [
+                      "raceNumber",
+                      "time",
+                      "distanceMeters",
+                      "track",
+                      "runners"
+                    ]
+                  }
+                }
+              },
+              required: ["city", "races"]
+            }
+          }
+        },
+        required: ["meetings"]
+      }
+    }
+  });
+
+  const payload = await response.json();
+
+  return json({
+    ok: response.ok,
+    sourceUrl: source.url,
+    discoveredNow: source.discovered,
+    data: payload
+  }, response.ok ? 200 : 502);
 }
