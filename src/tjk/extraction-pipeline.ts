@@ -683,56 +683,179 @@ async function extractMeeting(
   );
 }
 
-async function masterHtml(
+async function discoverMasterMeetings(
   env: Env,
-  url: string,
-  diagnostics:
-    TjkDiagnostic[]
-): Promise<string> {
-  const scope =
-    "master";
+  inputUrl: string,
+  diagnostics: TjkDiagnostic[]
+): Promise<Array<{
+  city: string;
+  url: string;
+}>> {
+  /*
+   * TJK canonical daily-program page.
+   *
+   * Query/Page occasionally returns a shell/partial page with HTTP 200.
+   * HTTP 200 alone is NOT success. Meeting discovery must also succeed.
+   */
+  const canonicalUrl = inputUrl
+    .replace(
+      /\/Query\/Page\/GunlukYarisProgrami/i,
+      "/Info/Page/GunlukYarisProgrami"
+    );
+
+  const scope = "master";
 
   /*
-   * Master sayfa için de en ucuzdan pahalıya.
-   * JSON'a gerek yok; sadece city linklerini keşfediyoruz.
+   * 1) NORMAL HTTP
+   * Fetch + discovery together form one successful stage.
    */
   try {
-    return await timed(
+    const html = await timed(
       scope,
       "HTTP_FETCH",
       diagnostics,
-      () =>
-        httpFetchHtml(url)
+      () => httpFetchHtml(canonicalUrl)
     );
+
+    const meetings = discoverDomesticMeetings(
+      html,
+      canonicalUrl
+    );
+
+    if (!meetings.length) {
+      diagnostics.push({
+        scope,
+        stage: "HTTP_PARSE",
+        ok: false,
+        durationMs: 0,
+        error: "NO_DOMESTIC_MEETINGS"
+      });
+
+      console.warn(
+        "[TJK] master HTTP_PARSE FAIL NO_DOMESTIC_MEETINGS"
+      );
+
+      throw new Error(
+        "HTTP_MASTER_NO_DOMESTIC_MEETINGS"
+      );
+    }
+
+    diagnostics.push({
+      scope,
+      stage: "HTTP_PARSE",
+      ok: true,
+      durationMs: 0,
+      detail: `${meetings.length} meetings`
+    });
+
+    console.info(
+      `[TJK] master HTTP_PARSE OK ${meetings.length} meetings`
+    );
+
+    return meetings;
   } catch {
-    // scrape
+    // continue to Cloudflare scrape
   }
 
+  /*
+   * 2) CLOUDFLARE /SCRAPE
+   */
   try {
-    return await timed(
+    const html = await timed(
       scope,
       "CF_SCRAPE",
       diagnostics,
-      () =>
-        browserScrapeHtml(
-          env,
-          url
-        )
+      () => browserScrapeHtml(
+        env,
+        canonicalUrl
+      )
     );
+
+    const meetings = discoverDomesticMeetings(
+      html,
+      canonicalUrl
+    );
+
+    if (!meetings.length) {
+      diagnostics.push({
+        scope,
+        stage: "SCRAPE_PARSE",
+        ok: false,
+        durationMs: 0,
+        error: "NO_DOMESTIC_MEETINGS"
+      });
+
+      console.warn(
+        "[TJK] master SCRAPE_PARSE FAIL NO_DOMESTIC_MEETINGS"
+      );
+
+      throw new Error(
+        "SCRAPE_MASTER_NO_DOMESTIC_MEETINGS"
+      );
+    }
+
+    diagnostics.push({
+      scope,
+      stage: "SCRAPE_PARSE",
+      ok: true,
+      durationMs: 0,
+      detail: `${meetings.length} meetings`
+    });
+
+    console.info(
+      `[TJK] master SCRAPE_PARSE OK ${meetings.length} meetings`
+    );
+
+    return meetings;
   } catch {
-    // content
+    // continue to rendered content
   }
 
-  return await timed(
+  /*
+   * 3) CLOUDFLARE /CONTENT
+   */
+  const html = await timed(
     scope,
     "CF_CONTENT",
     diagnostics,
-    () =>
-      browserContentHtml(
-        env,
-        url
-      )
+    () => browserContentHtml(
+      env,
+      canonicalUrl
+    )
   );
+
+  const meetings = discoverDomesticMeetings(
+    html,
+    canonicalUrl
+  );
+
+  if (!meetings.length) {
+    diagnostics.push({
+      scope,
+      stage: "CONTENT_PARSE",
+      ok: false,
+      durationMs: 0,
+      error: "NO_DOMESTIC_MEETINGS"
+    });
+
+    throw new Error(
+      "CONTENT_MASTER_NO_DOMESTIC_MEETINGS"
+    );
+  }
+
+  diagnostics.push({
+    scope,
+    stage: "CONTENT_PARSE",
+    ok: true,
+    durationMs: 0,
+    detail: `${meetings.length} meetings`
+  });
+
+  console.info(
+    `[TJK] master CONTENT_PARSE OK ${meetings.length} meetings`
+  );
+
+  return meetings;
 }
 
 async function mapLimited<
@@ -802,24 +925,12 @@ export async function extractTjkProgramWithFallbacks(
     TjkDiagnostic[] = [];
 
   try {
-    const html =
-      await masterHtml(
+    const meetings =
+      await discoverMasterMeetings(
         env,
         masterUrl,
         diagnostics
       );
-
-    const meetings =
-      discoverDomesticMeetings(
-        html,
-        masterUrl
-      );
-
-    if (!meetings.length) {
-      throw new Error(
-        "TJK_MASTER_NO_DOMESTIC_MEETINGS"
-      );
-    }
 
     /*
      * Paid planı ekonomik kullanmak için
