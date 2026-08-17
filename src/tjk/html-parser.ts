@@ -158,8 +158,7 @@ function parseRunnerTable(
     const jockey =
       jockeyCell
         ? firstMeaningfulAnchor($, jockeyCell) ??
-          clean(jockeyCell.text()) ||
-          null
+          (clean(jockeyCell.text()) || null)
         : null;
 
     runners.push({
