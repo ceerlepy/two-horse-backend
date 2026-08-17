@@ -49,6 +49,28 @@ export default {
       return discoverSource(sourceKey, env);
     }
 
+    if (url.pathname === "/api/debug/tjk-source") {
+      try {
+        const result = await discoverTjkProgramUrl(env);
+
+        return json({
+          ok: true,
+          source: "tjk_program",
+          url: result.url,
+          discoveredNow: result.discovered
+        });
+      } catch (error) {
+        return json(
+          {
+            ok: false,
+            source: "tjk_program",
+            error: error instanceof Error ? error.message : String(error)
+          },
+          503
+        );
+      }
+    }
+
     if (url.pathname === "/api/debug/tjk") {
       const targetUrl =
         "https://www.tjk.org/TR/YarisSever/Info/Page/GunlukYarisProgrami";
@@ -287,4 +309,167 @@ async function discoverSource(
       { status: 500 }
     );
   }
+}
+
+async function discoverTjkProgramUrl(env: Env): Promise<{
+  url: string;
+  discovered: boolean;
+}> {
+  const registry = await env.DB.prepare(`
+    SELECT
+      homepage_url,
+      last_working_url
+    FROM main_source_registry
+    WHERE source_key = 'tjk_program'
+    LIMIT 1
+  `).first();
+
+  const currentUrl =
+    (registry?.last_working_url as string | null) ||
+    "https://www.tjk.org/TR/YarisSever/Info/Page/GunlukYarisProgrami";
+
+  // 1. Önce son çalışan URL'yi doğrula.
+  try {
+    const currentResponse = await env.BROWSER.quickAction("content", {
+      url: currentUrl,
+      gotoOptions: {
+        waitUntil: "networkidle2",
+        timeout: 30000
+      }
+    });
+
+    const currentBody = await currentResponse.text();
+
+    if (
+      currentResponse.ok &&
+      currentBody.length > 10000 &&
+      /Yarış Programı|YarisProgram|Günlük Yarış/i.test(currentBody)
+    ) {
+      await env.DB.prepare(`
+        UPDATE main_source_registry
+        SET
+          health_status = 'healthy',
+          last_success_at = ?,
+          consecutive_failures = 0,
+          discovery_confidence = 1.0,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE source_key = 'tjk_program'
+      `).bind(new Date().toISOString()).run();
+
+      return {
+        url: currentUrl,
+        discovered: false
+      };
+    }
+  } catch {
+    // Discovery aşamasına düş.
+  }
+
+  // 2. Bilinen URL çalışmıyorsa TJK içindeki linkleri keşfet.
+  const seedUrls = [
+    "https://www.tjk.org/TR/YarisSever",
+    "https://www.tjk.org/TR/YarisSever/Info",
+    "https://www.tjk.org"
+  ];
+
+  const candidates = new Set<string>();
+
+  for (const seedUrl of seedUrls) {
+    try {
+      const response = await env.BROWSER.quickAction("links", {
+        url: seedUrl,
+        excludeExternalLinks: true,
+        gotoOptions: {
+          waitUntil: "networkidle2",
+          timeout: 30000
+        }
+      });
+
+      const raw: any = await response.json();
+
+      const links: string[] = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.result)
+          ? raw.result
+          : [];
+
+      for (const link of links) {
+        if (
+          typeof link === "string" &&
+          (
+            /GunlukYarisProgrami/i.test(link) ||
+            /GünlükYarışProgram/i.test(link) ||
+            /YarisProgram/i.test(link)
+          )
+        ) {
+          candidates.add(link);
+        }
+      }
+    } catch {
+      // Diğer seed URL'ye devam.
+    }
+  }
+
+  // 3. Bulunan adayları gerçek Browser content çağrısıyla doğrula.
+  for (const candidate of candidates) {
+    try {
+      const response = await env.BROWSER.quickAction("content", {
+        url: candidate,
+        gotoOptions: {
+          waitUntil: "networkidle2",
+          timeout: 30000
+        }
+      });
+
+      const body = await response.text();
+
+      if (
+        response.ok &&
+        body.length > 10000 &&
+        /Yarış Programı|YarisProgram|Günlük Yarış/i.test(body)
+      ) {
+        const discoveredAt = new Date().toISOString();
+
+        await env.DB.prepare(`
+          UPDATE main_source_registry
+          SET
+            last_working_url = ?,
+            last_working_url_pattern = ?,
+            health_status = 'healthy',
+            last_success_at = ?,
+            last_discovered_at = ?,
+            discovery_confidence = 0.95,
+            consecutive_failures = 0,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE source_key = 'tjk_program'
+        `).bind(
+          candidate,
+          new URL(candidate).pathname,
+          discoveredAt,
+          discoveredAt
+        ).run();
+
+        return {
+          url: candidate,
+          discovered: true
+        };
+      }
+    } catch {
+      // Sonraki adaya devam.
+    }
+  }
+
+  const failedAt = new Date().toISOString();
+
+  await env.DB.prepare(`
+    UPDATE main_source_registry
+    SET
+      health_status = 'down',
+      last_failure_at = ?,
+      consecutive_failures = consecutive_failures + 1,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE source_key = 'tjk_program'
+  `).bind(failedAt).run();
+
+  throw new Error("TJK program URL could not be discovered");
 }
