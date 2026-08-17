@@ -5,6 +5,16 @@
   "compatibility_date": "2026-08-17",
   "compatibility_flags": ["nodejs_compat"],
 
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "two-horse-db",
+      "database_id": "f54d0d64-93f8-462f-8ce9-e38e139f10c9",
+      "migrations_dir": "migrations"
+    }
+  ],
+
   "ai": {
     "binding": "AI"
   },
