@@ -3,9 +3,9 @@
   "name": "two-horse-backend",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-17",
-  "compatibility_flags": ["nodejs_compat"],
-
-
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -14,20 +14,16 @@
       "migrations_dir": "migrations"
     }
   ],
-
   "ai": {
     "binding": "AI"
   },
-
   "browser": {
     "binding": "BROWSER"
   },
-
   "vars": {
     "APP_NAME": "Two Horse Backend",
-    "APP_VERSION": "0.1.0"
+    "APP_VERSION": "0.3.0"
   },
-
   "observability": {
     "enabled": true,
     "logs": {
@@ -38,5 +34,10 @@
       "enabled": true,
       "head_sampling_rate": 1
     }
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
   }
 }
