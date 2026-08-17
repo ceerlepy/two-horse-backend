@@ -1,10 +1,8 @@
 import type { Env } from "../env";
-import type { TjkProgramInput } from "../types/models";
 
 import {
   errorMessage,
-  sha256,
-  unwrapQuickActionJson
+  sha256
 } from "../shared";
 
 import {
@@ -24,296 +22,24 @@ import {
   rediscoverTjkProgramUrl
 } from "./registry";
 
-import { tjkProgramSchema } from "./schema";
-
 import {
-  discoverDomesticMeetings,
-  parseTjkMeetingPage,
-  assertCompleteProgram
-} from "./html-parser";
+  extractTjkProgramWithFallbacks,
+  TjkExtractionError,
+  type TjkDiagnostic
+} from "./extraction-pipeline";
 
-const KEY = "tjk:program";
-const TTL_MS = 60 * 60 * 1000;
-const FETCH_TIMEOUT_MS = 15000;
-const CITY_CONCURRENCY = 4;
+const KEY =
+  "tjk:program";
 
-async function fetchHtml(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    FETCH_TIMEOUT_MS
-  );
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (compatible; TwoHorse/1.0; +https://workers.dev)",
-        "accept":
-          "text/html,application/xhtml+xml"
-      },
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `HTTP_FETCH_${response.status}:${url}`
-      );
-    }
-
-    const html = await response.text();
-
-    if (html.length < 1000) {
-      throw new Error(`HTTP_HTML_TOO_SMALL:${url}`);
-    }
-
-    return html;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function browserContent(
-  env: Env,
-  url: string
-): Promise<string> {
-  const response = await (env.BROWSER as any).quickAction(
-    "content",
-    {
-      url,
-      gotoOptions: {
-        waitUntil: "networkidle2",
-        timeout: 20000
-      },
-      rejectResourceTypes: [
-        "image",
-        "media",
-        "font"
-      ]
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `BROWSER_CONTENT_${response.status}:${url}`
-    );
-  }
-
-  return await response.text();
-}
-
-async function htmlWithFallback(
-  env: Env,
-  url: string
-): Promise<{
-  html: string;
-  method: "fetch" | "browser-content";
-}> {
-  try {
-    return {
-      html: await fetchHtml(url),
-      method: "fetch"
-    };
-  } catch {
-    return {
-      html: await browserContent(env, url),
-      method: "browser-content"
-    };
-  }
-}
-
-async function aiJsonFallback(
-  env: Env,
-  url: string
-): Promise<TjkProgramInput> {
-  const response = await (env.BROWSER as any).quickAction(
-    "json",
-    {
-      url,
-
-      prompt: `
-Extract the COMPLETE official Turkish Jockey Club daily
-race program visible on this page.
-
-Return every domestic meeting, every race and every runner.
-
-For every race:
-- raceNumber = actual race number.
-- time = actual start time in HH:mm.
-- never return null for time.
-- runners must include every listed horse.
-- runner number and name are mandatory.
-- extract jockey, weight, HP and AGF where present.
-- use null only when optional runner data is genuinely absent.
-- never invent data.
-`,
-
-      response_format: {
-        type: "json_schema",
-        json_schema: tjkProgramSchema
-      },
-
-      gotoOptions: {
-        waitUntil: "networkidle2",
-        timeout: 25000
-      },
-
-      rejectResourceTypes: [
-        "image",
-        "media",
-        "font"
-      ]
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `TJK_JSON_${response.status}`
-    );
-  }
-
-  const payload = unwrapQuickActionJson(
-    await response.json()
-  ) as TjkProgramInput;
-
-  assertCompleteProgram(payload);
-
-  return payload;
-}
-
-async function mapLimited<T, R>(
-  values: T[],
-  limit: number,
-  fn: (value: T) => Promise<R>
-): Promise<R[]> {
-  const result: R[] = new Array(values.length);
-  let cursor = 0;
-
-  async function worker() {
-    while (true) {
-      const index = cursor++;
-      if (index >= values.length) return;
-
-      result[index] = await fn(values[index]);
-    }
-  }
-
-  await Promise.all(
-    Array.from(
-      { length: Math.min(limit, values.length) },
-      () => worker()
-    )
-  );
-
-  return result;
-}
-
-async function deterministicProgram(
-  env: Env,
-  masterUrl: string
-): Promise<TjkProgramInput> {
-  const master = await htmlWithFallback(
-    env,
-    masterUrl
-  );
-
-  const meetings = discoverDomesticMeetings(
-    master.html,
-    masterUrl
-  );
-
-  if (!meetings.length) {
-    throw new Error("TJK_MASTER_NO_DOMESTIC_MEETINGS");
-  }
-
-  const parsed = await mapLimited(
-    meetings,
-    CITY_CONCURRENCY,
-    async ({ city, url }) => {
-      // First: ordinary HTTP.
-      try {
-        const html = await fetchHtml(url);
-        const meeting = parseTjkMeetingPage(
-          html,
-          city
-        );
-
-        if (
-          meeting.races.length &&
-          meeting.races.every(
-            race =>
-              race.time &&
-              race.runners.length > 0
-          )
-        ) {
-          return meeting;
-        }
-      } catch {
-        // continue to rendered HTML
-      }
-
-      // Second: browser-rendered HTML, still deterministic.
-      const html = await browserContent(
-        env,
-        url
-      );
-
-      const meeting = parseTjkMeetingPage(
-        html,
-        city
-      );
-
-      if (
-        !meeting.races.length ||
-        meeting.races.some(
-          race =>
-            !race.time ||
-            !race.runners.length
-        )
-      ) {
-        throw new Error(
-          `TJK_CITY_PARSE_INCOMPLETE:${city}`
-        );
-      }
-
-      return meeting;
-    }
-  );
-
-  const program: TjkProgramInput = {
-    meetings: parsed
-  };
-
-  assertCompleteProgram(program);
-
-  return program;
-}
-
-async function extractProgram(
-  env: Env,
-  url: string
-): Promise<TjkProgramInput> {
-  try {
-    // PRIMARY:
-    // HTTP / rendered HTML -> deterministic parser.
-    return await deterministicProgram(
-      env,
-      url
-    );
-  } catch (deterministicError) {
-    console.warn(
-      "tjk deterministic extraction failed",
-      errorMessage(deterministicError)
-    );
-
-    // LAST RESORT:
-    // AI /json.
-    return await aiJsonFallback(
-      env,
-      url
-    );
-  }
-}
+/*
+ * Full canonical TJK program:
+ * 60 dakika.
+ *
+ * AGF / market refresh bunun dışında,
+ * ayrı lightweight pipeline olacak.
+ */
+const TTL_MS =
+  60 * 60 * 1000;
 
 export async function refreshProgramIfDue(
   env: Env,
@@ -321,77 +47,130 @@ export async function refreshProgramIfDue(
 ): Promise<{
   refreshed: boolean;
   reason: string;
+  diagnostics:
+    TjkDiagnostic[];
 }> {
-  const state = await getState(env, KEY);
+  const state =
+    await getState(
+      env,
+      KEY
+    );
 
   if (
     !force &&
-    !isDue(state, TTL_MS)
-  ) {
-    return {
-      refreshed: false,
-      reason: "fresh"
-    };
-  }
-
-  if (
-    !await acquireLease(
-      env,
-      KEY,
-      120
+    !isDue(
+      state,
+      TTL_MS
     )
   ) {
     return {
       refreshed: false,
-      reason: "already-refreshing"
+      reason: "fresh",
+      diagnostics: []
     };
   }
 
+  /*
+   * Aynı anda 100 kullanıcı refresh
+   * etse bile yalnız 1 upstream refresh.
+   */
+  if (
+    !await acquireLease(
+      env,
+      KEY,
+      180
+    )
+  ) {
+    return {
+      refreshed: false,
+      reason:
+        "already-refreshing",
+      diagnostics: []
+    };
+  }
+
+  let diagnostics:
+    TjkDiagnostic[] = [];
+
   try {
     let { url } =
-      await getTjkProgramUrl(env);
+      await getTjkProgramUrl(
+        env
+      );
 
-    let program: TjkProgramInput;
+    let extracted;
 
     try {
-      program = await extractProgram(
-        env,
-        url
-      );
-    } catch {
-      // URL changed => registry rediscovery.
-      url =
-        await rediscoverTjkProgramUrl(env);
+      extracted =
+        await extractTjkProgramWithFallbacks(
+          env,
+          url
+        );
+    } catch (firstError) {
+      if (
+        firstError instanceof
+        TjkExtractionError
+      ) {
+        diagnostics.push(
+          ...firstError
+            .diagnostics
+        );
+      }
 
-      program = await extractProgram(
-        env,
-        url
-      );
+      /*
+       * Master TJK URL gerçekten değiştiyse
+       * registry recovery.
+       */
+      url =
+        await rediscoverTjkProgramUrl(
+          env
+        );
+
+      extracted =
+        await extractTjkProgramWithFallbacks(
+          env,
+          url
+        );
     }
 
-    assertCompleteProgram(program);
-
-    const hash = await sha256(
-      JSON.stringify(program)
+    diagnostics.push(
+      ...extracted
+        .diagnostics
     );
 
-    const old = await env.DB
-      .prepare(`
-        SELECT source_hash
-        FROM meetings
-        WHERE race_date =
-          date('now', '+3 hours')
-        LIMIT 1
-      `)
-      .first<any>();
+    const program =
+      extracted.program;
 
+    const sourceHash =
+      await sha256(
+        JSON.stringify(
+          program
+        )
+      );
+
+    const existing =
+      await env.DB
+        .prepare(`
+          SELECT source_hash
+          FROM meetings
+          WHERE race_date =
+            date('now','+3 hours')
+          LIMIT 1
+        `)
+        .first<any>();
+
+    /*
+     * Aynı canonical veri ise gereksiz D1
+     * write yapılmaz.
+     */
     if (
-      old?.source_hash !== hash
+      existing?.source_hash !==
+      sourceHash
     ) {
       await upsertProgram(
         env,
         program,
-        hash
+        sourceHash
       );
     }
 
@@ -402,18 +181,50 @@ export async function refreshProgramIfDue(
 
     return {
       refreshed: true,
+
       reason:
-        old?.source_hash === hash
+        existing?.source_hash ===
+          sourceHash
           ? "unchanged"
-          : "updated"
+          : "updated",
+
+      diagnostics
     };
   } catch (error) {
+    if (
+      error instanceof
+      TjkExtractionError
+    ) {
+      diagnostics.push(
+        ...error.diagnostics
+      );
+    }
+
+    const message =
+      errorMessage(error);
+
     await markFailure(
       env,
       KEY,
-      errorMessage(error)
+      message
     );
 
-    throw error;
+    console.error(
+      "TJK refresh failed",
+      {
+        message,
+        diagnostics
+      }
+    );
+
+    /*
+     * Mevcut sağlam D1 programı burada
+     * ASLA silinmez.
+     */
+    throw new Error(
+      `${message}\nDIAGNOSTICS=${JSON.stringify(
+        diagnostics
+      )}`
+    );
   }
 }

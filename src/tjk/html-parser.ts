@@ -1,53 +1,96 @@
 import * as cheerio from "cheerio";
 import type { TjkProgramInput } from "../types/models";
 
-type Meeting = TjkProgramInput["meetings"][number];
-type Race = Meeting["races"][number];
-type Runner = Race["runners"][number];
+type Meeting =
+  TjkProgramInput["meetings"][number];
 
-function clean(v: string): string {
-  return v
+type Race =
+  Meeting["races"][number];
+
+type Runner =
+  Race["runners"][number];
+
+function clean(value: unknown): string {
+  return String(value ?? "")
     .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function lower(v: string): string {
-  return clean(v).toLocaleLowerCase("tr-TR");
+function lower(value: unknown): string {
+  return clean(value)
+    .toLocaleLowerCase("tr-TR");
 }
 
-function numberValue(v: string): number | null {
-  const m = clean(v).match(/-?\d+(?:[,.]\d+)?/);
-  if (!m) return null;
+function numberValue(
+  value: unknown
+): number | null {
+  const match = clean(value)
+    .match(/-?\d+(?:[,.]\d+)?/);
 
-  const n = Number(m[0].replace(",", "."));
-  return Number.isFinite(n) ? n : null;
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(
+    match[0].replace(",", ".")
+  );
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
 }
 
-function integerValue(v: string): number | null {
-  const n = numberValue(v);
-  return n == null ? null : Math.trunc(n);
+function integerValue(
+  value: unknown
+): number | null {
+  const parsed = numberValue(value);
+
+  return parsed == null
+    ? null
+    : Math.trunc(parsed);
 }
 
-function agfValue(v: string): number | null {
-  const m = clean(v).match(/%\s*(\d+(?:[,.]\d+)?)/);
-  if (!m) return null;
+function agfValue(
+  value: unknown
+): number | null {
+  const text = clean(value);
 
-  const n = Number(m[1].replace(",", "."));
-  return Number.isFinite(n) ? n : null;
+  const match =
+    text.match(/%\s*(\d+(?:[,.]\d+)?)/) ??
+    text.match(/(\d+(?:[,.]\d+)?)\s*%/);
+
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(
+    match[1].replace(",", ".")
+  );
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
 }
 
-function firstMeaningfulAnchor(
+function anchorText(
   $: cheerio.CheerioAPI,
   cell: cheerio.Cheerio<any>
 ): string | null {
   let result: string | null = null;
 
-  cell.find("a").each((_, el) => {
-    if (result) return;
+  cell.find("a").each((_, element) => {
+    if (result) {
+      return;
+    }
 
-    const text = clean($(el).text());
-    if (text) result = text;
+    const text = clean(
+      $(element).text()
+    );
+
+    if (text) {
+      result = text;
+    }
   });
 
   return result;
@@ -56,72 +99,157 @@ function firstMeaningfulAnchor(
 export function discoverDomesticMeetings(
   html: string,
   baseUrl: string
-): Array<{ city: string; url: string }> {
+): Array<{
+  city: string;
+  url: string;
+}> {
   const $ = cheerio.load(html);
-  const found = new Map<string, string>();
 
-  $('a[href*="/Info/Sehir/GunlukYarisProgrami"]').each((_, el) => {
-    const href = $(el).attr("href");
-    const text = clean($(el).text());
+  const meetings =
+    new Map<string, string>();
 
-    if (!href || !text) return;
+  /*
+   * Bilerek CSS href substring selector kullanmıyoruz.
+   * URL path casing'i değişse bile regex case-insensitive.
+   */
+  $("a[href]").each((_, element) => {
+    const href = clean(
+      $(element).attr("href")
+    );
 
-    // YD = yabancı yarış. Canonical uygulama programına sokmuyoruz.
-    if (/\(\s*YD\b/i.test(text)) return;
+    const label = clean(
+      $(element).text()
+    );
+
+    if (
+      !href ||
+      !/\/Info\/Sehir\/GunlukYarisProgrami/i.test(
+        href
+      )
+    ) {
+      return;
+    }
+
+    /*
+     * YD = yabancı program.
+     * Two Horse canonical domestic meeting listesine girmez.
+     */
+    if (/\(\s*YD\b/i.test(label)) {
+      return;
+    }
 
     try {
-      const url = new URL(href, baseUrl);
+      const url = new URL(
+        href,
+        baseUrl
+      );
+
+      const queryCity = clean(
+        url.searchParams.get(
+          "SehirAdi"
+        )
+      );
+
+      const labelCity = clean(
+        label.replace(
+          /\([^)]*\)/g,
+          ""
+        )
+      );
+
       const city =
-        clean(url.searchParams.get("SehirAdi") ?? "") ||
-        clean(text.replace(/\([^)]*\)/g, ""));
+        queryCity || labelCity;
 
-      if (!city) return;
+      if (!city) {
+        return;
+      }
 
-      found.set(city, url.toString());
+      meetings.set(
+        city,
+        url.toString()
+      );
     } catch {
-      // malformed link => ignore
+      // malformed URL => ignore
     }
   });
 
-  return [...found.entries()].map(([city, url]) => ({ city, url }));
+  return [...meetings.entries()]
+    .map(([city, url]) => ({
+      city,
+      url
+    }));
 }
 
 function headerIndexes(
   $: cheerio.CheerioAPI,
   table: cheerio.Cheerio<any>
 ): Record<string, number> {
-  let cells = table.find("thead tr").first().find("th,td");
+  let headerCells =
+    table
+      .find("thead tr")
+      .first()
+      .find("th,td");
 
-  if (!cells.length) {
-    cells = table.find("tr").first().find("th,td");
+  if (!headerCells.length) {
+    headerCells =
+      table
+        .find("tr")
+        .first()
+        .find("th,td");
   }
 
-  const result: Record<string, number> = {};
+  const indexes:
+    Record<string, number> = {};
 
-  cells.each((i, el) => {
-    const h = lower($(el).text());
+  headerCells.each((index, element) => {
+    const header = lower(
+      $(element).text()
+    );
 
-    if (h === "n" || h === "no" || h === "numara") result.number = i;
-    else if (h.includes("at ismi")) result.name = i;
-    else if (h.includes("sıklet")) result.weight = i;
-    else if (h === "jokey" || h.includes("jokey")) result.jockey = i;
-    else if (h === "hp") result.hp = i;
-    else if (h === "agf" || h.includes("agf")) result.agf = i;
+    if (
+      header === "n" ||
+      header === "no" ||
+      header === "numara"
+    ) {
+      indexes.number = index;
+    } else if (
+      header.includes("at ismi")
+    ) {
+      indexes.name = index;
+    } else if (
+      header.includes("sıklet") ||
+      header.includes("siklet")
+    ) {
+      indexes.weight = index;
+    } else if (
+      header.includes("jokey")
+    ) {
+      indexes.jockey = index;
+    } else if (
+      header === "hp"
+    ) {
+      indexes.hp = index;
+    } else if (
+      header === "agf" ||
+      header.includes("agf")
+    ) {
+      indexes.agf = index;
+    }
   });
 
-  return result;
+  return indexes;
 }
 
 function parseRunnerTable(
   $: cheerio.CheerioAPI,
   table: cheerio.Cheerio<any>
 ): Runner[] {
-  const idx = headerIndexes($, table);
+  const indexes =
+    headerIndexes($, table);
 
   if (
-    idx.number == null ||
-    idx.name == null ||
-    idx.jockey == null
+    indexes.number == null ||
+    indexes.name == null
   ) {
     return [];
   }
@@ -129,56 +257,203 @@ function parseRunnerTable(
   const runners: Runner[] = [];
 
   table.find("tr").each((_, row) => {
-    const cells = $(row).find("td");
-    if (!cells.length) return;
+    const cells =
+      $(row).find("td");
 
-    const at = (i: number | undefined) =>
-      i == null ? null : cells.eq(i);
+    if (!cells.length) {
+      return;
+    }
 
-    const numberCell = at(idx.number);
-    const nameCell = at(idx.name);
+    const cell = (
+      index: number | undefined
+    ) =>
+      index == null
+        ? null
+        : cells.eq(index);
 
-    if (!numberCell || !nameCell) return;
+    const numberCell =
+      cell(indexes.number);
 
-    const number = integerValue(numberCell.text());
+    const nameCell =
+      cell(indexes.name);
+
+    if (
+      !numberCell ||
+      !nameCell
+    ) {
+      return;
+    }
+
+    const number =
+      integerValue(
+        numberCell.text()
+      );
 
     const name =
-      firstMeaningfulAnchor($, nameCell) ??
+      anchorText($, nameCell) ??
       clean(nameCell.text())
         .replace(/\([^)]*\)/g, "")
         .trim();
 
-    if (!number || !name) return;
+    if (
+      !number ||
+      !name
+    ) {
+      return;
+    }
 
-    const jockeyCell = at(idx.jockey);
-    const weightCell = at(idx.weight);
-    const hpCell = at(idx.hp);
-    const agfCell = at(idx.agf);
+    const jockeyCell =
+      cell(indexes.jockey);
 
-    const jockey =
+    const weightCell =
+      cell(indexes.weight);
+
+    const hpCell =
+      cell(indexes.hp);
+
+    const agfCell =
+      cell(indexes.agf);
+
+    const jockeyText =
       jockeyCell
-        ? firstMeaningfulAnchor($, jockeyCell) ??
-          (clean(jockeyCell.text()) || null)
-        : null;
+        ? (
+            anchorText(
+              $,
+              jockeyCell
+            ) ??
+            clean(
+              jockeyCell.text()
+            )
+          )
+        : "";
 
     runners.push({
       number,
       name,
-      jockey,
-      weight: weightCell ? numberValue(weightCell.text()) : null,
-      hp: hpCell ? integerValue(hpCell.text()) : null,
-      agfPercent: agfCell ? agfValue(agfCell.text()) : null
+
+      jockey:
+        jockeyText || null,
+
+      weight:
+        weightCell
+          ? numberValue(
+              weightCell.text()
+            )
+          : null,
+
+      hp:
+        hpCell
+          ? integerValue(
+              hpCell.text()
+            )
+          : null,
+
+      agfPercent:
+        agfCell
+          ? agfValue(
+              agfCell.text()
+            )
+          : null
     });
   });
 
-  // duplicate horse numbers rejected deterministically
-  const unique = new Map<number, Runner>();
+  /*
+   * Duplicate horse number varsa
+   * ilk geçerli kayıt tutulur.
+   */
+  const unique =
+    new Map<number, Runner>();
 
-  for (const r of runners) {
-    if (!unique.has(r.number)) unique.set(r.number, r);
+  for (const runner of runners) {
+    if (
+      !unique.has(
+        runner.number
+      )
+    ) {
+      unique.set(
+        runner.number,
+        runner
+      );
+    }
   }
 
-  return [...unique.values()].sort((a, b) => a.number - b.number);
+  return [...unique.values()]
+    .sort(
+      (a, b) =>
+        a.number - b.number
+    );
+}
+
+function raceHeader(
+  value: string
+): {
+  raceNumber: number;
+  time: string;
+} | null {
+  const text = clean(value);
+
+  /*
+   * TJK örnekleri:
+   * 1. Koşu 14.00
+   * 1. Koşu 14:00
+   * 1.Koşu 14.00
+   */
+  const match = text.match(
+    /(\d+)\s*\.\s*Koşu\s+(\d{1,2})[.:](\d{2})/i
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    raceNumber:
+      Number(match[1]),
+
+    time:
+      `${match[2].padStart(
+        2,
+        "0"
+      )}:${match[3]}`
+  };
+}
+
+function surfaceData(
+  value: string
+): {
+  distanceMeters: number | null;
+  track: string | null;
+} {
+  const text = clean(value);
+
+  const match = text.match(
+    /\b(\d{3,4})\s*(Kum|Çim|Cim|Sentetik)\b/i
+  );
+
+  if (!match) {
+    return {
+      distanceMeters: null,
+      track: null
+    };
+  }
+
+  const rawTrack =
+    lower(match[2]);
+
+  return {
+    distanceMeters:
+      Number(match[1]),
+
+    track:
+      rawTrack === "kum"
+        ? "Kum"
+        : (
+            rawTrack === "çim" ||
+            rawTrack === "cim"
+          )
+          ? "Çim"
+          : "Sentetik"
+  };
 }
 
 export function parseTjkMeetingPage(
@@ -187,135 +462,251 @@ export function parseTjkMeetingPage(
 ): Meeting {
   const $ = cheerio.load(html);
 
-  const races = new Map<number, Race>();
-  let currentRace: Race | null = null;
+  const races =
+    new Map<number, Race>();
 
-  // h3 + table in true document order.
-  $("h3, table").each((_, el) => {
-    const node = $(el);
+  let currentRace:
+    Race | null = null;
 
-    if (el.tagName?.toLowerCase() === "h3") {
-      const text = clean(node.text());
+  /*
+   * DOM order önemli.
+   *
+   * TJK:
+   * h3 => race header
+   * h3 => race conditions
+   * ...
+   * table => runners
+   */
+  $("h1,h2,h3,h4,table")
+    .each((_, element) => {
+      const node = $(element);
 
-      const raceHeader =
-        text.match(/(\d+)\.\s*Koşu\s+(\d{1,2})[.:](\d{2})/i);
+      const tag =
+        element.tagName
+          ?.toLowerCase();
 
-      if (raceHeader) {
-        const raceNumber = Number(raceHeader[1]);
-        const time =
-          `${raceHeader[2].padStart(2, "0")}:${raceHeader[3]}`;
+      if (tag !== "table") {
+        const text =
+          clean(node.text());
 
-        currentRace = {
-          raceNumber,
-          time,
-          distanceMeters: null,
-          track: null,
-          runners: []
-        };
+        const header =
+          raceHeader(text);
 
-        races.set(raceNumber, currentRace);
+        if (header) {
+          const existing =
+            races.get(
+              header.raceNumber
+            );
+
+          if (existing) {
+            /*
+             * Üst navigasyonda aynı koşu
+             * bir kez daha görünebilir.
+             */
+            currentRace = existing;
+
+            if (
+              !existing.time
+            ) {
+              existing.time =
+                header.time;
+            }
+          } else {
+            currentRace = {
+              raceNumber:
+                header.raceNumber,
+
+              time:
+                header.time,
+
+              distanceMeters:
+                null,
+
+              track:
+                null,
+
+              runners:
+                []
+            };
+
+            races.set(
+              header.raceNumber,
+              currentRace
+            );
+          }
+
+          return;
+        }
+
+        if (currentRace) {
+          const surface =
+            surfaceData(text);
+
+          if (
+            surface.distanceMeters
+          ) {
+            currentRace
+              .distanceMeters =
+                surface
+                  .distanceMeters;
+          }
+
+          if (surface.track) {
+            currentRace.track =
+              surface.track;
+          }
+        }
+
         return;
       }
 
-      if (currentRace) {
-        const surface =
-          text.match(/\b(\d{3,4})\s*(Kum|Çim|Sentetik)\b/i);
-
-        if (surface) {
-          currentRace.distanceMeters = Number(surface[1]);
-
-          const s = lower(surface[2]);
-          currentRace.track =
-            s === "kum"
-              ? "Kum"
-              : s === "çim"
-                ? "Çim"
-                : "Sentetik";
-        }
+      if (!currentRace) {
+        return;
       }
 
-      return;
-    }
+      const tableText =
+        lower(node.text());
 
-    if (!currentRace) return;
+      /*
+       * Runner tablosunu diğer
+       * ikramiye / bahis tablolarından ayır.
+       */
+      if (
+        !tableText.includes(
+          "at ismi"
+        ) ||
+        !tableText.includes(
+          "jokey"
+        )
+      ) {
+        return;
+      }
 
-    const headers = lower(
-      node.find("tr").first().text()
-    );
+      const parsed =
+        parseRunnerTable(
+          $,
+          node
+        );
 
-    if (
-      !headers.includes("at ismi") ||
-      !headers.includes("jokey")
-    ) {
-      return;
-    }
-
-    const parsed = parseRunnerTable($, node);
-
-    if (parsed.length) {
-      currentRace.runners = parsed;
-    }
-  });
+      if (parsed.length) {
+        currentRace.runners =
+          parsed;
+      }
+    });
 
   return {
     city,
-    races: [...races.values()]
-      .sort((a, b) => a.raceNumber - b.raceNumber)
+    races:
+      [...races.values()]
+        .sort(
+          (a, b) =>
+            a.raceNumber -
+            b.raceNumber
+        )
   };
+}
+
+export function assertCompleteMeeting(
+  meeting: Meeting
+): void {
+  if (!meeting.city?.trim()) {
+    throw new Error(
+      "TJK_CITY_MISSING"
+    );
+  }
+
+  if (!meeting.races?.length) {
+    throw new Error(
+      `TJK_NO_RACES:${meeting.city}`
+    );
+  }
+
+  for (
+    const race of meeting.races
+  ) {
+    if (
+      !Number.isInteger(
+        race.raceNumber
+      ) ||
+      race.raceNumber <= 0
+    ) {
+      throw new Error(
+        `TJK_RACE_NUMBER_INVALID:${meeting.city}`
+      );
+    }
+
+    if (
+      !/^([01]\d|2[0-3]):[0-5]\d$/
+        .test(
+          race.time ?? ""
+        )
+    ) {
+      throw new Error(
+        `TJK_TIME_INVALID:${meeting.city}:R${race.raceNumber}`
+      );
+    }
+
+    if (
+      !race.runners?.length
+    ) {
+      throw new Error(
+        `TJK_RUNNERS_EMPTY:${meeting.city}:R${race.raceNumber}`
+      );
+    }
+
+    const horseNumbers =
+      new Set<number>();
+
+    for (
+      const runner of
+        race.runners
+    ) {
+      if (
+        !Number.isInteger(
+          runner.number
+        ) ||
+        runner.number <= 0 ||
+        !runner.name?.trim()
+      ) {
+        throw new Error(
+          `TJK_RUNNER_INVALID:${meeting.city}:R${race.raceNumber}`
+        );
+      }
+
+      if (
+        horseNumbers.has(
+          runner.number
+        )
+      ) {
+        throw new Error(
+          `TJK_RUNNER_DUPLICATE:${meeting.city}:R${race.raceNumber}:#${runner.number}`
+        );
+      }
+
+      horseNumbers.add(
+        runner.number
+      );
+    }
+  }
 }
 
 export function assertCompleteProgram(
   program: TjkProgramInput
 ): void {
-  if (!program.meetings?.length) {
-    throw new Error("TJK_NO_MEETINGS");
+  if (
+    !program.meetings?.length
+  ) {
+    throw new Error(
+      "TJK_NO_MEETINGS"
+    );
   }
 
-  for (const meeting of program.meetings) {
-    if (!meeting.city?.trim()) {
-      throw new Error("TJK_CITY_MISSING");
-    }
-
-    if (!meeting.races?.length) {
-      throw new Error(`TJK_NO_RACES:${meeting.city}`);
-    }
-
-    for (const race of meeting.races) {
-      if (
-        !/^([01]\d|2[0-3]):[0-5]\d$/.test(race.time ?? "")
-      ) {
-        throw new Error(
-          `TJK_TIME_INVALID:${meeting.city}:${race.raceNumber}`
-        );
-      }
-
-      if (!race.runners?.length) {
-        throw new Error(
-          `TJK_RUNNERS_EMPTY:${meeting.city}:${race.raceNumber}`
-        );
-      }
-
-      const numbers = new Set<number>();
-
-      for (const runner of race.runners) {
-        if (
-          !Number.isInteger(runner.number) ||
-          runner.number <= 0 ||
-          !runner.name?.trim()
-        ) {
-          throw new Error(
-            `TJK_RUNNER_INVALID:${meeting.city}:${race.raceNumber}`
-          );
-        }
-
-        if (numbers.has(runner.number)) {
-          throw new Error(
-            `TJK_RUNNER_DUPLICATE:${meeting.city}:${race.raceNumber}:${runner.number}`
-          );
-        }
-
-        numbers.add(runner.number);
-      }
-    }
+  for (
+    const meeting of
+      program.meetings
+  ) {
+    assertCompleteMeeting(
+      meeting
+    );
   }
 }

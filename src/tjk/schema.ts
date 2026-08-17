@@ -1,58 +1,94 @@
-export const tjkProgramSchema = {
+/*
+ * Browser /json için schema bilinçli olarak sade tutulur.
+ *
+ * Format / semantic integrity kuralları AI schema'ya bırakılmaz.
+ * Bunlar deterministic validator tarafından uygulanır.
+ *
+ * Böylece:
+ * - Browser Run schema compatibility daha yüksek olur.
+ * - AI çıktısı ile business validation birbirinden ayrılır.
+ */
+
+export const tjkMeetingJsonSchema = {
   type: "object",
-  additionalProperties: false,
   properties: {
-    meetings: {
+    city: {
+      type: "string"
+    },
+    races: {
       type: "array",
-      minItems: 1,
       items: {
         type: "object",
-        additionalProperties: false,
         properties: {
-          city: { type: "string", minLength: 1 },
-          races: {
+          raceNumber: {
+            type: "integer"
+          },
+          time: {
+            type: "string"
+          },
+          distanceMeters: {
+            type: "integer"
+          },
+          track: {
+            type: "string"
+          },
+          runners: {
             type: "array",
-            minItems: 1,
             items: {
               type: "object",
-              additionalProperties: false,
               properties: {
-                raceNumber: { type: "integer", minimum: 1 },
-                time: {
-                  type: "string",
-                  pattern: "^([01]\\d|2[0-3]):[0-5]\\d$"
+                number: {
+                  type: "integer"
                 },
-                distanceMeters: {
-                  anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }]
+                name: {
+                  type: "string"
                 },
-                track: {
-                  anyOf: [{ type: "string", minLength: 1 }, { type: "null" }]
+                jockey: {
+                  type: "string"
                 },
-                runners: {
-                  type: "array",
-                  minItems: 1,
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      number: { type: "integer", minimum: 1 },
-                      name: { type: "string", minLength: 1 },
-                      jockey: { anyOf: [{ type: "string" }, { type: "null" }] },
-                      weight: { anyOf: [{ type: "number" }, { type: "null" }] },
-                      hp: { anyOf: [{ type: "integer" }, { type: "null" }] },
-                      agfPercent: { anyOf: [{ type: "number" }, { type: "null" }] }
-                    },
-                    required: ["number","name","jockey","weight","hp","agfPercent"]
-                  }
+                weight: {
+                  type: "number"
+                },
+                hp: {
+                  type: "integer"
+                },
+                agfPercent: {
+                  type: "number"
                 }
               },
-              required: ["raceNumber","time","distanceMeters","track","runners"]
+              required: [
+                "number",
+                "name"
+              ]
             }
           }
         },
-        required: ["city","races"]
+        required: [
+          "raceNumber",
+          "time",
+          "runners"
+        ]
       }
     }
   },
-  required: ["meetings"]
+  required: [
+    "city",
+    "races"
+  ]
+} as const;
+
+/*
+ * Eski importları kırmamak için program schema export'u korunuyor.
+ */
+export const tjkProgramSchema = {
+  type: "object",
+  properties: {
+    meetings: {
+      type: "array",
+      items: tjkMeetingJsonSchema
+    }
+  },
+  required: [
+    "meetings"
+  ]
 } as const;
