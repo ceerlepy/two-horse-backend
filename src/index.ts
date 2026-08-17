@@ -1,6 +1,6 @@
 export interface Env {
   AI: Ai;
-  BROWSER: Fetcher;
+  BROWSER: BrowserRun;
   DB: D1Database;
   APP_NAME: string;
   APP_VERSION: string;
@@ -136,20 +136,9 @@ async function discoverSource(
   }
 
   try {
-    const response = await env.BROWSER.fetch(
-      new Request(
-        "https://browser-run.cloudflare.com/content",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            url: targetUrl
-          })
-        }
-      )
-    );
+    const response = await env.BROWSER.quickAction("content", {
+      url: targetUrl
+    });
 
     const body = await response.text();
     const completedAt = new Date().toISOString();
