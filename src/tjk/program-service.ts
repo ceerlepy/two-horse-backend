@@ -32,7 +32,7 @@ import {
   assertCompleteProgram
 } from "./html-parser";
 
-const KEY = "tjk-program";
+const KEY = "tjk:program";
 const TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15000;
 const CITY_CONCURRENCY = 4;
