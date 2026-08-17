@@ -1,6 +1,7 @@
 export interface Env {
   AI: Ai;
   BROWSER: Fetcher;
+  DB: D1Database;
   APP_NAME: string;
   APP_VERSION: string;
 }
@@ -36,6 +37,10 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/debug/sources") {
+      return getSources(env);
+    }
+
     return json(
       {
         error: "not_found",
@@ -45,3 +50,32 @@ export default {
     );
   }
 };
+
+export async function getSources(env: Env): Promise<Response> {
+  try {
+    const result = await env.DB
+      .prepare(`
+        SELECT
+          source_key,
+          source_name,
+          domain,
+          homepage_url,
+          health_status,
+          discovery_confidence
+        FROM source_registry
+        ORDER BY source_name
+      `)
+      .all();
+
+    return Response.json({
+      ok: true,
+      count: result.results.length,
+      sources: result.results
+    });
+  } catch (error) {
+    return Response.json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
+  }
+}
