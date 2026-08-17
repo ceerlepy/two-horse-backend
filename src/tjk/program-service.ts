@@ -28,15 +28,11 @@ import {
   type TjkDiagnostic
 } from "./extraction-pipeline";
 
-const KEY =
-  "tjk:program";
+const KEY = "tjk:program";
 
 /*
- * Full canonical TJK program:
- * 60 dakika.
- *
- * AGF / market refresh bunun dışında,
- * ayrı lightweight pipeline olacak.
+ * Canonical race structure changes slowly.
+ * AGF / live market will use a separate adaptive pipeline.
  */
 const TTL_MS =
   60 * 60 * 1000;
@@ -47,21 +43,16 @@ export async function refreshProgramIfDue(
 ): Promise<{
   refreshed: boolean;
   reason: string;
-  diagnostics:
-    TjkDiagnostic[];
+  diagnostics: TjkDiagnostic[];
 }> {
-  const state =
-    await getState(
-      env,
-      KEY
-    );
+  const state = await getState(
+    env,
+    KEY
+  );
 
   if (
     !force &&
-    !isDue(
-      state,
-      TTL_MS
-    )
+    !isDue(state, TTL_MS)
   ) {
     return {
       refreshed: false,
@@ -70,10 +61,6 @@ export async function refreshProgramIfDue(
     };
   }
 
-  /*
-   * Aynı anda 100 kullanıcı refresh
-   * etse bile yalnız 1 upstream refresh.
-   */
   if (
     !await acquireLease(
       env,
@@ -83,20 +70,20 @@ export async function refreshProgramIfDue(
   ) {
     return {
       refreshed: false,
-      reason:
-        "already-refreshing",
+      reason: "already-refreshing",
       diagnostics: []
     };
   }
 
-  let diagnostics:
-    TjkDiagnostic[] = [];
+  let diagnostics: TjkDiagnostic[] = [];
 
   try {
+    /*
+     * Registry is retained for future URL self-healing.
+     * Extraction has a known-good canonical fallback internally.
+     */
     let { url } =
-      await getTjkProgramUrl(
-        env
-      );
+      await getTjkProgramUrl(env);
 
     let extracted;
 
@@ -108,23 +95,18 @@ export async function refreshProgramIfDue(
         );
     } catch (firstError) {
       if (
-        firstError instanceof
-        TjkExtractionError
+        firstError instanceof TjkExtractionError
       ) {
         diagnostics.push(
-          ...firstError
-            .diagnostics
+          ...firstError.diagnostics
         );
       }
 
       /*
-       * Master TJK URL gerçekten değiştiyse
-       * registry recovery.
+       * Registry URL may genuinely have changed.
        */
       url =
-        await rediscoverTjkProgramUrl(
-          env
-        );
+        await rediscoverTjkProgramUrl(env);
 
       extracted =
         await extractTjkProgramWithFallbacks(
@@ -134,19 +116,14 @@ export async function refreshProgramIfDue(
     }
 
     diagnostics.push(
-      ...extracted
-        .diagnostics
+      ...extracted.diagnostics
     );
 
-    const program =
-      extracted.program;
+    const program = extracted.program;
 
-    const sourceHash =
-      await sha256(
-        JSON.stringify(
-          program
-        )
-      );
+    const sourceHash = await sha256(
+      JSON.stringify(program)
+    );
 
     const existing =
       await env.DB
@@ -160,8 +137,7 @@ export async function refreshProgramIfDue(
         .first<any>();
 
     /*
-     * Aynı canonical veri ise gereksiz D1
-     * write yapılmaz.
+     * Only write when canonical data changed.
      */
     if (
       existing?.source_hash !==
@@ -183,8 +159,7 @@ export async function refreshProgramIfDue(
       refreshed: true,
 
       reason:
-        existing?.source_hash ===
-          sourceHash
+        existing?.source_hash === sourceHash
           ? "unchanged"
           : "updated",
 
@@ -192,8 +167,7 @@ export async function refreshProgramIfDue(
     };
   } catch (error) {
     if (
-      error instanceof
-      TjkExtractionError
+      error instanceof TjkExtractionError
     ) {
       diagnostics.push(
         ...error.diagnostics
@@ -218,8 +192,7 @@ export async function refreshProgramIfDue(
     );
 
     /*
-     * Mevcut sağlam D1 programı burada
-     * ASLA silinmez.
+     * Last known good D1 data remains untouched.
      */
     throw new Error(
       `${message}\nDIAGNOSTICS=${JSON.stringify(

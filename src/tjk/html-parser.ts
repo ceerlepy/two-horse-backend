@@ -1,14 +1,15 @@
 import * as cheerio from "cheerio";
 import type { TjkProgramInput } from "../types/models";
 
-type Meeting =
-  TjkProgramInput["meetings"][number];
+export type TjkMeeting = TjkProgramInput["meetings"][number];
+export type TjkRace = TjkMeeting["races"][number];
+export type TjkRunner = TjkRace["runners"][number];
 
-type Race =
-  Meeting["races"][number];
+const DOMESTIC_MEETING_RE =
+  /^(.+?)\s*\(\s*\d+\.\s*(?:Y\.?\s*G\.?|Yarış\s+Günü)\s*\)$/iu;
 
-type Runner =
-  Race["runners"][number];
+const RACE_HEADER_RE =
+  /(\d+)\s*\.\s*Koşu\s+(\d{1,2})[.:](\d{2})/iu;
 
 function clean(value: unknown): string {
   return String(value ?? "")
@@ -18,42 +19,26 @@ function clean(value: unknown): string {
 }
 
 function lower(value: unknown): string {
-  return clean(value)
-    .toLocaleLowerCase("tr-TR");
+  return clean(value).toLocaleLowerCase("tr-TR");
 }
 
-function numberValue(
-  value: unknown
-): number | null {
-  const match = clean(value)
-    .match(/-?\d+(?:[,.]\d+)?/);
+function parseNumber(value: unknown): number | null {
+  const match = clean(value).match(/-?\d+(?:[,.]\d+)?/);
 
   if (!match) {
     return null;
   }
 
-  const parsed = Number(
-    match[0].replace(",", ".")
-  );
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : null;
+  const number = Number(match[0].replace(",", "."));
+  return Number.isFinite(number) ? number : null;
 }
 
-function integerValue(
-  value: unknown
-): number | null {
-  const parsed = numberValue(value);
-
-  return parsed == null
-    ? null
-    : Math.trunc(parsed);
+function parseInteger(value: unknown): number | null {
+  const valueNumber = parseNumber(value);
+  return valueNumber == null ? null : Math.trunc(valueNumber);
 }
 
-function agfValue(
-  value: unknown
-): number | null {
+function parseAgf(value: unknown): number | null {
   const text = clean(value);
 
   const match =
@@ -64,188 +49,135 @@ function agfValue(
     return null;
   }
 
-  const parsed = Number(
-    match[1].replace(",", ".")
-  );
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : null;
+  const number = Number(match[1].replace(",", "."));
+  return Number.isFinite(number) ? number : null;
 }
 
 function anchorText(
   $: cheerio.CheerioAPI,
   cell: cheerio.Cheerio<any>
 ): string | null {
-  let result: string | null = null;
+  const anchor = cell.find("a").first();
 
-  cell.find("a").each((_, element) => {
-    if (result) {
-      return;
-    }
+  if (!anchor.length) {
+    return null;
+  }
 
-    const text = clean(
-      $(element).text()
-    );
-
-    if (text) {
-      result = text;
-    }
-  });
-
-  return result;
+  return clean(anchor.text()) || null;
 }
 
-export function discoverDomesticMeetings(
-  html: string,
-  baseUrl: string
-): Array<{
-  city: string;
-  url: string;
-}> {
+/**
+ * Master page discovery does NOT depend on links anymore.
+ *
+ * TJK visibly prints domestic meetings as:
+ *   Ankara (44. Y.G.)
+ *   Bursa (28. Yarış Günü)
+ *
+ * We extract those semantic labels from rendered text.
+ */
+export function discoverDomesticMeetingNames(html: string): string[] {
   const $ = cheerio.load(html);
+  const result = new Map<string, string>();
 
-  const meetings =
-    new Map<string, string>();
-
-  /*
-   * Bilerek CSS href substring selector kullanmıyoruz.
-   * URL path casing'i değişse bile regex case-insensitive.
-   */
-  $("a[href]").each((_, element) => {
-    const href = clean(
-      $(element).attr("href")
-    );
-
-    const label = clean(
-      $(element).text()
-    );
+  $("li, a, option, span, div").each((_, element) => {
+    const text = clean($(element).text());
 
     if (
-      !href ||
-      !/\/Info\/Sehir\/GunlukYarisProgrami/i.test(
-        href
-      )
+      !text ||
+      /\(\s*YD\b/iu.test(text)
     ) {
       return;
     }
 
-    /*
-     * YD = yabancı program.
-     * Two Horse canonical domestic meeting listesine girmez.
-     */
-    if (/\(\s*YD\b/i.test(label)) {
+    const match = text.match(DOMESTIC_MEETING_RE);
+
+    if (!match) {
       return;
     }
 
-    try {
-      const url = new URL(
-        href,
-        baseUrl
-      );
+    const city = clean(match[1]);
 
-      const queryCity = clean(
-        url.searchParams.get(
-          "SehirAdi"
-        )
-      );
-
-      const labelCity = clean(
-        label.replace(
-          /\([^)]*\)/g,
-          ""
-        )
-      );
-
-      const city =
-        queryCity || labelCity;
-
-      if (!city) {
-        return;
-      }
-
-      meetings.set(
-        city,
-        url.toString()
-      );
-    } catch {
-      // malformed URL => ignore
+    /*
+     * Avoid accidentally capturing giant parent DIV text.
+     */
+    if (
+      !city ||
+      city.length > 40 ||
+      city.includes("\n")
+    ) {
+      return;
     }
+
+    const key = city.toLocaleLowerCase("tr-TR");
+    result.set(key, city);
   });
 
-  return [...meetings.entries()]
-    .map(([city, url]) => ({
-      city,
-      url
-    }));
+  return [...result.values()];
 }
 
 function headerIndexes(
   $: cheerio.CheerioAPI,
   table: cheerio.Cheerio<any>
 ): Record<string, number> {
-  let headerCells =
-    table
-      .find("thead tr")
-      .first()
-      .find("th,td");
+  const rows = table.find("tr");
 
-  if (!headerCells.length) {
-    headerCells =
-      table
-        .find("tr")
-        .first()
-        .find("th,td");
-  }
+  for (let r = 0; r < Math.min(rows.length, 4); r++) {
+    const cells = rows.eq(r).find("th,td");
+    const indexes: Record<string, number> = {};
 
-  const indexes:
-    Record<string, number> = {};
+    cells.each((index, element) => {
+      const header = lower($(element).text());
 
-  headerCells.each((index, element) => {
-    const header = lower(
-      $(element).text()
-    );
+      if (
+        header === "n" ||
+        header === "no" ||
+        header === "numara"
+      ) {
+        indexes.number = index;
+      } else if (
+        header.includes("at ismi") ||
+        header === "at"
+      ) {
+        indexes.name = index;
+      } else if (
+        header.includes("sıklet") ||
+        header.includes("siklet") ||
+        header === "kilo"
+      ) {
+        indexes.weight = index;
+      } else if (
+        header.includes("jokey")
+      ) {
+        indexes.jockey = index;
+      } else if (
+        header === "hp" ||
+        header.includes("handikap")
+      ) {
+        indexes.hp = index;
+      } else if (
+        header === "agf" ||
+        header.includes("agf")
+      ) {
+        indexes.agf = index;
+      }
+    });
 
     if (
-      header === "n" ||
-      header === "no" ||
-      header === "numara"
+      indexes.number != null &&
+      indexes.name != null
     ) {
-      indexes.number = index;
-    } else if (
-      header.includes("at ismi")
-    ) {
-      indexes.name = index;
-    } else if (
-      header.includes("sıklet") ||
-      header.includes("siklet")
-    ) {
-      indexes.weight = index;
-    } else if (
-      header.includes("jokey")
-    ) {
-      indexes.jockey = index;
-    } else if (
-      header === "hp"
-    ) {
-      indexes.hp = index;
-    } else if (
-      header === "agf" ||
-      header.includes("agf")
-    ) {
-      indexes.agf = index;
+      return indexes;
     }
-  });
+  }
 
-  return indexes;
+  return {};
 }
 
 function parseRunnerTable(
   $: cheerio.CheerioAPI,
   table: cheerio.Cheerio<any>
-): Runner[] {
-  const indexes =
-    headerIndexes($, table);
+): TjkRunner[] {
+  const indexes = headerIndexes($, table);
 
   if (
     indexes.number == null ||
@@ -254,40 +186,26 @@ function parseRunnerTable(
     return [];
   }
 
-  const runners: Runner[] = [];
+  const runners: TjkRunner[] = [];
 
   table.find("tr").each((_, row) => {
-    const cells =
-      $(row).find("td");
+    const cells = $(row).find("td");
 
     if (!cells.length) {
       return;
     }
 
-    const cell = (
-      index: number | undefined
-    ) =>
-      index == null
-        ? null
-        : cells.eq(index);
+    const cell = (index: number | undefined) =>
+      index == null ? null : cells.eq(index);
 
-    const numberCell =
-      cell(indexes.number);
+    const numberCell = cell(indexes.number);
+    const nameCell = cell(indexes.name);
 
-    const nameCell =
-      cell(indexes.name);
-
-    if (
-      !numberCell ||
-      !nameCell
-    ) {
+    if (!numberCell || !nameCell) {
       return;
     }
 
-    const number =
-      integerValue(
-        numberCell.text()
-      );
+    const number = parseInteger(numberCell.text());
 
     const name =
       anchorText($, nameCell) ??
@@ -296,138 +214,83 @@ function parseRunnerTable(
         .trim();
 
     if (
-      !number ||
+      number == null ||
+      number <= 0 ||
       !name
     ) {
       return;
     }
 
-    const jockeyCell =
-      cell(indexes.jockey);
-
-    const weightCell =
-      cell(indexes.weight);
-
-    const hpCell =
-      cell(indexes.hp);
-
-    const agfCell =
-      cell(indexes.agf);
-
-    const jockeyText =
-      jockeyCell
-        ? (
-            anchorText(
-              $,
-              jockeyCell
-            ) ??
-            clean(
-              jockeyCell.text()
-            )
-          )
-        : "";
+    const jockeyCell = cell(indexes.jockey);
+    const weightCell = cell(indexes.weight);
+    const hpCell = cell(indexes.hp);
+    const agfCell = cell(indexes.agf);
 
     runners.push({
       number,
       name,
 
       jockey:
-        jockeyText || null,
+        jockeyCell
+          ? (
+              anchorText($, jockeyCell) ??
+              clean(jockeyCell.text()) ||
+              null
+            )
+          : null,
 
       weight:
         weightCell
-          ? numberValue(
-              weightCell.text()
-            )
+          ? parseNumber(weightCell.text())
           : null,
 
       hp:
         hpCell
-          ? integerValue(
-              hpCell.text()
-            )
+          ? parseInteger(hpCell.text())
           : null,
 
       agfPercent:
         agfCell
-          ? agfValue(
-              agfCell.text()
-            )
+          ? parseAgf(agfCell.text())
           : null
     });
   });
 
-  /*
-   * Duplicate horse number varsa
-   * ilk geçerli kayıt tutulur.
-   */
-  const unique =
-    new Map<number, Runner>();
+  const unique = new Map<number, TjkRunner>();
 
   for (const runner of runners) {
-    if (
-      !unique.has(
-        runner.number
-      )
-    ) {
-      unique.set(
-        runner.number,
-        runner
-      );
+    if (!unique.has(runner.number)) {
+      unique.set(runner.number, runner);
     }
   }
 
   return [...unique.values()]
-    .sort(
-      (a, b) =>
-        a.number - b.number
-    );
+    .sort((a, b) => a.number - b.number);
 }
 
-function raceHeader(
-  value: string
-): {
+function parseRaceHeader(text: string): {
   raceNumber: number;
   time: string;
 } | null {
-  const text = clean(value);
-
-  /*
-   * TJK örnekleri:
-   * 1. Koşu 14.00
-   * 1. Koşu 14:00
-   * 1.Koşu 14.00
-   */
-  const match = text.match(
-    /(\d+)\s*\.\s*Koşu\s+(\d{1,2})[.:](\d{2})/i
-  );
+  const match = clean(text).match(RACE_HEADER_RE);
 
   if (!match) {
     return null;
   }
 
   return {
-    raceNumber:
-      Number(match[1]),
-
+    raceNumber: Number(match[1]),
     time:
-      `${match[2].padStart(
-        2,
-        "0"
-      )}:${match[3]}`
+      `${match[2].padStart(2, "0")}:${match[3]}`
   };
 }
 
-function surfaceData(
-  value: string
-): {
+function parseSurface(text: string): {
   distanceMeters: number | null;
   track: string | null;
 } {
-  const text = clean(value);
-
-  const match = text.match(
-    /\b(\d{3,4})\s*(Kum|Çim|Cim|Sentetik)\b/i
+  const match = clean(text).match(
+    /\b(\d{3,4})\s*(Kum|Çim|Cim|Sentetik)\b/iu
   );
 
   if (!match) {
@@ -437,13 +300,10 @@ function surfaceData(
     };
   }
 
-  const rawTrack =
-    lower(match[2]);
+  const rawTrack = lower(match[2]);
 
   return {
-    distanceMeters:
-      Number(match[1]),
-
+    distanceMeters: Number(match[1]),
     track:
       rawTrack === "kum"
         ? "Kum"
@@ -456,163 +316,111 @@ function surfaceData(
   };
 }
 
+/**
+ * Parse a city-selected TJK program page.
+ *
+ * Important design:
+ * - race headers and runner tables are discovered independently
+ * - both are paired by document order
+ * - this does not depend on table nesting/layout wrappers
+ */
 export function parseTjkMeetingPage(
   html: string,
   city: string
-): Meeting {
+): TjkMeeting {
   const $ = cheerio.load(html);
 
-  const races =
-    new Map<number, Race>();
+  const headers: Array<{
+    raceNumber: number;
+    time: string;
+    distanceMeters: number | null;
+    track: string | null;
+  }> = [];
 
-  let currentRace:
-    Race | null = null;
+  $("h1,h2,h3,h4,h5,h6").each((_, element) => {
+    const text = clean($(element).text());
+    const header = parseRaceHeader(text);
 
-  /*
-   * DOM order önemli.
-   *
-   * TJK:
-   * h3 => race header
-   * h3 => race conditions
-   * ...
-   * table => runners
-   */
-  $("h1,h2,h3,h4,table")
-    .each((_, element) => {
-      const node = $(element);
+    if (!header) {
+      return;
+    }
 
-      const tag =
-        element.tagName
-          ?.toLowerCase();
+    const surroundingText = clean(
+      $(element)
+        .parent()
+        .text()
+        .slice(0, 2000)
+    );
 
-      if (tag !== "table") {
-        const text =
-          clean(node.text());
+    const surface = parseSurface(surroundingText);
 
-        const header =
-          raceHeader(text);
+    /*
+     * Same race header may occur more than once in navigation.
+     */
+    if (
+      !headers.some(
+        item =>
+          item.raceNumber === header.raceNumber
+      )
+    ) {
+      headers.push({
+        ...header,
+        ...surface
+      });
+    }
+  });
 
-        if (header) {
-          const existing =
-            races.get(
-              header.raceNumber
-            );
+  const runnerTables: TjkRunner[][] = [];
 
-          if (existing) {
-            /*
-             * Üst navigasyonda aynı koşu
-             * bir kez daha görünebilir.
-             */
-            currentRace = existing;
+  $("table").each((_, element) => {
+    const table = $(element);
+    const text = lower(table.text());
 
-            if (
-              !existing.time
-            ) {
-              existing.time =
-                header.time;
-            }
-          } else {
-            currentRace = {
-              raceNumber:
-                header.raceNumber,
+    if (
+      !text.includes("at ismi") ||
+      !text.includes("jokey")
+    ) {
+      return;
+    }
 
-              time:
-                header.time,
+    const runners = parseRunnerTable($, table);
 
-              distanceMeters:
-                null,
+    if (runners.length) {
+      runnerTables.push(runners);
+    }
+  });
 
-              track:
-                null,
+  const count = Math.min(
+    headers.length,
+    runnerTables.length
+  );
 
-              runners:
-                []
-            };
+  const races: TjkRace[] = [];
 
-            races.set(
-              header.raceNumber,
-              currentRace
-            );
-          }
-
-          return;
-        }
-
-        if (currentRace) {
-          const surface =
-            surfaceData(text);
-
-          if (
-            surface.distanceMeters
-          ) {
-            currentRace
-              .distanceMeters =
-                surface
-                  .distanceMeters;
-          }
-
-          if (surface.track) {
-            currentRace.track =
-              surface.track;
-          }
-        }
-
-        return;
-      }
-
-      if (!currentRace) {
-        return;
-      }
-
-      const tableText =
-        lower(node.text());
-
-      /*
-       * Runner tablosunu diğer
-       * ikramiye / bahis tablolarından ayır.
-       */
-      if (
-        !tableText.includes(
-          "at ismi"
-        ) ||
-        !tableText.includes(
-          "jokey"
-        )
-      ) {
-        return;
-      }
-
-      const parsed =
-        parseRunnerTable(
-          $,
-          node
-        );
-
-      if (parsed.length) {
-        currentRace.runners =
-          parsed;
-      }
+  for (let index = 0; index < count; index++) {
+    races.push({
+      raceNumber: headers[index].raceNumber,
+      time: headers[index].time,
+      distanceMeters: headers[index].distanceMeters,
+      track: headers[index].track,
+      runners: runnerTables[index]
     });
+  }
 
   return {
     city,
-    races:
-      [...races.values()]
-        .sort(
-          (a, b) =>
-            a.raceNumber -
-            b.raceNumber
-        )
+    races: races.sort(
+      (a, b) =>
+        a.raceNumber - b.raceNumber
+    )
   };
 }
 
 export function assertCompleteMeeting(
-  meeting: Meeting
+  meeting: TjkMeeting
 ): void {
   if (!meeting.city?.trim()) {
-    throw new Error(
-      "TJK_CITY_MISSING"
-    );
+    throw new Error("TJK_CITY_MISSING");
   }
 
   if (!meeting.races?.length) {
@@ -621,13 +429,9 @@ export function assertCompleteMeeting(
     );
   }
 
-  for (
-    const race of meeting.races
-  ) {
+  for (const race of meeting.races) {
     if (
-      !Number.isInteger(
-        race.raceNumber
-      ) ||
+      !Number.isInteger(race.raceNumber) ||
       race.raceNumber <= 0
     ) {
       throw new Error(
@@ -636,35 +440,26 @@ export function assertCompleteMeeting(
     }
 
     if (
-      !/^([01]\d|2[0-3]):[0-5]\d$/
-        .test(
-          race.time ?? ""
-        )
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(
+        race.time ?? ""
+      )
     ) {
       throw new Error(
         `TJK_TIME_INVALID:${meeting.city}:R${race.raceNumber}`
       );
     }
 
-    if (
-      !race.runners?.length
-    ) {
+    if (!race.runners?.length) {
       throw new Error(
         `TJK_RUNNERS_EMPTY:${meeting.city}:R${race.raceNumber}`
       );
     }
 
-    const horseNumbers =
-      new Set<number>();
+    const numbers = new Set<number>();
 
-    for (
-      const runner of
-        race.runners
-    ) {
+    for (const runner of race.runners) {
       if (
-        !Number.isInteger(
-          runner.number
-        ) ||
+        !Number.isInteger(runner.number) ||
         runner.number <= 0 ||
         !runner.name?.trim()
       ) {
@@ -673,19 +468,13 @@ export function assertCompleteMeeting(
         );
       }
 
-      if (
-        horseNumbers.has(
-          runner.number
-        )
-      ) {
+      if (numbers.has(runner.number)) {
         throw new Error(
           `TJK_RUNNER_DUPLICATE:${meeting.city}:R${race.raceNumber}:#${runner.number}`
         );
       }
 
-      horseNumbers.add(
-        runner.number
-      );
+      numbers.add(runner.number);
     }
   }
 }
@@ -693,20 +482,11 @@ export function assertCompleteMeeting(
 export function assertCompleteProgram(
   program: TjkProgramInput
 ): void {
-  if (
-    !program.meetings?.length
-  ) {
-    throw new Error(
-      "TJK_NO_MEETINGS"
-    );
+  if (!program.meetings?.length) {
+    throw new Error("TJK_NO_MEETINGS");
   }
 
-  for (
-    const meeting of
-      program.meetings
-  ) {
-    assertCompleteMeeting(
-      meeting
-    );
+  for (const meeting of program.meetings) {
+    assertCompleteMeeting(meeting);
   }
 }

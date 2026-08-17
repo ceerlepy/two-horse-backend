@@ -2,18 +2,12 @@ import type { Env } from "../env";
 import type { TjkProgramInput } from "../types/models";
 
 import {
-  discoverDomesticMeetings,
+  discoverDomesticMeetingNames,
   parseTjkMeetingPage,
   assertCompleteMeeting,
-  assertCompleteProgram
+  assertCompleteProgram,
+  type TjkMeeting
 } from "./html-parser";
-
-import {
-  tjkMeetingJsonSchema
-} from "./schema";
-
-type Meeting =
-  TjkProgramInput["meetings"][number];
 
 export type TjkStage =
   | "HTTP_FETCH"
@@ -35,66 +29,110 @@ export interface TjkDiagnostic {
   detail?: string;
 }
 
-export class TjkExtractionError
-  extends Error {
+export class TjkExtractionError extends Error {
   constructor(
     message: string,
-    readonly diagnostics:
-      TjkDiagnostic[]
+    readonly diagnostics: TjkDiagnostic[]
   ) {
     super(message);
-    this.name =
-      "TjkExtractionError";
+    this.name = "TjkExtractionError";
   }
 }
 
-const FETCH_TIMEOUT_MS =
-  15_000;
+const TJK_MASTER_URL =
+  "https://www.tjk.org/TR/YarisSever/Info/Page/GunlukYarisProgrami";
 
-function errorText(
-  error: unknown
-): string {
+const HTTP_TIMEOUT_MS = 15_000;
+const BROWSER_TIMEOUT_MS = 25_000;
+const CITY_CONCURRENCY = 4;
+
+function errorText(error: unknown): string {
   return error instanceof Error
     ? error.message
     : String(error);
 }
 
+function turkeyDateParts(): {
+  yyyyMMdd: string;
+  ddMMyyyy: string;
+} {
+  const parts = new Intl.DateTimeFormat(
+    "en-GB",
+    {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }
+  ).formatToParts(new Date());
+
+  const value = (type: string) =>
+    parts.find(part => part.type === type)?.value ?? "";
+
+  const year = value("year");
+  const month = value("month");
+  const day = value("day");
+
+  return {
+    yyyyMMdd: `${year}-${month}-${day}`,
+    ddMMyyyy: `${day}/${month}/${year}`
+  };
+}
+
+function buildCityUrl(city: string): string {
+  const { ddMMyyyy } = turkeyDateParts();
+
+  const url = new URL(TJK_MASTER_URL);
+
+  url.searchParams.set(
+    "QueryParameter_Tarih",
+    ddMMyyyy
+  );
+
+  url.searchParams.set(
+    "SehirAdi",
+    city
+  );
+
+  url.searchParams.set(
+    "Era",
+    "today"
+  );
+
+  return url.toString();
+}
+
 async function timed<T>(
   scope: string,
   stage: TjkStage,
-  diagnostics:
-    TjkDiagnostic[],
+  diagnostics: TjkDiagnostic[],
   work: () => Promise<T>
 ): Promise<T> {
-  const started = Date.now();
+  const startedAt = Date.now();
 
   try {
-    const value =
-      await work();
+    const result = await work();
 
     diagnostics.push({
       scope,
       stage,
       ok: true,
-      durationMs:
-        Date.now() - started
+      durationMs: Date.now() - startedAt
     });
 
     console.info(
       `[TJK] ${scope} ${stage} OK`
     );
 
-    return value;
+    return result;
   } catch (error) {
-    const message =
-      errorText(error);
+    const message = errorText(error);
 
     diagnostics.push({
       scope,
       stage,
       ok: false,
-      durationMs:
-        Date.now() - started,
+      durationMs: Date.now() - startedAt,
       error: message
     });
 
@@ -107,48 +145,42 @@ async function timed<T>(
   }
 }
 
-async function httpFetchHtml(
-  url: string
-): Promise<string> {
-  const controller =
-    new AbortController();
+async function httpHtml(url: string): Promise<string> {
+  const controller = new AbortController();
 
-  const timeout =
-    setTimeout(
-      () =>
-        controller.abort(),
-      FETCH_TIMEOUT_MS
-    );
+  const timeout = setTimeout(
+    () => controller.abort(),
+    HTTP_TIMEOUT_MS
+  );
 
   try {
-    const response =
-      await fetch(url, {
-        headers: {
-          "accept":
-            "text/html,application/xhtml+xml",
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 
-          "user-agent":
-            "Mozilla/5.0 (compatible; TwoHorse/1.0)"
-        },
+        "accept-language":
+          "tr-TR,tr;q=0.9,en;q=0.7",
 
-        signal:
-          controller.signal
-      });
+        "user-agent":
+          "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/139.0 Safari/537.36"
+      }
+    });
 
     if (!response.ok) {
       throw new Error(
-        `HTTP_${response.status}`
+        `HTTP_${response.status}:${url}`
       );
     }
 
-    const html =
-      await response.text();
+    const html = await response.text();
 
-    if (
-      html.length < 1000
-    ) {
+    if (html.length < 1000) {
       throw new Error(
-        `HTML_TOO_SMALL:${html.length}`
+        `HTTP_HTML_TOO_SMALL:${html.length}`
       );
     }
 
@@ -158,156 +190,140 @@ async function httpFetchHtml(
   }
 }
 
-function unwrapQuickAction(
-  body: any
-): any {
+function unwrapQuickAction(value: any): any {
   if (
-    body &&
-    typeof body === "object" &&
-    "result" in body
+    value &&
+    typeof value === "object" &&
+    "result" in value
   ) {
-    return body.result;
+    return value.result;
   }
 
-  return body;
+  return value;
 }
 
-function scrapeBodyHtml(
-  payload: any
-): string {
-  const raw =
-    unwrapQuickAction(
-      payload
-    );
+function recursivelyFindHtml(value: any): string | null {
+  if (!value) {
+    return null;
+  }
 
-  const groups =
-    Array.isArray(raw)
-      ? raw
-      : [];
-
-  for (
-    const group of groups
+  if (
+    typeof value === "object" &&
+    typeof value.html === "string" &&
+    value.html.length > 500
   ) {
-    if (
-      group?.selector !==
-      "body"
-    ) {
-      continue;
+    return value.html;
+  }
+
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = recursivelyFindHtml(child);
+
+      if (found) {
+        return found;
+      }
     }
 
-    const first =
-      Array.isArray(
-        group.results
-      )
-        ? group.results[0]
-        : null;
+    return null;
+  }
 
-    if (
-      typeof first?.html ===
-        "string" &&
-      first.html.length
-    ) {
-      return (
-        "<body>" +
-        first.html +
-        "</body>"
-      );
+  if (typeof value === "object") {
+    for (const child of Object.values(value)) {
+      const found = recursivelyFindHtml(child);
+
+      if (found) {
+        return found;
+      }
     }
   }
 
-  throw new Error(
-    "SCRAPE_BODY_NOT_FOUND"
-  );
+  return null;
 }
 
-async function browserScrapeHtml(
+async function scrapeHtml(
   env: Env,
   url: string
 ): Promise<string> {
-  const response =
-    await (env.BROWSER as any)
-      .quickAction(
-        "scrape",
+  const response = await env.BROWSER.quickAction(
+    "scrape",
+    {
+      url,
+
+      elements: [
         {
-          url,
-
-          elements: [
-            {
-              selector:
-                "body"
-            }
-          ],
-
-          gotoOptions: {
-            waitUntil:
-              "networkidle2",
-            timeout:
-              20_000
-          },
-
-          rejectResourceTypes: [
-            "image",
-            "media",
-            "font"
-          ]
+          selector: "body"
         }
-      );
+      ],
+
+      gotoOptions: {
+        waitUntil: "networkidle2",
+        timeout: BROWSER_TIMEOUT_MS
+      },
+
+      rejectResourceTypes: [
+        "image",
+        "media",
+        "font"
+      ]
+    }
+  );
 
   if (!response.ok) {
-    const body =
-      await response.text();
+    const body = await response.text();
 
     throw new Error(
-      `SCRAPE_HTTP_${response.status}:${body.slice(0, 500)}`
+      `SCRAPE_${response.status}:${body.slice(0, 800)}`
     );
   }
 
-  return scrapeBodyHtml(
+  const payload = unwrapQuickAction(
     await response.json()
   );
-}
 
-async function browserContentHtml(
-  env: Env,
-  url: string
-): Promise<string> {
-  const response =
-    await (env.BROWSER as any)
-      .quickAction(
-        "content",
-        {
-          url,
+  const html = recursivelyFindHtml(payload);
 
-          gotoOptions: {
-            waitUntil:
-              "networkidle2",
-            timeout:
-              20_000
-          },
-
-          rejectResourceTypes: [
-            "image",
-            "media",
-            "font"
-          ]
-        }
-      );
-
-  if (!response.ok) {
-    const body =
-      await response.text();
-
+  if (!html) {
     throw new Error(
-      `CONTENT_HTTP_${response.status}:${body.slice(0, 500)}`
+      "SCRAPE_HTML_NOT_FOUND"
     );
   }
 
-  const html =
-    await response.text();
+  return `<body>${html}</body>`;
+}
 
-  if (
-    html.length < 1000
-  ) {
+async function contentHtml(
+  env: Env,
+  url: string
+): Promise<string> {
+  const response = await env.BROWSER.quickAction(
+    "content",
+    {
+      url,
+
+      gotoOptions: {
+        waitUntil: "networkidle2",
+        timeout: BROWSER_TIMEOUT_MS
+      },
+
+      rejectResourceTypes: [
+        "image",
+        "media",
+        "font"
+      ]
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+
+    throw new Error(
+      `CONTENT_${response.status}:${body.slice(0, 800)}`
+    );
+  }
+
+  const html = await response.text();
+
+  if (html.length < 1000) {
     throw new Error(
       `CONTENT_TOO_SMALL:${html.length}`
     );
@@ -316,243 +332,163 @@ async function browserContentHtml(
   return html;
 }
 
-function nullableString(
-  value: unknown
-): string | null {
-  const text =
-    String(value ?? "")
-      .trim();
-
-  return text || null;
-}
-
-function nullableNumber(
-  value: unknown
-): number | null {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
-
-  const parsed =
-    Number(
-      String(value)
-        .replace(",", ".")
-    );
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : null;
-}
-
-function nullableInteger(
-  value: unknown
-): number | null {
-  const parsed =
-    nullableNumber(value);
-
-  return parsed == null
-    ? null
-    : Math.trunc(parsed);
-}
-
-function normalizeAiMeeting(
+function normalizeJsonMeeting(
   payload: any,
   expectedCity: string
-): Meeting {
-  const raw =
-    unwrapQuickAction(
-      payload
-    );
+): TjkMeeting {
+  const raw = unwrapQuickAction(payload);
 
-  const city =
-    nullableString(
-      raw?.city
-    ) ??
-    expectedCity;
-
-  const races =
-    Array.isArray(raw?.races)
-      ? raw.races
-      : [];
+  const races = Array.isArray(raw?.races)
+    ? raw.races
+    : [];
 
   return {
-    city,
+    city:
+      String(raw?.city ?? expectedCity).trim() ||
+      expectedCity,
 
-    races:
-      races.map(
-        (race: any) => ({
-          raceNumber:
-            Number(
-              race?.raceNumber
-            ),
+    races: races.map((race: any) => ({
+      raceNumber:
+        Number(race?.raceNumber),
 
-          time:
-            String(
-              race?.time ?? ""
-            )
-              .replace(".", ":")
-              .trim(),
+      time:
+        String(race?.time ?? "")
+          .replace(".", ":")
+          .trim(),
 
-          distanceMeters:
-            nullableInteger(
-              race?.distanceMeters
-            ),
+      distanceMeters:
+        race?.distanceMeters == null
+          ? null
+          : Number(race.distanceMeters),
 
-          track:
-            nullableString(
-              race?.track
-            ),
+      track:
+        race?.track == null
+          ? null
+          : String(race.track),
 
-          runners:
-            Array.isArray(
-              race?.runners
-            )
-              ? race.runners.map(
-                  (
-                    runner: any
-                  ) => ({
-                    number:
-                      Number(
-                        runner?.number
-                      ),
+      runners:
+        Array.isArray(race?.runners)
+          ? race.runners.map((runner: any) => ({
+              number:
+                Number(runner?.number),
 
-                    name:
-                      String(
-                        runner?.name ??
-                        ""
-                      ).trim(),
+              name:
+                String(runner?.name ?? "").trim(),
 
-                    jockey:
-                      nullableString(
-                        runner?.jockey
-                      ),
+              jockey:
+                runner?.jockey == null
+                  ? null
+                  : String(runner.jockey).trim() || null,
 
-                    weight:
-                      nullableNumber(
-                        runner?.weight
-                      ),
+              weight:
+                runner?.weight == null
+                  ? null
+                  : Number(runner.weight),
 
-                    hp:
-                      nullableInteger(
-                        runner?.hp
-                      ),
+              hp:
+                runner?.hp == null
+                  ? null
+                  : Math.trunc(Number(runner.hp)),
 
-                    agfPercent:
-                      nullableNumber(
-                        runner?.agfPercent
-                      )
-                  })
-                )
-              : []
-        })
-      )
+              agfPercent:
+                runner?.agfPercent == null
+                  ? null
+                  : Number(runner.agfPercent)
+            }))
+          : []
+    }))
   };
 }
 
-async function browserJsonMeeting(
+/**
+ * /json is the LAST resort.
+ *
+ * Prompt-only mode is intentional:
+ * Browser Run docs support prompt OR response_format.
+ * Semantic validation is performed by our own validator.
+ */
+async function jsonMeeting(
   env: Env,
-  url: string,
-  city: string
-): Promise<Meeting> {
-  const response =
-    await (env.BROWSER as any)
-      .quickAction(
-        "json",
+  city: string,
+  url: string
+): Promise<TjkMeeting> {
+  const response = await env.BROWSER.quickAction(
+    "json",
+    {
+      url,
+
+      prompt: `
+Read this official Turkish Jockey Club daily race program for ${city}.
+
+Return JSON in this exact logical shape:
+
+{
+  "city": "${city}",
+  "races": [
+    {
+      "raceNumber": 1,
+      "time": "HH:mm",
+      "distanceMeters": 1200,
+      "track": "Kum",
+      "runners": [
         {
-          url,
-
-          prompt: `
-This is an official Turkish Jockey Club city race-program page.
-
-Extract ONLY the domestic meeting shown on this page.
-
-Expected city: ${city}
-
-Return every race and every listed runner.
-
-Rules:
-- raceNumber is the actual race number.
-- time is the visible race start time in HH:mm format.
-- runners contains every horse listed in that race.
-- runner number and horse name are mandatory.
-- jockey, weight, HP and AGF should be extracted when visible.
-- do not invent missing values.
-- do not omit races.
-- do not omit runners.
-`,
-
-          response_format: {
-            type:
-              "json_schema",
-
-            json_schema:
-              tjkMeetingJsonSchema
-          },
-
-          gotoOptions: {
-            waitUntil:
-              "networkidle2",
-
-            timeout:
-              25_000
-          },
-
-          rejectResourceTypes: [
-            "image",
-            "media",
-            "font"
-          ]
+          "number": 1,
+          "name": "HORSE NAME",
+          "jockey": "JOCKEY NAME",
+          "weight": 58,
+          "hp": 70,
+          "agfPercent": 25.4
         }
-      );
+      ]
+    }
+  ]
+}
+
+Requirements:
+- extract EVERY race displayed for ${city}
+- extract EVERY listed runner
+- use the real visible race start time
+- do not invent horses
+- do not omit horses
+- keep horse number and horse name paired correctly
+- use null for optional fields only when not shown
+- time must be HH:mm
+`
+    }
+  );
 
   if (!response.ok) {
-    /*
-     * 422 gibi hatalarda Cloudflare'ın
-     * GERÇEK response body’si logda kalır.
-     */
-    const body =
-      await response.text();
+    const body = await response.text();
 
     throw new Error(
       `CF_JSON_HTTP_${response.status}:${body.slice(0, 1200)}`
     );
   }
 
-  const payload =
-    await response.json();
-
-  return normalizeAiMeeting(
-    payload,
+  return normalizeJsonMeeting(
+    await response.json(),
     city
   );
 }
 
-async function extractMeeting(
+async function meetingThroughFourStages(
   env: Env,
   city: string,
-  url: string,
-  diagnostics:
-    TjkDiagnostic[]
-): Promise<Meeting> {
-  const scope =
-    `meeting:${city}`;
+  diagnostics: TjkDiagnostic[]
+): Promise<TjkMeeting> {
+  const url = buildCityUrl(city);
+  const scope = `meeting:${city}`;
 
   /*
-   * 1. NORMAL HTTP FETCH
+   * 1. ordinary HTTP
    */
   try {
-    const html =
-      await timed(
-        scope,
-        "HTTP_FETCH",
-        diagnostics,
-        () =>
-          httpFetchHtml(url)
-      );
+    const html = await timed(
+      scope,
+      "HTTP_FETCH",
+      diagnostics,
+      () => httpHtml(url)
+    );
 
     return await timed(
       scope,
@@ -560,37 +496,26 @@ async function extractMeeting(
       diagnostics,
       async () => {
         const meeting =
-          parseTjkMeetingPage(
-            html,
-            city
-          );
+          parseTjkMeetingPage(html, city);
 
-        assertCompleteMeeting(
-          meeting
-        );
-
+        assertCompleteMeeting(meeting);
         return meeting;
       }
     );
   } catch {
-    // stage 2
+    // next stage
   }
 
   /*
-   * 2. CLOUDFLARE /SCRAPE
+   * 2. Cloudflare /scrape
    */
   try {
-    const html =
-      await timed(
-        scope,
-        "CF_SCRAPE",
-        diagnostics,
-        () =>
-          browserScrapeHtml(
-            env,
-            url
-          )
-      );
+    const html = await timed(
+      scope,
+      "CF_SCRAPE",
+      diagnostics,
+      () => scrapeHtml(env, url)
+    );
 
     return await timed(
       scope,
@@ -598,37 +523,26 @@ async function extractMeeting(
       diagnostics,
       async () => {
         const meeting =
-          parseTjkMeetingPage(
-            html,
-            city
-          );
+          parseTjkMeetingPage(html, city);
 
-        assertCompleteMeeting(
-          meeting
-        );
-
+        assertCompleteMeeting(meeting);
         return meeting;
       }
     );
   } catch {
-    // stage 3
+    // next stage
   }
 
   /*
-   * 3. CLOUDFLARE /CONTENT
+   * 3. Cloudflare /content
    */
   try {
-    const html =
-      await timed(
-        scope,
-        "CF_CONTENT",
-        diagnostics,
-        () =>
-          browserContentHtml(
-            env,
-            url
-          )
-      );
+    const html = await timed(
+      scope,
+      "CF_CONTENT",
+      diagnostics,
+      () => contentHtml(env, url)
+    );
 
     return await timed(
       scope,
@@ -636,107 +550,59 @@ async function extractMeeting(
       diagnostics,
       async () => {
         const meeting =
-          parseTjkMeetingPage(
-            html,
-            city
-          );
+          parseTjkMeetingPage(html, city);
 
-        assertCompleteMeeting(
-          meeting
-        );
-
+        assertCompleteMeeting(meeting);
         return meeting;
       }
     );
   } catch {
-    // stage 4
+    // next stage
   }
 
   /*
-   * 4. CLOUDFLARE /JSON
-   * En son fallback.
+   * 4. Cloudflare /json AI fallback
    */
-  const meeting =
-    await timed(
-      scope,
-      "CF_JSON",
-      diagnostics,
-      () =>
-        browserJsonMeeting(
-          env,
-          url,
-          city
-        )
-    );
+  const meeting = await timed(
+    scope,
+    "CF_JSON",
+    diagnostics,
+    () => jsonMeeting(env, city, url)
+  );
 
   return await timed(
     scope,
     "JSON_VALIDATE",
     diagnostics,
     async () => {
-      assertCompleteMeeting(
-        meeting
-      );
-
+      assertCompleteMeeting(meeting);
       return meeting;
     }
   );
 }
 
-async function discoverMasterMeetings(
+async function discoverCities(
   env: Env,
-  inputUrl: string,
   diagnostics: TjkDiagnostic[]
-): Promise<Array<{
-  city: string;
-  url: string;
-}>> {
-  /*
-   * TJK canonical daily-program page.
-   *
-   * Query/Page occasionally returns a shell/partial page with HTTP 200.
-   * HTTP 200 alone is NOT success. Meeting discovery must also succeed.
-   */
-  const canonicalUrl = inputUrl
-    .replace(
-      /\/Query\/Page\/GunlukYarisProgrami/i,
-      "/Info/Page/GunlukYarisProgrami"
-    );
-
+): Promise<string[]> {
   const scope = "master";
 
   /*
-   * 1) NORMAL HTTP
-   * Fetch + discovery together form one successful stage.
+   * Stage 1
    */
   try {
     const html = await timed(
       scope,
       "HTTP_FETCH",
       diagnostics,
-      () => httpFetchHtml(canonicalUrl)
+      () => httpHtml(TJK_MASTER_URL)
     );
 
-    const meetings = discoverDomesticMeetings(
-      html,
-      canonicalUrl
-    );
+    const cities = discoverDomesticMeetingNames(html);
 
-    if (!meetings.length) {
-      diagnostics.push({
-        scope,
-        stage: "HTTP_PARSE",
-        ok: false,
-        durationMs: 0,
-        error: "NO_DOMESTIC_MEETINGS"
-      });
-
-      console.warn(
-        "[TJK] master HTTP_PARSE FAIL NO_DOMESTIC_MEETINGS"
-      );
-
+    if (!cities.length) {
       throw new Error(
-        "HTTP_MASTER_NO_DOMESTIC_MEETINGS"
+        "NO_DOMESTIC_MEETINGS"
       );
     }
 
@@ -745,52 +611,36 @@ async function discoverMasterMeetings(
       stage: "HTTP_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${meetings.length} meetings`
+      detail: `${cities.length} meetings`
     });
 
-    console.info(
-      `[TJK] master HTTP_PARSE OK ${meetings.length} meetings`
-    );
-
-    return meetings;
-  } catch {
-    // continue to Cloudflare scrape
+    return cities;
+  } catch (error) {
+    diagnostics.push({
+      scope,
+      stage: "HTTP_PARSE",
+      ok: false,
+      durationMs: 0,
+      error: errorText(error)
+    });
   }
 
   /*
-   * 2) CLOUDFLARE /SCRAPE
+   * Stage 2
    */
   try {
     const html = await timed(
       scope,
       "CF_SCRAPE",
       diagnostics,
-      () => browserScrapeHtml(
-        env,
-        canonicalUrl
-      )
+      () => scrapeHtml(env, TJK_MASTER_URL)
     );
 
-    const meetings = discoverDomesticMeetings(
-      html,
-      canonicalUrl
-    );
+    const cities = discoverDomesticMeetingNames(html);
 
-    if (!meetings.length) {
-      diagnostics.push({
-        scope,
-        stage: "SCRAPE_PARSE",
-        ok: false,
-        durationMs: 0,
-        error: "NO_DOMESTIC_MEETINGS"
-      });
-
-      console.warn(
-        "[TJK] master SCRAPE_PARSE FAIL NO_DOMESTIC_MEETINGS"
-      );
-
+    if (!cities.length) {
       throw new Error(
-        "SCRAPE_MASTER_NO_DOMESTIC_MEETINGS"
+        "NO_DOMESTIC_MEETINGS"
       );
     }
 
@@ -799,166 +649,191 @@ async function discoverMasterMeetings(
       stage: "SCRAPE_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${meetings.length} meetings`
+      detail: `${cities.length} meetings`
     });
 
-    console.info(
-      `[TJK] master SCRAPE_PARSE OK ${meetings.length} meetings`
-    );
-
-    return meetings;
-  } catch {
-    // continue to rendered content
+    return cities;
+  } catch (error) {
+    diagnostics.push({
+      scope,
+      stage: "SCRAPE_PARSE",
+      ok: false,
+      durationMs: 0,
+      error: errorText(error)
+    });
   }
 
   /*
-   * 3) CLOUDFLARE /CONTENT
+   * Stage 3
    */
-  const html = await timed(
-    scope,
-    "CF_CONTENT",
-    diagnostics,
-    () => browserContentHtml(
-      env,
-      canonicalUrl
-    )
-  );
+  try {
+    const html = await timed(
+      scope,
+      "CF_CONTENT",
+      diagnostics,
+      () => contentHtml(env, TJK_MASTER_URL)
+    );
 
-  const meetings = discoverDomesticMeetings(
-    html,
-    canonicalUrl
-  );
+    const cities = discoverDomesticMeetingNames(html);
 
-  if (!meetings.length) {
+    if (!cities.length) {
+      throw new Error(
+        "NO_DOMESTIC_MEETINGS"
+      );
+    }
+
+    diagnostics.push({
+      scope,
+      stage: "CONTENT_PARSE",
+      ok: true,
+      durationMs: 0,
+      detail: `${cities.length} meetings`
+    });
+
+    return cities;
+  } catch (error) {
     diagnostics.push({
       scope,
       stage: "CONTENT_PARSE",
       ok: false,
       durationMs: 0,
-      error: "NO_DOMESTIC_MEETINGS"
+      error: errorText(error)
     });
+  }
+
+  /*
+   * Stage 4: master JSON.
+   * Unlike the old architecture, JSON is reachable even if city
+   * discovery failed in stages 1-3.
+   */
+  const response = await timed(
+    scope,
+    "CF_JSON",
+    diagnostics,
+    () =>
+      env.BROWSER.quickAction(
+        "json",
+        {
+          url: TJK_MASTER_URL,
+
+          prompt: `
+Read the official Turkish Jockey Club daily race-program page.
+
+Return JSON exactly like:
+{
+  "cities": ["Ankara", "Bursa"]
+}
+
+Include ONLY today's domestic Turkish race meetings.
+Exclude every foreign/YD meeting.
+Do not invent cities.
+`
+        }
+      )
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
 
     throw new Error(
-      "CONTENT_MASTER_NO_DOMESTIC_MEETINGS"
+      `MASTER_JSON_${response.status}:${body.slice(0, 1200)}`
+    );
+  }
+
+  const payload = unwrapQuickAction(
+    await response.json()
+  );
+
+  const cities = Array.isArray(payload?.cities)
+    ? payload.cities
+        .map((city: unknown) => String(city).trim())
+        .filter(Boolean)
+    : [];
+
+  if (!cities.length) {
+    throw new Error(
+      "MASTER_JSON_NO_CITIES"
     );
   }
 
   diagnostics.push({
     scope,
-    stage: "CONTENT_PARSE",
+    stage: "JSON_VALIDATE",
     ok: true,
     durationMs: 0,
-    detail: `${meetings.length} meetings`
+    detail: `${cities.length} meetings`
   });
 
-  console.info(
-    `[TJK] master CONTENT_PARSE OK ${meetings.length} meetings`
-  );
-
-  return meetings;
+  return [...new Set(cities)];
 }
 
-async function mapLimited<
-  T,
-  R
->(
+async function mapLimited<T, R>(
   values: T[],
   concurrency: number,
-  work:
-    (value: T) =>
-      Promise<R>
+  work: (value: T) => Promise<R>
 ): Promise<R[]> {
-  const result:
-    R[] =
-      new Array(
-        values.length
-      );
+  const results = new Array<R>(values.length);
+  let cursor = 0;
 
-  let next = 0;
-
-  async function worker() {
+  async function worker(): Promise<void> {
     while (true) {
-      const index = next++;
+      const index = cursor++;
 
-      if (
-        index >=
-        values.length
-      ) {
+      if (index >= values.length) {
         return;
       }
 
-      result[index] =
-        await work(
-          values[index]
-        );
+      results[index] =
+        await work(values[index]);
     }
   }
 
-  const count =
-    Math.max(
-      1,
-      Math.min(
-        concurrency,
-        values.length
-      )
-    );
-
   await Promise.all(
     Array.from(
-      { length: count },
+      {
+        length: Math.max(
+          1,
+          Math.min(concurrency, values.length)
+        )
+      },
       () => worker()
     )
   );
 
-  return result;
+  return results;
 }
 
 export async function extractTjkProgramWithFallbacks(
   env: Env,
-  masterUrl: string
+  _registryUrl: string
 ): Promise<{
   program: TjkProgramInput;
-  diagnostics:
-    TjkDiagnostic[];
+  diagnostics: TjkDiagnostic[];
 }> {
-  const diagnostics:
-    TjkDiagnostic[] = [];
+  const diagnostics: TjkDiagnostic[] = [];
 
   try {
-    const meetings =
-      await discoverMasterMeetings(
-        env,
-        masterUrl,
-        diagnostics
-      );
-
-    /*
-     * Paid planı ekonomik kullanmak için
-     * kontrollü concurrency.
-     *
-     * Her meeting kendi 4-stage fallback zincirini yürütür.
-     */
-    const parsed =
-      await mapLimited(
-        meetings,
-        4,
-        meeting =>
-          extractMeeting(
-            env,
-            meeting.city,
-            meeting.url,
-            diagnostics
-          )
-      );
-
-    const program:
-      TjkProgramInput = {
-        meetings: parsed
-      };
-
-    assertCompleteProgram(
-      program
+    const cities = await discoverCities(
+      env,
+      diagnostics
     );
+
+    const meetings = await mapLimited(
+      cities,
+      CITY_CONCURRENCY,
+      city =>
+        meetingThroughFourStages(
+          env,
+          city,
+          diagnostics
+        )
+    );
+
+    const program: TjkProgramInput = {
+      meetings
+    };
+
+    assertCompleteProgram(program);
 
     return {
       program,
