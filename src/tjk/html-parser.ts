@@ -232,10 +232,8 @@ function parseRunnerTable(
 
       jockey:
         jockeyCell
-          ? (
-              anchorText($, jockeyCell) ??
-              clean(jockeyCell.text()) ||
-              null
+          ?(
+              anchorText($, jockeyCell) ?? (clean(jockeyCell.text()) || null)
             )
           : null,
 
