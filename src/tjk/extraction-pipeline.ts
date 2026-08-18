@@ -764,7 +764,9 @@ Do not invent cities.
     detail: `${cities.length} meetings`
   });
 
-  return [...new Set(cities)];
+  return [...new Set(
+    cities.map((city: unknown) => String(city).trim())
+  )].filter(Boolean);
 }
 
 async function mapLimited<T, R>(
