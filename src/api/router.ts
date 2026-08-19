@@ -6,6 +6,7 @@ import { refreshExpertsIfDue } from "../experts/service";
 import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
+import { generateSixFoldCoupons } from "../coupons/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -17,6 +18,111 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
   return json({date:turkeyDate(),meetings,servedFrom:"d1",refreshingInBackground:true});
  }
+ if(url.pathname==="/api/coupons/generate") {
+  try {
+   let city=
+    url.searchParams.get(
+     "city"
+    ) ?? "";
+
+   let budgetTl=
+    Number(
+     url.searchParams.get(
+      "budgetTl"
+     )
+    );
+
+   let sixfold=
+    Number(
+     url.searchParams.get(
+      "sixfold"
+     ) ?? "1"
+    );
+
+   let multiplier=
+    Number(
+     url.searchParams.get(
+      "multiplier"
+     ) ?? "1"
+    );
+
+   if(
+    request.method==="POST"
+   ) {
+    const body=
+     await request
+      .json<any>();
+
+    city=
+     String(
+      body?.city ??
+      city
+     );
+
+    budgetTl=
+     Number(
+      body?.budgetTl ??
+      budgetTl
+     );
+
+    sixfold=
+     Number(
+      body?.sixfold ??
+      sixfold
+     );
+
+    multiplier=
+     Number(
+      body?.multiplier ??
+      multiplier
+     );
+   }
+
+   if(
+    !city.trim()
+   ) {
+    return json({
+     ok:false,
+     error:"CITY_REQUIRED"
+    },400);
+   }
+
+   if(
+    !Number.isFinite(
+     budgetTl
+    ) ||
+    budgetTl<=0
+   ) {
+    return json({
+     ok:false,
+     error:"VALID_BUDGET_REQUIRED"
+    },400);
+   }
+
+   const result=
+    await generateSixFoldCoupons(
+     env,
+     {
+      city,
+      budgetTl,
+      sixfold,
+      multiplier
+     }
+    );
+
+   return json({
+    ok:true,
+    ...result
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },400);
+  }
+ }
+
  if(url.pathname==="/api/history") return json({history:await getHistory(env)});
  if(url.pathname==="/api/admin/refresh-tjk" && request.method==="POST") {
         try {
