@@ -403,24 +403,35 @@ export function parseTjkMeetingPage(
   }> = [];
 
   /*
-   * TJK renders race metadata in a separate heading after
-   * the race header:
+   * Mirror the proven horsai parser as closely as possible.
    *
+   * TJK's race program uses h3 elements for both:
    *   1. Koşu 17.45
-   *   Maiden/... 1200 Kum ...
+   * and the following race-title/condition line containing:
+   *   1200 Kum
+   *   1400 Çim
+   *   2000 Sentetik
    *
-   * This mirrors the proven horsai parser:
-   * collect headings in document order, and for each race
-   * header take the first following heading containing a
-   * recognized surface.
+   * Do not rely on parent/sibling structure.
+   * Do not mix h1..h6.
    */
-  const headingTexts = $("h1,h2,h3,h4,h5,h6")
+  const h3Texts = $("h3")
     .map((_, element) =>
       clean($(element).text())
     )
     .get();
 
-  headingTexts.forEach((text, index) => {
+  const byRace = new Map<
+    number,
+    {
+      raceNumber: number;
+      time: string;
+      distanceMeters: number | null;
+      track: string | null;
+    }
+  >();
+
+  h3Texts.forEach((text, index) => {
     const header = parseRaceHeader(text);
 
     if (!header) {
@@ -428,18 +439,17 @@ export function parseTjkMeetingPage(
     }
 
     /*
-     * Navigation may contain duplicate race headers.
-     * Only keep the first occurrence for each race number.
+     * horsai behaviour:
+     * from this race-heading occurrence, take the first later
+     * h3 which:
+     *   - is non-empty
+     *   - is not another race heading
+     *   - contains Çim/Kum/Sentetik
+     *
+     * Important: do not stop merely because navigation contains
+     * another race heading. We search later h3 entries exactly
+     * like horsai does.
      */
-    if (
-      headers.some(
-        item =>
-          item.raceNumber === header.raceNumber
-      )
-    ) {
-      return;
-    }
-
     let surface = {
       distanceMeters: null as number | null,
       track: null as string | null
@@ -447,21 +457,20 @@ export function parseTjkMeetingPage(
 
     for (
       let nextIndex = index + 1;
-      nextIndex < headingTexts.length;
+      nextIndex < h3Texts.length;
       nextIndex++
     ) {
-      const candidate =
-        headingTexts[nextIndex];
+      const candidate = h3Texts[nextIndex];
 
-      /*
-       * Stop if we reached the next actual race header.
-       */
-      if (parseRaceHeader(candidate)) {
-        break;
+      if (!candidate) {
+        continue;
       }
 
-      const parsed =
-        parseSurface(candidate);
+      if (parseRaceHeader(candidate)) {
+        continue;
+      }
+
+      const parsed = parseSurface(candidate);
 
       if (
         parsed.distanceMeters != null &&
@@ -472,11 +481,47 @@ export function parseTjkMeetingPage(
       }
     }
 
-    headers.push({
-      ...header,
-      ...surface
-    });
+    const existing = byRace.get(
+      header.raceNumber
+    );
+
+    if (!existing) {
+      byRace.set(
+        header.raceNumber,
+        {
+          ...header,
+          ...surface
+        }
+      );
+      return;
+    }
+
+    /*
+     * Navigation occurrence may have resolved poorly.
+     * Prefer a later duplicate occurrence when it gives us
+     * actual surface metadata.
+     */
+    if (
+      surface.distanceMeters != null &&
+      surface.track != null
+    ) {
+      existing.distanceMeters =
+        surface.distanceMeters;
+
+      existing.track =
+        surface.track;
+
+      existing.time =
+        header.time;
+    }
   });
+
+  headers.push(
+    ...[...byRace.values()].sort(
+      (a, b) =>
+        a.raceNumber - b.raceNumber
+    )
+  );
 
   const runnerTables: TjkRunner[][] = [];
 
