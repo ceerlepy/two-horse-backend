@@ -47,7 +47,17 @@ export interface ScoreComponent {
 }
 
 export interface HorseModelScore {
+  /*
+   * Final score after bounded historical learning.
+   */
   score: number;
+
+  /*
+   * Present once the learning layer has been applied.
+   */
+  baseScore?: number;
+
+  learningAdjustment?: number;
 
   /*
    * Confidence in the score itself, not

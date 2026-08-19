@@ -12,7 +12,8 @@ import {
 
 import {
   insertLearningRace,
-  insertLearningRunner
+  insertLearningRunner,
+  insertLearningExpertPick
 } from "./repository";
 
 import {
@@ -394,8 +395,16 @@ export async function promoteStartedCandidates(
               runner.horse_name
             ),
 
+          horseId:
+            runner.horse_id ??
+            null,
+
           jockey:
             runner.jockey ??
+            null,
+
+          jockeyId:
+            runner.jockey_id ??
             null,
 
           weight:
@@ -516,6 +525,91 @@ export async function promoteStartedCandidates(
             row.captured_at
         }
       );
+
+      for (
+        const pick of
+        runner.expertPredictions ??
+        []
+      ) {
+        await insertLearningExpertPick(
+          env,
+          {
+            raceDate:
+              row.race_date,
+
+            city:
+              row.city,
+
+            raceNumber:
+              row.race_number,
+
+            horseNumber:
+              Number(
+                runner.horse_number
+              ),
+
+            horseId:
+              runner.horse_id ??
+              null,
+
+            horseName:
+              String(
+                runner.horse_name
+              ),
+
+            sourceKey:
+              String(
+                pick.source_key
+              ),
+
+            confidence:
+              pick.confidence ==
+                null
+                ? null
+                : Number(
+                    pick.confidence
+                  ),
+
+            isBanko:
+              Boolean(
+                pick.is_banko
+              ),
+
+            isFavorite:
+              Boolean(
+                pick.is_favorite
+              ),
+
+            isStrong:
+              Boolean(
+                pick.is_strong
+              ),
+
+            isStar:
+              Boolean(
+                pick.is_star
+              ),
+
+            isRival:
+              Boolean(
+                pick.is_rival
+              ),
+
+            isSurprise:
+              Boolean(
+                pick.is_surprise
+              ),
+
+            isAvoid:
+              Boolean(
+                pick.is_avoid
+              ),
+
+            snapshotAt:
+              row.captured_at
+          }
+        );
+      }
 
       runnerCount += 1;
     }

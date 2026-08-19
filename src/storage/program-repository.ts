@@ -21,6 +21,18 @@ import {
   combineFieldScores
 } from "../field/combined-field-score";
 
+import {
+  horseIdentity,
+  jockeyIdentity,
+  distanceBand
+} from "../learning/identity";
+
+import {
+  applyLearningAdjustment,
+  type ContextPrior,
+  type GlobalOutcomeRates
+} from "../learning/adjustment";
+
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
   const statements: D1PreparedStatement[] = [];
@@ -90,10 +102,13 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             agf_percent,
             recent_form_raw,
             horse_profile_url,
+            horse_id,
+            jockey_id,
+            jockey_profile_url,
             updated_at
           )
           VALUES(
-            ?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
             CURRENT_TIMESTAMP
           )
           ON CONFLICT(
@@ -110,6 +125,9 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             agf_percent=excluded.agf_percent,
             recent_form_raw=excluded.recent_form_raw,
             horse_profile_url=excluded.horse_profile_url,
+            horse_id=excluded.horse_id,
+            jockey_id=excluded.jockey_id,
+            jockey_profile_url=excluded.jockey_profile_url,
             updated_at=CURRENT_TIMESTAMP`)
           .bind(
             date,
@@ -122,7 +140,19 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             r.hp,
             r.agfPercent,
             r.recentFormRaw,
-            r.horseProfileUrl
+            r.horseProfileUrl,
+
+            horseIdentity(
+              r.name,
+              r.horseProfileUrl
+            ),
+
+            jockeyIdentity(
+              r.jockey,
+              r.jockeyProfileUrl
+            ),
+
+            r.jockeyProfileUrl
           ));
       }
     }
@@ -154,6 +184,75 @@ export async function getToday(env: Env): Promise<any> {
     `)
       .bind(date)
       .all<any>();
+
+  const globalOutcome =
+    await env.DB.prepare(`
+      SELECT
+        AVG(
+          CASE
+            WHEN finish_position = 1
+              THEN 1.0
+            ELSE 0.0
+          END
+        ) AS win_rate,
+
+        AVG(
+          CASE
+            WHEN finish_position
+              BETWEEN 1 AND 3
+              THEN 1.0
+            ELSE 0.0
+          END
+        ) AS top3_rate
+
+      FROM learning_runner_features
+
+      WHERE finish_position
+        IS NOT NULL
+    `)
+      .first<any>();
+
+  const globalRates:
+    GlobalOutcomeRates = {
+      winRate:
+        Number(
+          globalOutcome?.win_rate ??
+          0
+        ),
+
+      top3Rate:
+        Number(
+          globalOutcome?.top3_rate ??
+          0
+        )
+    };
+
+  const contextPriors =
+    await env.DB.prepare(`
+      SELECT *
+      FROM learning_context_priors
+    `).all<any>();
+
+  const expertPriors =
+    await env.DB.prepare(`
+      SELECT
+        source_key,
+        multiplier
+      FROM expert_learning_priors
+    `).all<any>();
+
+  const expertMultiplier =
+    new Map<string, number>(
+      (
+        expertPriors.results ??
+        []
+      ).map(
+        (row:any) => [
+          String(row.source_key),
+          Number(row.multiplier ?? 1)
+        ]
+      )
+    );
 
   const experts = await env.DB.prepare(`
     SELECT
@@ -205,11 +304,35 @@ export async function getToday(env: Env): Promise<any> {
                 .map(
                   (runner:any) => {
                     const expertPredictions =
-                      raceExperts.filter(
-                        (e:any) =>
-                          e.horse_number ===
-                            runner.horse_number
-                      );
+                      raceExperts
+                        .filter(
+                          (e:any) =>
+                            e.horse_number ===
+                              runner.horse_number
+                        )
+                        .map(
+                          (e:any) => ({
+                            ...e,
+
+                            /*
+                             * Historical learning only changes
+                             * this source's own contribution.
+                             */
+                            base_weight:
+                              Number(
+                                e.base_weight ??
+                                1
+                              ) *
+                              (
+                                expertMultiplier.get(
+                                  String(
+                                    e.source_key
+                                  )
+                                ) ??
+                                1
+                              )
+                          })
+                        );
 
                     const marketMovement =
                       analyzeMarketMovement(
@@ -305,9 +428,118 @@ export async function getToday(env: Env): Promise<any> {
                   }
                 );
 
-            const scoredRunners =
+            const baseScoredRunners =
               scoreRace(
                 assembledRunners
+              );
+
+            const band =
+              distanceBand(
+                race.distance_meters
+              );
+
+            const priorFor = (
+              entityType: string,
+              entityKey:
+                string | null
+            ): ContextPrior | null => {
+              if (!entityKey) {
+                return null;
+              }
+
+              const row =
+                (
+                  contextPriors.results ??
+                  []
+                ).find(
+                  (item:any) =>
+                    item.entity_type ===
+                      entityType &&
+                    item.entity_key ===
+                      entityKey &&
+                    item.city ===
+                      m.city &&
+                    item.track ===
+                      (
+                        race.track ??
+                        "unknown"
+                      ) &&
+                    item.distance_band ===
+                      band
+                );
+
+              if (!row) {
+                return null;
+              }
+
+              return {
+                sampleSize:
+                  Number(
+                    row.sample_size
+                  ),
+
+                winRate:
+                  Number(
+                    row.win_rate
+                  ),
+
+                top3Rate:
+                  Number(
+                    row.top3_rate
+                  )
+              };
+            };
+
+            const scoredRunners =
+              baseScoredRunners.map(
+                (runner:any) => {
+                  const horseId =
+                    runner.horse_id ??
+                    horseIdentity(
+                      runner.horse_name,
+                      runner.horse_profile_url
+                    );
+
+                  const jockeyId =
+                    runner.jockey_id ??
+                    null;
+
+                  const pairId =
+                    jockeyId
+                      ? `${horseId}|${jockeyId}`
+                      : null;
+
+                  return {
+                    ...runner,
+
+                    modelScore:
+                      applyLearningAdjustment(
+                        runner.modelScore,
+                        {
+                          global:
+                            globalRates,
+
+                          horse:
+                            priorFor(
+                              "horse",
+                              horseId
+                            ),
+
+                          jockey:
+                            priorFor(
+                              "jockey",
+                              jockeyId
+                            ),
+
+                          pair:
+                            priorFor(
+                              "horse_jockey",
+                              pairId
+                            )
+                        }
+                      )
+                  };
+                }
               );
 
             return {

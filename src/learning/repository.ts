@@ -10,8 +10,10 @@ export interface LearningRunnerSnapshot {
   horseNumber: number;
 
   horseName: string;
+  horseId: string | null;
 
   jockey: string | null;
+  jockeyId: string | null;
   weight: number | null;
   hp: number | null;
 
@@ -111,8 +113,10 @@ export async function insertLearningRunner(
       horse_number,
 
       horse_name,
+      horse_id,
 
       jockey,
+      jockey_id,
       weight,
       hp,
 
@@ -146,8 +150,9 @@ export async function insertLearningRunner(
     )
     VALUES(
       ?,?,?,?,
-      ?,
+      ?,?,
       ?,?,?,
+      ?,
       ?,
       ?,?,
       ?,
@@ -173,8 +178,10 @@ export async function insertLearningRunner(
       row.horseNumber,
 
       row.horseName,
+      row.horseId,
 
       row.jockey,
+      row.jockeyId,
       row.weight,
       row.hp,
 
@@ -281,6 +288,130 @@ export async function attachOfficialResult(
         input.raceDate,
         input.city,
         input.raceNumber
+      ),
+
+    env.DB.prepare(`
+      UPDATE learning_expert_picks
+
+      SET
+        finish_position = ?,
+        labelled_at = ?
+
+      WHERE
+        race_date = ?
+        AND city = ?
+        AND race_number = ?
+        AND horse_number = ?
+        AND finish_position IS NULL
+    `)
+      .bind(
+        input.finishPosition,
+        input.labelledAt,
+        input.raceDate,
+        input.city,
+        input.raceNumber,
+        input.horseNumber
       )
   ]);
+}
+
+
+export async function insertLearningExpertPick(
+  env: Env,
+  input: {
+    raceDate: string;
+    city: string;
+    raceNumber: number;
+    horseNumber: number;
+
+    horseId: string | null;
+    horseName: string;
+
+    sourceKey: string;
+    confidence: number | null;
+
+    isBanko: boolean;
+    isFavorite: boolean;
+    isStrong: boolean;
+    isStar: boolean;
+    isRival: boolean;
+    isSurprise: boolean;
+    isAvoid: boolean;
+
+    snapshotAt: string;
+  }
+): Promise<void> {
+  const positive =
+    input.isBanko ||
+    input.isFavorite ||
+    input.isStrong ||
+    input.isStar ||
+    input.isRival ||
+    input.isSurprise;
+
+  await env.DB.prepare(`
+    INSERT INTO learning_expert_picks(
+      race_date,
+      city,
+      race_number,
+      horse_number,
+
+      horse_id,
+      horse_name,
+
+      source_key,
+      confidence,
+
+      is_banko,
+      is_favorite,
+      is_strong,
+      is_star,
+      is_rival,
+      is_surprise,
+      is_avoid,
+      is_positive,
+
+      snapshot_at
+    )
+    VALUES(
+      ?,?,?,?,
+      ?,?,
+      ?,?,
+      ?,?,?,?,?,?,?,?,
+      ?
+    )
+
+    ON CONFLICT(
+      race_date,
+      city,
+      race_number,
+      horse_number,
+      source_key
+    )
+    DO NOTHING
+  `)
+    .bind(
+      input.raceDate,
+      input.city,
+      input.raceNumber,
+      input.horseNumber,
+
+      input.horseId,
+      input.horseName,
+
+      input.sourceKey,
+      input.confidence,
+
+      input.isBanko ? 1 : 0,
+      input.isFavorite ? 1 : 0,
+      input.isStrong ? 1 : 0,
+      input.isStar ? 1 : 0,
+      input.isRival ? 1 : 0,
+      input.isSurprise ? 1 : 0,
+      input.isAvoid ? 1 : 0,
+      positive ? 1 : 0,
+
+      input.snapshotAt
+    )
+    .run();
 }
