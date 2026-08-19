@@ -237,11 +237,59 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    const candidates=await env.DB.prepare(`
     SELECT
      COUNT(*) total,
+
+     SUM(
+      CASE
+       WHEN starts_at <= ?
+        AND captured_at < starts_at
+       THEN 1
+       ELSE 0
+      END
+     ) eligible_for_promotion,
+
+     SUM(
+      CASE
+       WHEN captured_at >= starts_at
+       THEN 1
+       ELSE 0
+      END
+     ) invalid_capture_timing,
+
      MIN(starts_at) earliest_start,
      MAX(starts_at) latest_start,
      MAX(captured_at) latest_capture
+
     FROM learning_snapshot_candidates
-   `).first<any>();
+   `)
+    .bind(
+     new Date().toISOString()
+    )
+    .first<any>();
+
+   const candidateExamples=await env.DB.prepare(`
+    SELECT
+     race_date,
+     city,
+     race_number,
+     starts_at,
+     captured_at,
+
+     CASE
+      WHEN starts_at <= ?
+       AND captured_at < starts_at
+      THEN 1
+      ELSE 0
+     END eligible_for_promotion
+
+    FROM learning_snapshot_candidates
+
+    ORDER BY starts_at
+    LIMIT 20
+   `)
+    .bind(
+     new Date().toISOString()
+    )
+    .all();
 
    const results=await env.DB.prepare(`
     SELECT
@@ -289,7 +337,40 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     ok:true,
     races,
     runners,
-    snapshotCandidates:candidates,
+    snapshotCandidates:{
+     total:Number(candidates?.total ?? 0),
+
+     eligibleForPromotion:
+      Number(
+       candidates?.eligible_for_promotion ??
+       0
+      ),
+
+     invalidCaptureTiming:
+      Number(
+       candidates?.invalid_capture_timing ??
+       0
+      ),
+
+     earliestStart:
+      candidates?.earliest_start ??
+      null,
+
+     latestStart:
+      candidates?.latest_start ??
+      null,
+
+     latestCapture:
+      candidates?.latest_capture ??
+      null
+    },
+
+    candidateExamples:
+     candidateExamples.results,
+
+    serverNow:
+     new Date().toISOString(),
+
     officialResultRuns:results.results,
     startedButUnlabelled:unlabelled.results,
     recentLearningRaces:recent.results
