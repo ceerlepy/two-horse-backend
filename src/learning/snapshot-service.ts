@@ -509,6 +509,29 @@ export async function promoteStartedCandidates(
               "field"
             ),
 
+          /*
+           * Preserve both sides of the learning layer.
+           *
+           * baseScore is the deterministic race-day model
+           * before historical calibration.
+           *
+           * modelScore is the bounded adjusted final score.
+           */
+          baseModelScore:
+            runner
+              .modelScore
+              ?.baseScore ??
+            runner
+              .modelScore
+              ?.score ??
+            null,
+
+          learningAdjustment:
+            runner
+              .modelScore
+              ?.learningAdjustment ??
+            0,
+
           modelScore:
             runner
               .modelScore

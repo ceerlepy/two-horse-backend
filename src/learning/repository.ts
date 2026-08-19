@@ -41,6 +41,12 @@ export interface LearningRunnerSnapshot {
 
   fieldScore: number | null;
 
+  /*
+   * Score provenance:
+   * base -> learning adjustment -> final modelScore.
+   */
+  baseModelScore: number | null;
+  learningAdjustment: number | null;
   modelScore: number | null;
   modelConfidence: number | null;
 
@@ -143,6 +149,8 @@ export async function insertLearningRunner(
 
       field_score,
 
+      base_model_score,
+      learning_adjustment,
       model_score,
       model_confidence,
 
@@ -159,7 +167,7 @@ export async function insertLearningRunner(
       ?,?,?,?,?,?,
       ?,?,?,?,?,?,
       ?,
-      ?,?,
+      ?,?,?,?,
       ?
     )
 
@@ -208,6 +216,8 @@ export async function insertLearningRunner(
 
       row.fieldScore,
 
+      row.baseModelScore,
+      row.learningAdjustment,
       row.modelScore,
       row.modelConfidence,
 
