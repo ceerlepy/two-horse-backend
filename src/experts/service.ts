@@ -135,13 +135,41 @@ async function processSource(
     source.content_hash ===
       fingerprint.hash
   ) {
-    return {
-      source:
-        source.source_key,
+    /*
+     * expert_predictions is partitioned by race_date.
+     *
+     * A fingerprint carried over from yesterday must
+     * NOT prevent today's rows from being persisted.
+     */
+    const todayExists =
+      await env.DB.prepare(`
+        SELECT 1 AS found
+        FROM expert_predictions
+        WHERE
+          race_date = ?
+          AND source_key = ?
+        LIMIT 1
+      `)
+        .bind(
+          turkeyDate(),
+          source.source_key
+        )
+        .first<any>();
 
-      status:
-        "unchanged"
-    };
+    if (todayExists) {
+      return {
+        source:
+          source.source_key,
+
+        status:
+          "unchanged"
+      };
+    }
+
+    /*
+     * Same page fingerprint, but no rows for today:
+     * continue semantic extraction and persistence.
+     */
   }
 
   /*

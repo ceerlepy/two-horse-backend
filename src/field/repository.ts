@@ -26,6 +26,17 @@ export function normalizedHorseName(
     .toLocaleUpperCase(
       "tr-TR"
     )
+    /*
+     * TJK programme horse names can carry a trailing
+     * parenthesised age, while performance history
+     * can expose the bare horse name.
+     *
+     * CASHOUT (5) -> CASHOUT
+     */
+    .replace(
+      /\s*\(\d+\)\s*$/u,
+      ""
+    )
     .replace(
       /\s+/g,
       " "
@@ -60,8 +71,36 @@ export async function fieldRaceCandidates(
         AND r.performance_url <> ''
         AND (
           fs.status IS NULL
+
           OR fs.status <> 'healthy'
+
+          OR (
+            NOT EXISTS (
+              SELECT 1
+              FROM field_signals sig
+              WHERE
+                sig.race_date =
+                  r.race_date
+                AND sig.city =
+                  r.city
+                AND sig.race_number =
+                  r.race_number
+                AND sig.tjk_score
+                  IS NOT NULL
+            )
+
+            AND (
+              fs.last_attempt_at IS NULL
+              OR datetime(
+                fs.last_attempt_at
+              ) <= datetime(
+                'now',
+                '-60 minutes'
+              )
+            )
+          )
         )
+
       ORDER BY
         r.starts_at
       LIMIT ?
@@ -199,6 +238,21 @@ export async function persistFieldRace(
     );
   }
 
+  const usableScoreCount =
+    scores.filter(
+      item =>
+        item.score !== null
+    ).length;
+
+  const status =
+    usableScoreCount > 0
+      ? "healthy"
+      : "no-data";
+
+  const now =
+    new Date()
+      .toISOString();
+
   statements.push(
     env.DB.prepare(`
       INSERT INTO field_refresh_state(
@@ -212,11 +266,9 @@ export async function persistFieldRace(
         last_error
       )
       VALUES(
-        ?,?,?,
-        'healthy',
+        ?,?,?,?,?,
         ?,
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP,
+        ?,
         NULL
       )
       ON CONFLICT(
@@ -226,13 +278,22 @@ export async function persistFieldRace(
       )
       DO UPDATE SET
         status =
-          'healthy',
+          excluded.status,
+
         acquisition_method =
           excluded.acquisition_method,
+
         last_success_at =
-          CURRENT_TIMESTAMP,
+          CASE
+            WHEN excluded.status = 'healthy'
+              THEN excluded.last_success_at
+            ELSE
+              field_refresh_state.last_success_at
+          END,
+
         last_attempt_at =
-          CURRENT_TIMESTAMP,
+          excluded.last_attempt_at,
+
         last_error =
           NULL
     `)
@@ -240,7 +301,12 @@ export async function persistFieldRace(
         date,
         candidate.city,
         candidate.raceNumber,
-        method
+        status,
+        method,
+        usableScoreCount > 0
+          ? now
+          : null,
+        now
       )
   );
 

@@ -152,6 +152,11 @@ export async function refreshFieldSignalsIfDue(
             }
           );
 
+        /*
+         * Persist acquisition output even when no
+         * runner could be scored. Repository retry
+         * policy will revisit null-only races.
+         */
         await persistFieldRace(
           env,
           candidate,
