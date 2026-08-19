@@ -186,13 +186,33 @@ async function processSource(
       source.source_name
     );
 
+  const extractedPicks =
+    extracted
+      .extraction
+      .picks;
+
   const picks =
     await validateExpertPicks(
       env,
-      extracted
-        .extraction
-        .picks
+      extractedPicks
     );
+
+  /*
+   * Semantic extraction may succeed syntactically but
+   * still describe yesterday / another meeting.
+   *
+   * Do NOT mark the source healthy when none of the
+   * extracted picks match today's canonical TJK card.
+   */
+  if (
+    picks.length === 0
+  ) {
+    throw new Error(
+      `EXPERT_NO_VALID_TODAY_PICKS:` +
+      `${source.source_key}:` +
+      `extracted=${extractedPicks.length}`
+    );
+  }
 
   /*
    * Prefer raw-page HTTP fingerprint when available.

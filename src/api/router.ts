@@ -5,6 +5,7 @@ import { refreshProgramIfDue } from "../tjk/program-service";
 import { refreshExpertsIfDue } from "../experts/service";
 import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
+import { refreshFieldSignalsIfDue } from "../field/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -29,6 +30,26 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
         }
     }
 
+    if(url.pathname==="/api/admin/refresh-field" && request.method==="POST") {
+  try {
+    await refreshFieldSignalsIfDue(
+      env
+    );
+
+    return json({
+      ok:true,
+      field:{
+        triggered:true
+      }
+    });
+  } catch(e) {
+    return json({
+      ok:false,
+      error:errorMessage(e)
+    },502);
+  }
+ }
+
     if(url.pathname==="/api/admin/refresh-form" && request.method==="POST") {
   try {
     const forms =
@@ -49,8 +70,42 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
  if(url.pathname==="/api/admin/refresh" && request.method==="POST") {
-  try { const program=await refreshProgramIfDue(env,true); const experts=await refreshExpertsIfDue(env,true); return json({ok:true,program,experts}); }
-  catch(e){ return json({ok:false,error:errorMessage(e)},502); }
+  try {
+   const program=
+    await refreshProgramIfDue(
+     env,
+     true
+    );
+
+   const experts=
+    await refreshExpertsIfDue(
+     env,
+     true
+    );
+
+   /*
+    * Field has its own candidate/retry policy.
+    * Admin force refresh must exercise it too.
+    */
+   await refreshFieldSignalsIfDue(
+    env
+   );
+
+   return json({
+    ok:true,
+    program,
+    experts,
+    field:{
+     triggered:true
+    }
+   });
+  }
+  catch(e){
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },502);
+  }
  }
  if(url.pathname==="/api/debug/sources") {
   const sources=await env.DB.prepare(`
