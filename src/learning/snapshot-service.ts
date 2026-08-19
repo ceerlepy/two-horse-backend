@@ -600,6 +600,23 @@ export async function promoteStartedCandidates(
               ?.score ??
             null,
 
+          /*
+           * Full learned score is frozen separately
+           * for out-of-sample shadow evaluation.
+           */
+          shadowModelScore:
+            runner
+              .shadowModelScore
+              ?.score ??
+            runner
+              .modelScore
+              ?.score ??
+            null,
+
+          /*
+           * This adjustment is the production-applied
+           * adjustment after the safety scale.
+           */
           learningAdjustment:
             runner
               .modelScore

@@ -47,6 +47,16 @@ export interface LearningRunnerSnapshot {
    */
   baseModelScore: number | null;
   learningAdjustment: number | null;
+
+  /*
+   * Full scale=1 learned prediction used only
+   * for leakage-safe shadow evaluation.
+   */
+  shadowModelScore: number | null;
+
+  /*
+   * Production-served score after safety gate.
+   */
   modelScore: number | null;
   modelConfidence: number | null;
 
@@ -191,6 +201,7 @@ export async function insertLearningRunner(
 
       base_model_score,
       learning_adjustment,
+      shadow_model_score,
       model_score,
       model_confidence,
 
@@ -207,7 +218,7 @@ export async function insertLearningRunner(
       ?,?,?,?,?,?,
       ?,?,?,?,?,?,
       ?,
-      ?,?,?,?,
+      ?,?,?,?,?,
       ?
     )
 
@@ -258,6 +269,7 @@ export async function insertLearningRunner(
 
       row.baseModelScore,
       row.learningAdjustment,
+      row.shadowModelScore,
       row.modelScore,
       row.modelConfidence,
 

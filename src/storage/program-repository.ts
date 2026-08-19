@@ -617,38 +617,63 @@ export async function getToday(env: Env): Promise<any> {
                       ? `${horseId}|${jockeyId}`
                       : null;
 
+                  const learningInput = {
+                    global:
+                      globalRates,
+
+                    horse:
+                      priorFor(
+                        "horse",
+                        horseId
+                      ),
+
+                    jockey:
+                      priorFor(
+                        "jockey",
+                        jockeyId
+                      ),
+
+                    pair:
+                      priorFor(
+                        "horse_jockey",
+                        pairId
+                      )
+                  };
+
+                  /*
+                   * Shadow model:
+                   * full learned adjustment, never served
+                   * as production prediction before gate.
+                   */
+                  const shadowModelScore =
+                    applyLearningAdjustment(
+                      runner.modelScore,
+                      {
+                        ...learningInput,
+                        scale: 1
+                      }
+                    );
+
+                  /*
+                   * Production model:
+                   * controlled by evaluated safety gate.
+                   */
+                  const modelScore =
+                    applyLearningAdjustment(
+                      runner.modelScore,
+                      {
+                        ...learningInput,
+                        scale:
+                          learningScale
+                      }
+                    );
+
                   return {
                     ...runner,
 
-                    modelScore:
-                      applyLearningAdjustment(
-                        runner.modelScore,
-                        {
-                          global:
-                            globalRates,
+                    shadowModelScore,
 
-                          horse:
-                            priorFor(
-                              "horse",
-                              horseId
-                            ),
-
-                          jockey:
-                            priorFor(
-                              "jockey",
-                              jockeyId
-                            ),
-
-                          pair:
-                            priorFor(
-                              "horse_jockey",
-                              pairId
-                            ),
-
-                          scale:
-                            learningScale
-                        }
-                      )
+                    modelScore
                   };
                 }
               );

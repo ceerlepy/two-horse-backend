@@ -42,8 +42,8 @@ export async function evaluateAdvancedLearning(
               AND x.race_number =
                 w.race_number
               AND x.finish_position > 0
-              AND x.model_score >
-                  w.model_score
+              AND x.shadow_model_score >
+                  w.shadow_model_score
           ) learned_rank
 
         FROM learning_runner_features w

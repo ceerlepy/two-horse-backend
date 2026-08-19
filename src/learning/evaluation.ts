@@ -66,8 +66,8 @@ export async function evaluateLearningModel(
               AND x.city = w.city
               AND x.race_number = w.race_number
               AND x.finish_position > 0
-              AND x.model_score >
-                  w.model_score
+              AND x.shadow_model_score >
+                  w.shadow_model_score
           ) AS learned_rank
 
         FROM learning_runner_features w
@@ -75,7 +75,7 @@ export async function evaluateLearningModel(
         WHERE
           w.finish_position = 1
           AND w.base_model_score IS NOT NULL
-          AND w.model_score IS NOT NULL
+          AND w.shadow_model_score IS NOT NULL
 
           AND NOT EXISTS (
             SELECT 1
@@ -88,7 +88,7 @@ export async function evaluateLearningModel(
               AND z.finish_position > 0
               AND (
                 z.base_model_score IS NULL
-                OR z.model_score IS NULL
+                OR z.shadow_model_score IS NULL
               )
           )
       ),
@@ -173,7 +173,14 @@ export async function evaluateLearningModel(
       0
     );
 
-  let scale = 1;
+  /*
+   * Production learning stays OFF until the
+   * shadow model has enough official outcomes.
+   *
+   * Shadow scoring itself still runs at scale=1
+   * and is evaluated independently.
+   */
+  let scale = 0;
   let status =
     "insufficient-data";
 
@@ -196,6 +203,7 @@ export async function evaluateLearningModel(
       baseRank -
       learnedRank;
 
+    scale = 1;
     status = "healthy";
 
     /*

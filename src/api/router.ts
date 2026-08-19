@@ -489,7 +489,25 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     ok:true,
 
     learningGate:
-     state ?? null,
+     state == null
+      ? null
+      : {
+         ...state,
+
+         productionLearningEnabled:
+          Number(
+           state.learning_scale ??
+           0
+          ) > 0,
+
+         evaluationMode:
+          Number(
+           state.evaluated_races ??
+           0
+          ) < 100
+           ? "shadow"
+           : "gated-production"
+        },
 
     advancedEvaluation:
      advanced ?? null,
