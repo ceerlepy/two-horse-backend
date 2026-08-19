@@ -3,6 +3,10 @@ import type {
 } from "../env";
 
 import {
+  turkeyDate
+} from "../shared";
+
+import {
   getToday
 } from "../storage/program-repository";
 
@@ -24,6 +28,33 @@ function normalize(
     .toLocaleLowerCase(
       "tr-TR"
     );
+}
+
+
+function displayHorseName(
+  value:
+    string | null | undefined
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return value
+    /*
+     * TJK programme names can carry a trailing
+     * parenthesised age/auxiliary value.
+     *
+     * BOLD LION (5) -> BOLD LION
+     */
+    .replace(
+      /\s*\(\d+\)\s*$/u,
+      ""
+    )
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .trim();
 }
 
 
@@ -146,9 +177,10 @@ export async function generateSixFoldCoupons(
                   ),
 
                 horseName:
-                  runner
-                    .horse_name ??
-                  null,
+                  displayHorseName(
+                    runner
+                      .horse_name
+                  ),
 
                 score:
                   Number(
@@ -210,8 +242,7 @@ export async function generateSixFoldCoupons(
 
   return {
     date:
-      meeting.race_date ??
-      null,
+      turkeyDate(),
 
     city:
       meeting.city,
