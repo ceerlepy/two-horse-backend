@@ -410,14 +410,80 @@ export function parseTjkMeetingPage(
       return;
     }
 
-    const surroundingText = clean(
+    /*
+     * TJK renders race metadata (for example "1400 Çim")
+     * in a following heading/block, not necessarily inside the
+     * race-header element's parent. Search forward in document
+     * order until the next race header or runner table.
+     */
+    const surfaceParts: string[] = [];
+
+    const ownParentText = clean(
       $(element)
         .parent()
         .text()
         .slice(0, 2000)
     );
 
-    const surface = parseSurface(surroundingText);
+    if (ownParentText) {
+      surfaceParts.push(ownParentText);
+    }
+
+    let cursor = $(element).parent().next();
+    let scanned = 0;
+
+    while (
+      cursor.length &&
+      scanned < 12
+    ) {
+      const cursorText = clean(
+        cursor.text().slice(0, 2000)
+      );
+
+      const nextRaceHeader =
+        parseRaceHeader(cursorText);
+
+      if (nextRaceHeader) {
+        break;
+      }
+
+      /*
+       * Runner table marks the end of useful race metadata.
+       */
+      if (cursor.is("table")) {
+        const tableText = lower(cursor.text());
+
+        if (
+          tableText.includes("at ismi") &&
+          tableText.includes("jokey")
+        ) {
+          break;
+        }
+      }
+
+      if (cursorText) {
+        surfaceParts.push(cursorText);
+      }
+
+      const foundSurface =
+        parseSurface(
+          surfaceParts.join(" ")
+        );
+
+      if (
+        foundSurface.distanceMeters != null &&
+        foundSurface.track != null
+      ) {
+        break;
+      }
+
+      cursor = cursor.next();
+      scanned++;
+    }
+
+    const surface = parseSurface(
+      surfaceParts.join(" ")
+    );
 
     /*
      * Same race header may occur more than once in navigation.
