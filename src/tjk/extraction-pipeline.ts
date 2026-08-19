@@ -806,7 +806,10 @@ Do not invent cities.
     )
   );
 
-  return normalizedCities;
+  return normalizedCities.map(city => ({
+    city,
+    url: buildCityUrl(city)
+  }));
 }
 
 async function mapLimited<T, R>(
