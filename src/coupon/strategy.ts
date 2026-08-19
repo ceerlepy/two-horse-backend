@@ -165,26 +165,38 @@ export function recommendCouponStrategy<
   /*
    * SPREAD
    *
-   * High uncertainty automatically
-   * widens the coupon.
+   * No arbitrary max-horse ceiling.
    *
-   * Never exceed five horses here:
-   * this is decision support, not
-   * uncontrolled combinatorial growth.
+   * This is only the race-level candidate
+   * ranking. Final expansion is controlled
+   * by the six-leg budget optimizer.
    */
+  const pressure =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        uncertainty
+          .expansionPressure
+      )
+    );
+
+  const desiredCount =
+    Math.max(
+      3,
+      Math.ceil(
+        ordered.length *
+        Math.max(
+          0.35,
+          pressure
+        )
+      )
+    );
+
   const spreadCount =
     Math.min(
       ordered.length,
-
-      uncertainty
-        .expansionPressure >=
-      0.80
-        ? 5
-        : uncertainty
-            .expansionPressure >=
-          0.60
-          ? 4
-          : 3
+      desiredCount
     );
 
   return {
