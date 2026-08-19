@@ -4,6 +4,7 @@ import { getToday } from "../storage/program-repository";
 import { refreshProgramIfDue } from "../tjk/program-service";
 import { refreshExpertsIfDue } from "../experts/service";
 import { getHistory } from "../history/service";
+import { refreshHorseForms } from "../form/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -28,7 +29,26 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
         }
     }
 
-    if(url.pathname==="/api/admin/refresh" && request.method==="POST") {
+    if(url.pathname==="/api/admin/refresh-form" && request.method==="POST") {
+  try {
+    const forms =
+      await refreshHorseForms(
+        env,
+        true
+      );
+
+    return json({
+      ok:true,
+      forms
+    });
+  } catch(e) {
+    return json({
+      ok:false,
+      error:errorMessage(e)
+    },502);
+  }
+ }
+ if(url.pathname==="/api/admin/refresh" && request.method==="POST") {
   try { const program=await refreshProgramIfDue(env,true); const experts=await refreshExpertsIfDue(env,true); return json({ok:true,program,experts}); }
   catch(e){ return json({ok:false,error:errorMessage(e)},502); }
  }
