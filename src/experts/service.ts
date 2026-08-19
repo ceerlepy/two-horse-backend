@@ -129,18 +129,20 @@ export async function refreshExpertsIfDue(env:Env,force=false):Promise<any>{
  const mins=await nextRaceMinutes(env); const interval=expertCheckIntervalMs(mins); if(interval===null) return {refreshed:false,reason:"no-upcoming-race"};
  const state=await env.DB.prepare("SELECT MAX(last_checked_at) checked FROM source_registry").first<any>();
  if(!force && state?.checked && Date.now()-Date.parse(state.checked)<interval) return {refreshed:false,reason:"fresh",nextRaceMinutes:mins};
- const sources=(await env.DB.prepare("SELECT
- source_key,
- source_name,
- homepage_url,
- last_working_url,
- content_hash,
- last_checked_at,
- source_type,
- base_weight
+ const sources=(await env.DB.prepare(`
+ SELECT
+   source_key,
+   source_name,
+   homepage_url,
+   last_working_url,
+   content_hash,
+   last_checked_at,
+   source_type,
+   base_weight
  FROM source_registry
  WHERE enabled=1
- ORDER BY source_key").all<Source>()).results??[];
+ ORDER BY source_key
+`).all<Source>()).results??[];
  const results=await mapLimit(sources,3,async s=>{try{return await processSource(env,s);}catch(e){await env.DB.prepare(`UPDATE source_registry SET health_status='degraded',last_failure_at=?,consecutive_failures=consecutive_failures+1,updated_at=CURRENT_TIMESTAMP WHERE source_key=?`).bind(new Date().toISOString(),s.source_key).run();return {source:s.source_key,status:"failed",error:errorMessage(e)};}});
  return {refreshed:true,nextRaceMinutes:mins,results};
 }

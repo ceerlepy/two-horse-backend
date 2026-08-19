@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import type { TjkProgramInput } from "../types/models";
 import { turkeyDate, turkeyDateTime } from "../shared";
+import { aggregateExpertPredictions } from "../experts/aggregator";
 
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
@@ -42,14 +43,48 @@ export async function getToday(env: Env): Promise<any> {
   const meetings = await env.DB.prepare("SELECT city,updated_at FROM meetings WHERE race_date=? ORDER BY city").bind(date).all<any>();
   const races = await env.DB.prepare("SELECT * FROM races WHERE race_date=? ORDER BY city,race_number").bind(date).all<any>();
   const runners = await env.DB.prepare("SELECT * FROM runners WHERE race_date=? ORDER BY city,race_number,horse_number").bind(date).all<any>();
-  const experts = await env.DB.prepare("SELECT * FROM expert_predictions WHERE race_date=? ORDER BY city,race_number,source_key,source_rank,horse_number").bind(date).all<any>();
+  const experts = await env.DB.prepare(`
+    SELECT
+      ep.*,
+      sr.source_type,
+      sr.base_weight
+    FROM expert_predictions ep
+    LEFT JOIN source_registry sr
+      ON sr.source_key = ep.source_key
+    WHERE ep.race_date = ?
+    ORDER BY
+      ep.city,
+      ep.race_number,
+      ep.source_key,
+      ep.source_rank,
+      ep.horse_number
+  `).bind(date).all<any>();
   return (meetings.results ?? []).map((m:any) => ({
     city:m.city,
     races:(races.results ?? []).filter((r:any)=>r.city===m.city).map((r:any)=>({
       ...r,
       runners:(runners.results ?? []).filter((x:any)=>x.city===m.city && x.race_number===r.race_number).map((x:any)=>({
         ...x,
-        expertPredictions:(experts.results ?? []).filter((e:any)=>e.city===m.city && e.race_number===r.race_number && e.horse_number===x.horse_number)
+
+        expertPredictions:
+          (experts.results ?? [])
+            .filter(
+              (e:any) =>
+                e.city === m.city &&
+                e.race_number === r.race_number &&
+                e.horse_number === x.horse_number
+            ),
+
+        expertConsensus:
+          aggregateExpertPredictions(
+            (experts.results ?? [])
+              .filter(
+                (e:any) =>
+                  e.city === m.city &&
+                  e.race_number === r.race_number &&
+                  e.horse_number === x.horse_number
+              )
+          )
       }))
     }))
   }));
