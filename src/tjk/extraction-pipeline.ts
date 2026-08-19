@@ -457,7 +457,19 @@ function normalizeJsonMeeting(
               agfPercent:
                 runner?.agfPercent == null
                   ? null
-                  : Number(runner.agfPercent)
+                  : Number(runner.agfPercent),
+
+              recentFormRaw:
+                runner?.recentFormRaw == null
+                  ? null
+                  : (
+                      String(
+                        runner.recentFormRaw
+                      ).trim() || null
+                    ),
+
+              horseProfileUrl:
+                null
             }))
           : []
     }))
@@ -501,7 +513,8 @@ Return JSON in this exact logical shape:
           "jockey": "JOCKEY NAME",
           "weight": 58,
           "hp": 70,
-          "agfPercent": 25.4
+          "agfPercent": 25.4,
+          "recentFormRaw": "3223-66"
         }
       ]
     }
@@ -515,6 +528,9 @@ Requirements:
 - do not invent horses
 - do not omit horses
 - keep horse number and horse name paired correctly
+- recentFormRaw MUST contain the runner's visible "Son 6 Y." / "SON 6 YR" value exactly as displayed
+- examples of recentFormRaw are "3223-66", "558635", "001311"
+- do not derive or invent recentFormRaw
 - use null for optional fields only when not shown
 - time must be HH:mm
 `

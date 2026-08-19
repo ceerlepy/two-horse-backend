@@ -9,6 +9,12 @@ export interface ScoringRunner {
   hp: number | null;
   weight: number | null;
 
+  /*
+   * Optional to preserve compatibility with
+   * historical/test runner fixtures.
+   */
+  recent_form_raw?: string | null;
+
   expertConsensus:
     ExpertConsensus;
 }

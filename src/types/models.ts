@@ -5,6 +5,19 @@ export interface RunnerInput {
   weight: number | null;
   hp: number | null;
   agfPercent: number | null;
+
+  /*
+   * TJK "Son 6 Y." value exactly as displayed.
+   *
+   * Examples:
+   *   3223-66
+   *   558635
+   *   001311
+   *
+   * Keep raw source data; scoring is a separate concern.
+   */
+  recentFormRaw: string | null;
+
   horseProfileUrl: string | null;
 }
 

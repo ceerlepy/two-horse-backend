@@ -29,6 +29,10 @@ import {
   scoreExpert
 } from "./expert-score";
 
+import {
+  scoreRecentForm
+} from "../form/recent-form-score";
+
 export function scoreHorse(
   runner: ScoringRunner,
   raceRunners:
@@ -55,15 +59,14 @@ export function scoreHorse(
         SCORING_WEIGHTS.expert
     },
 
-    /*
-     * Future features.
-     *
-     * Null means "not available",
-     * NOT zero.
-     */
     {
       key: "form" as const,
-      score: null,
+
+      score:
+        scoreRecentForm(
+          runner.recent_form_raw
+        ),
+
       configuredWeight:
         SCORING_WEIGHTS.form
     },

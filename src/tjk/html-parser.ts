@@ -256,6 +256,12 @@ function headerIndexes(
         header.includes("agf")
       ) {
         indexes.agf = index;
+      } else if (
+        header.includes("son 6 y") ||
+        header.includes("son 6 yr") ||
+        header.includes("son6y")
+      ) {
+        indexes.recentForm = index;
       }
     });
 
@@ -322,6 +328,8 @@ function parseRunnerTable(
     const weightCell = cell(indexes.weight);
     const hpCell = cell(indexes.hp);
     const agfCell = cell(indexes.agf);
+    const recentFormCell =
+      cell(indexes.recentForm);
 
     runners.push({
       number,
@@ -347,6 +355,15 @@ function parseRunnerTable(
       agfPercent:
         agfCell
           ? parseAgf(agfCell.text())
+          : null,
+
+      recentFormRaw:
+        recentFormCell
+          ? (
+              clean(
+                recentFormCell.text()
+              ) || null
+            )
           : null,
 
       horseProfileUrl:

@@ -38,11 +38,12 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             weight,
             hp,
             agf_percent,
+            recent_form_raw,
             horse_profile_url,
             updated_at
           )
           VALUES(
-            ?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,
             CURRENT_TIMESTAMP
           )
           ON CONFLICT(
@@ -57,6 +58,7 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             weight=excluded.weight,
             hp=excluded.hp,
             agf_percent=excluded.agf_percent,
+            recent_form_raw=excluded.recent_form_raw,
             horse_profile_url=excluded.horse_profile_url,
             updated_at=CURRENT_TIMESTAMP`)
           .bind(
@@ -69,6 +71,7 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             r.weight,
             r.hp,
             r.agfPercent,
+            r.recentFormRaw,
             r.horseProfileUrl
           ));
       }
