@@ -602,6 +602,26 @@ export function assertCompleteMeeting(
       );
     }
 
+    if (
+      !Number.isInteger(race.distanceMeters) ||
+      race.distanceMeters == null ||
+      race.distanceMeters <= 0
+    ) {
+      throw new Error(
+        `TJK_DISTANCE_MISSING:${meeting.city}:R${race.raceNumber}`
+      );
+    }
+
+    if (
+      race.track !== "Kum" &&
+      race.track !== "Çim" &&
+      race.track !== "Sentetik"
+    ) {
+      throw new Error(
+        `TJK_TRACK_MISSING:${meeting.city}:R${race.raceNumber}`
+      );
+    }
+
     if (!race.runners?.length) {
       throw new Error(
         `TJK_RUNNERS_EMPTY:${meeting.city}:R${race.raceNumber}`

@@ -28,6 +28,9 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      - name: Test
+        run: npm test
+
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply two-horse-db --remote
         env:
