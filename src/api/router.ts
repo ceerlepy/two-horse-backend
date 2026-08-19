@@ -72,6 +72,148 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
 `).all();
   return json({ok:true,count:sources.results.length,sources:sources.results});
  }
+ if(url.pathname==="/api/debug/learning") {
+  try {
+   const state=await env.DB.prepare(`
+    SELECT
+      evaluated_races,
+      base_top1_rate,
+      learned_top1_rate,
+      base_top3_rate,
+      learned_top3_rate,
+      base_mean_winner_rank,
+      learned_mean_winner_rank,
+      learning_scale,
+      status,
+      updated_at
+    FROM learning_model_state
+    WHERE id=1
+   `).first<any>();
+
+   const samples=await env.DB.prepare(`
+    SELECT
+      COUNT(
+        DISTINCT race_date || '|' ||
+        city || '|' || race_number
+      ) AS labelled_races,
+      COUNT(*) AS labelled_runners,
+      MAX(race_date) AS latest_label_date
+    FROM learning_runner_features
+    WHERE finish_position IS NOT NULL
+   `).first<any>();
+
+   const numberOrNull=(value:any)=>
+     value == null ? null : Number(value);
+
+   const baseTop1=
+     numberOrNull(state?.base_top1_rate);
+   const learnedTop1=
+     numberOrNull(state?.learned_top1_rate);
+
+   const baseTop3=
+     numberOrNull(state?.base_top3_rate);
+   const learnedTop3=
+     numberOrNull(state?.learned_top3_rate);
+
+   const baseRank=
+     numberOrNull(state?.base_mean_winner_rank);
+   const learnedRank=
+     numberOrNull(state?.learned_mean_winner_rank);
+
+   return json({
+    ok:true,
+
+    gate:{
+     status:
+      state?.status ??
+      "insufficient-data",
+
+     evaluatedRaces:
+      Number(
+       state?.evaluated_races ??
+       0
+      ),
+
+     minimumEvaluationRaces:100,
+
+     learningScale:
+      Math.max(
+       0,
+       Math.min(
+        1,
+        Number(
+         state?.learning_scale ??
+         1
+        )
+       )
+      ),
+
+     updatedAt:
+      state?.updated_at ??
+      null
+    },
+
+    performance:{
+     base:{
+      top1Rate:baseTop1,
+      top3Rate:baseTop3,
+      meanWinnerRank:baseRank
+     },
+
+     learned:{
+      top1Rate:learnedTop1,
+      top3Rate:learnedTop3,
+      meanWinnerRank:learnedRank
+     },
+
+     delta:{
+      top1Rate:
+       baseTop1 == null ||
+       learnedTop1 == null
+        ? null
+        : learnedTop1-baseTop1,
+
+      top3Rate:
+       baseTop3 == null ||
+       learnedTop3 == null
+        ? null
+        : learnedTop3-baseTop3,
+
+      meanWinnerRankGain:
+       baseRank == null ||
+       learnedRank == null
+        ? null
+        : baseRank-learnedRank
+     }
+    },
+
+    samples:{
+     labelledRaces:
+      Number(
+       samples?.labelled_races ??
+       0
+      ),
+
+     labelledRunners:
+      Number(
+       samples?.labelled_runners ??
+       0
+      ),
+
+     latestLabelDate:
+      samples?.latest_label_date ??
+      null
+    }
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/debug/refresh-state") return json({states:(await env.DB.prepare("SELECT * FROM refresh_state ORDER BY pipeline_key").all()).results});
  return json({error:"not_found",path:url.pathname},404);
 }
