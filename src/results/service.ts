@@ -18,6 +18,14 @@ import {
   evaluateLearningModel
 } from "../learning/evaluation";
 
+import {
+  rebuildExpertCategoryPriors
+} from "../learning/expert-category";
+
+import {
+  evaluateAdvancedLearning
+} from "../learning/advanced-evaluation";
+
 
 export async function ingestOfficialResults(
   env: Env,
@@ -65,6 +73,14 @@ export async function ingestOfficialResults(
        * fresh official labels have landed.
        */
       await evaluateLearningModel(
+        env
+      );
+
+      await rebuildExpertCategoryPriors(
+        env
+      );
+
+      await evaluateAdvancedLearning(
         env
       );
     }
