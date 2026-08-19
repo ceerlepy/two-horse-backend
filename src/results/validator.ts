@@ -3,17 +3,9 @@ import type {
 } from "./types";
 
 
-function normalizeName(
-  value: string
-): string {
-  return value
-    .trim()
-    .toLocaleUpperCase("tr-TR");
-}
-
-
 export function validateOfficialResults(
-  result: OfficialMeetingResults
+  result:
+    OfficialMeetingResults
 ): void {
   if (!result.city.trim()) {
     throw new Error(
@@ -31,16 +23,19 @@ export function validateOfficialResults(
     );
   }
 
-  if (result.races.length === 0) {
+  if (!result.races.length) {
     throw new Error(
-      "RESULT_NO_RACES"
+      "RESULT_NO_FINAL_RACES"
     );
   }
 
-  const seenRaces =
+  const raceNumbers =
     new Set<number>();
 
-  for (const race of result.races) {
+  for (
+    const race of
+    result.races
+  ) {
     if (
       !Number.isInteger(
         race.raceNumber
@@ -53,7 +48,7 @@ export function validateOfficialResults(
     }
 
     if (
-      seenRaces.has(
+      raceNumbers.has(
         race.raceNumber
       )
     ) {
@@ -62,15 +57,13 @@ export function validateOfficialResults(
       );
     }
 
-    seenRaces.add(
+    raceNumbers.add(
       race.raceNumber
     );
 
-    /*
-     * A single runner is not enough evidence that
-     * we acquired a complete official result table.
-     */
-    if (race.runners.length < 2) {
+    if (
+      race.runners.length < 2
+    ) {
       throw new Error(
         `RESULT_TOO_FEW_RUNNERS:R${race.raceNumber}`
       );
@@ -79,12 +72,12 @@ export function validateOfficialResults(
     const horseNumbers =
       new Set<number>();
 
-    const positivePositions =
-      new Set<number>();
-
     let winnerCount = 0;
 
-    for (const runner of race.runners) {
+    for (
+      const runner of
+      race.runners
+    ) {
       if (
         !Number.isInteger(
           runner.horseNumber
@@ -111,19 +104,13 @@ export function validateOfficialResults(
       );
 
       if (
-        !normalizeName(
-          runner.horseName
-        )
+        !runner.horseName.trim()
       ) {
         throw new Error(
-          `RESULT_HORSE_NAME_EMPTY:R${race.raceNumber}:#${runner.horseNumber}`
+          `RESULT_EMPTY_HORSE:R${race.raceNumber}:#${runner.horseNumber}`
         );
       }
 
-      /*
-       * 0 is reserved for an official
-       * unplaced/derecesiz style result.
-       */
       if (
         !Number.isInteger(
           runner.finishPosition
@@ -131,25 +118,7 @@ export function validateOfficialResults(
         runner.finishPosition < 0
       ) {
         throw new Error(
-          `RESULT_FINISH_INVALID:R${race.raceNumber}:#${runner.horseNumber}`
-        );
-      }
-
-      if (
-        runner.finishPosition > 0
-      ) {
-        if (
-          positivePositions.has(
-            runner.finishPosition
-          )
-        ) {
-          throw new Error(
-            `RESULT_DUPLICATE_FINISH:R${race.raceNumber}:P${runner.finishPosition}`
-          );
-        }
-
-        positivePositions.add(
-          runner.finishPosition
+          `RESULT_INVALID_FINISH:R${race.raceNumber}:#${runner.horseNumber}`
         );
       }
 
@@ -161,12 +130,15 @@ export function validateOfficialResults(
     }
 
     /*
-     * This prevents partial/live tables from
-     * becoming training labels.
+     * At least one official winner is required.
+     *
+     * More than one winner is legal for dead heat.
      */
-    if (winnerCount !== 1) {
+    if (
+      winnerCount < 1
+    ) {
       throw new Error(
-        `RESULT_NOT_FINAL:R${race.raceNumber}:WINNERS=${winnerCount}`
+        `RESULT_NOT_FINAL:R${race.raceNumber}`
       );
     }
   }

@@ -60,12 +60,14 @@ Kurallar:
 - horseNumber programdaki resmi at numarasıdır.
 - horseName resmi görünen at ismidir.
 - finishPosition yalnız resmi bitiriş sırasıdır.
-- derecesiz/bitiriş derecesi olmayan at için 0 kullanılabilir.
+- Koşmaz görünen atı DAHİL ET ve finishPosition=0 kullan.
 - aynı atı iki kere üretme.
-- aynı bitiriş sırasını iki ata verme.
+- atbaşı/dead-heat halinde aynı pozisyon birden fazla atta bulunabilir.
 - tamamlanmamış koşuyu races listesine ekleme.
-- her tamamlanmış koşuda tam olarak bir winner,
-  yani finishPosition=1 bulunmalıdır.
+- tamamlanmış koşuda en az bir finishPosition=1 bulunmalıdır.
+- horseNumber, At İsmi hücresindeki resmi parantez içi at numarasıdır.
+- Derece sütunu bitiriş sırası değildir; yarış süresidir.
+- Bitiriş pozisyonu TJK sonuç tablosundaki S sütunundan alınmalıdır.
 `.trim(),
       {
         type:

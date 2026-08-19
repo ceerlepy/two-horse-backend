@@ -8,60 +8,73 @@ import type {
 
 
 function clean(
-  value: string | null | undefined
+  value: unknown
 ): string {
   return String(value ?? "")
+    .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 
-function integer(
-  value: string
-): number | null {
+function normalizedHeader(
+  value: unknown
+): string {
+  return clean(value)
+    .toLocaleLowerCase("tr-TR");
+}
+
+
+function parseHorseIdentity(
+  raw: string
+): {
+  horseName: string;
+  horseNumber: number;
+} | null {
+  /*
+   * TJK:
+   * SILKY PEARL(11) KG SK ...
+   * KERDOS(5) ...
+   */
   const match =
-    clean(value).match(/\d+/);
+    clean(raw).match(
+      /^(.+?)\s*\((\d+)\)/
+    );
 
   if (!match) {
     return null;
   }
 
-  const parsed =
-    Number(match[0]);
+  const horseName =
+    clean(match[1]);
 
-  return Number.isInteger(parsed)
-    ? parsed
-    : null;
+  const horseNumber =
+    Number(match[2]);
+
+  if (
+    !horseName ||
+    !Number.isInteger(horseNumber) ||
+    horseNumber <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    horseName,
+    horseNumber
+  };
 }
 
 
-function normalized(
-  value: string
-): string {
-  return clean(value)
-    .toLocaleUpperCase("tr-TR")
-    .replace(/[İI]/g, "I")
-    .replace(/Ş/g, "S")
-    .replace(/Ğ/g, "G")
-    .replace(/Ü/g, "U")
-    .replace(/Ö/g, "O")
-    .replace(/Ç/g, "C");
-}
-
-
-function headerIndex(
+function findHeaderIndex(
   headers: string[],
-  candidates: string[]
+  predicate:
+    (value: string) => boolean
 ): number {
-  const wanted =
-    candidates.map(normalized);
-
   return headers.findIndex(
-    header =>
-      wanted.some(
-        candidate =>
-          normalized(header)
-            .includes(candidate)
+    value =>
+      predicate(
+        normalizedHeader(value)
       )
   );
 }
@@ -78,162 +91,239 @@ export function parseOfficialResultsHtml(
   const races:
     OfficialRaceResult[] = [];
 
+  let currentRaceNumber:
+    number | null = null;
+
   /*
-   * TJK layouts can change wrappers/classes.
-   * We therefore identify result tables semantically
-   * from their visible headers instead of relying on
-   * one fragile CSS class.
+   * Walk DOM in visible order.
+   *
+   * A race heading establishes the context for the
+   * following result table.
    */
-  $("table").each((_, table) => {
-    const headers =
-      $(table)
-        .find("thead th")
-        .map(
-          (_i, element) =>
-            clean($(element).text())
-        )
-        .get();
+  $("h1,h2,h3,h4,table").each(
+    (_, element) => {
+      const node =
+        $(element);
 
-    if (headers.length === 0) {
-      const firstRow =
-        $(table)
-          .find("tr")
-          .first();
-
-      firstRow
-        .find("th,td")
-        .each((_i, element) => {
-          headers.push(
-            clean($(element).text())
+      if (
+        element.tagName !==
+        "table"
+      ) {
+        const heading =
+          clean(
+            node.text()
           );
-        });
-    }
 
-    const numberIndex =
-      headerIndex(
-        headers,
-        [
-          "AT NO",
-          "AT NO.",
-          "NO"
-        ]
-      );
+        const match =
+          heading.match(
+            /(\d+)\s*[.]?\s*Koşu\b/iu
+          );
 
-    const horseIndex =
-      headerIndex(
-        headers,
-        [
-          "AT ADI",
-          "AT ISMI",
-          "AT"
-        ]
-      );
+        if (match) {
+          currentRaceNumber =
+            Number(match[1]);
+        }
 
-    const finishIndex =
-      headerIndex(
-        headers,
-        [
-          "DERECE",
-          "SIRA",
-          "BITIRIS"
-        ]
-      );
+        return;
+      }
 
-    if (
-      numberIndex < 0 ||
-      horseIndex < 0 ||
-      finishIndex < 0
-    ) {
-      return;
-    }
+      if (
+        currentRaceNumber == null
+      ) {
+        return;
+      }
 
-    /*
-     * Find race number from the nearest surrounding
-     * visible context.
-     */
-    const context =
-      clean(
-        $(table)
-          .parent()
-          .text()
-          .slice(0, 1500)
-      );
+      const table =
+        node;
 
-    const raceMatch =
-      context.match(
-        /(\d+)\s*\.?\s*KOŞU/i
-      );
+      let headers =
+        table
+          .find("thead th")
+          .map(
+            (_, cell) =>
+              clean(
+                $(cell).text()
+              )
+          )
+          .get();
 
-    if (!raceMatch) {
-      return;
-    }
-
-    const raceNumber =
-      Number(raceMatch[1]);
-
-    const runners:
-      OfficialRunnerResult[] = [];
-
-    $(table)
-      .find("tbody tr")
-      .each((_rowIndex, row) => {
-        const cells =
-          $(row)
-            .find("td")
+      if (!headers.length) {
+        headers =
+          table
+            .find("tr")
+            .first()
+            .find("th,td")
             .map(
-              (_i, element) =>
-                clean($(element).text())
+              (_, cell) =>
+                clean(
+                  $(cell).text()
+                )
             )
             .get();
+      }
 
-        if (
-          cells.length <=
-          Math.max(
-            numberIndex,
-            horseIndex,
-            finishIndex
-          )
-        ) {
-          return;
-        }
+      /*
+       * TJK result table canonical columns:
+       *
+       * S | At İsmi | ... | Derece | ...
+       */
+      const finishIndex =
+        findHeaderIndex(
+          headers,
+          value =>
+            value === "s"
+        );
 
-        const horseNumber =
-          integer(
-            cells[numberIndex]
-          );
+      const horseIndex =
+        findHeaderIndex(
+          headers,
+          value =>
+            value.includes(
+              "at ismi"
+            ) ||
+            value.includes(
+              "at adı"
+            ) ||
+            value.includes(
+              "at adi"
+            )
+        );
 
-        const horseName =
-          clean(
-            cells[horseIndex]
-          );
+      const timeIndex =
+        findHeaderIndex(
+          headers,
+          value =>
+            value === "derece"
+        );
 
-        const finishPosition =
-          integer(
-            cells[finishIndex]
-          );
+      if (
+        finishIndex < 0 ||
+        horseIndex < 0
+      ) {
+        return;
+      }
 
-        if (
-          horseNumber == null ||
-          !horseName ||
-          finishPosition == null
-        ) {
-          return;
-        }
+      const runners:
+        OfficialRunnerResult[] = [];
 
-        runners.push({
-          horseNumber,
-          horseName,
-          finishPosition
-        });
-      });
+      table
+        .find("tbody tr")
+        .each(
+          (_, row) => {
+            const cells =
+              $(row)
+                .find("td");
 
-    if (runners.length > 0) {
+            if (!cells.length) {
+              return;
+            }
+
+            const horseCell =
+              clean(
+                cells
+                  .eq(horseIndex)
+                  .text()
+              );
+
+            const identity =
+              parseHorseIdentity(
+                horseCell
+              );
+
+            if (!identity) {
+              return;
+            }
+
+            const rawPosition =
+              clean(
+                cells
+                  .eq(finishIndex)
+                  .text()
+              );
+
+            const degreeText =
+              timeIndex >= 0
+                ? clean(
+                    cells
+                      .eq(timeIndex)
+                      .text()
+                  )
+                : "";
+
+            let finishPosition:
+              number | null =
+              null;
+
+            if (
+              /^\d+$/.test(
+                rawPosition
+              )
+            ) {
+              finishPosition =
+                Number(
+                  rawPosition
+                );
+            } else if (
+              /koşmaz|kosmaz/iu.test(
+                degreeText
+              ) ||
+              /koşmaz|kosmaz/iu.test(
+                horseCell
+              )
+            ) {
+              /*
+               * Keep official scratches in the result
+               * set so frozen pre-race runner identity
+               * can still match exactly.
+               */
+              finishPosition = 0;
+            }
+
+            if (
+              finishPosition ==
+              null
+            ) {
+              return;
+            }
+
+            runners.push({
+              horseNumber:
+                identity.horseNumber,
+
+              horseName:
+                identity.horseName,
+
+              finishPosition
+            });
+          }
+        );
+
+      if (!runners.length) {
+        return;
+      }
+
+      /*
+       * Do not duplicate the same race if TJK renders
+       * another summary table later in the document.
+       */
+      if (
+        races.some(
+          race =>
+            race.raceNumber ===
+            currentRaceNumber
+        )
+      ) {
+        return;
+      }
+
       races.push({
-        raceNumber,
+        raceNumber:
+          currentRaceNumber,
+
         runners
       });
     }
-  });
+  );
 
   return {
     city,
