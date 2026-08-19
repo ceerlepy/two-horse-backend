@@ -370,7 +370,15 @@ function parseRunnerTable(
         anchorHref(
           $,
           nameCell
-        )
+        ),
+
+      jockeyProfileUrl:
+        jockeyCell
+          ? anchorHref(
+              $,
+              jockeyCell
+            )
+          : null
     });
   });
 

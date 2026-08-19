@@ -536,11 +536,103 @@ function normalizeJsonMeeting(
                     ),
 
               horseProfileUrl:
-                null
+                runner?.horseProfileUrl == null
+                  ? null
+                  : (
+                      String(
+                        runner.horseProfileUrl
+                      ).trim() || null
+                    ),
+
+              jockeyProfileUrl:
+                runner?.jockeyProfileUrl == null
+                  ? null
+                  : (
+                      String(
+                        runner.jockeyProfileUrl
+                      ).trim() || null
+                    )
             }))
           : []
     }))
   };
+}
+
+
+function assertJsonCanonicalParity(
+  meeting: TjkMeeting
+): void {
+  for (const race of meeting.races) {
+    if (
+      !Number.isInteger(race.raceNumber) ||
+      race.raceNumber <= 0
+    ) {
+      throw new Error(
+        "JSON_SCHEMA_INVALID_RACE_NUMBER"
+      );
+    }
+
+    if (
+      race.time != null &&
+      !/^\d{2}:\d{2}$/.test(race.time)
+    ) {
+      throw new Error(
+        `JSON_SCHEMA_INVALID_TIME:R${race.raceNumber}`
+      );
+    }
+
+    if (
+      race.performanceUrl != null &&
+      !/^https?:\/\//i.test(race.performanceUrl)
+    ) {
+      throw new Error(
+        `JSON_SCHEMA_INVALID_PERFORMANCE_URL:R${race.raceNumber}`
+      );
+    }
+
+    const seen = new Set<number>();
+
+    for (const runner of race.runners) {
+      if (
+        !Number.isInteger(runner.number) ||
+        runner.number <= 0
+      ) {
+        throw new Error(
+          `JSON_SCHEMA_INVALID_RUNNER_NUMBER:R${race.raceNumber}`
+        );
+      }
+
+      if (seen.has(runner.number)) {
+        throw new Error(
+          `JSON_SCHEMA_DUPLICATE_RUNNER:R${race.raceNumber}:#${runner.number}`
+        );
+      }
+
+      seen.add(runner.number);
+
+      if (!runner.name.trim()) {
+        throw new Error(
+          `JSON_SCHEMA_EMPTY_RUNNER_NAME:R${race.raceNumber}:#${runner.number}`
+        );
+      }
+
+      for (
+        const [key, value] of [
+          ["horseProfileUrl", runner.horseProfileUrl],
+          ["jockeyProfileUrl", runner.jockeyProfileUrl]
+        ] as const
+      ) {
+        if (
+          value != null &&
+          !/^https?:\/\//i.test(value)
+        ) {
+          throw new Error(
+            `JSON_SCHEMA_INVALID_${key}:R${race.raceNumber}:#${runner.number}`
+          );
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -585,7 +677,9 @@ Return JSON in this exact logical shape:
           "weight": 58,
           "hp": 70,
           "agfPercent": 25.4,
-          "recentFormRaw": "3223-66"
+          "recentFormRaw": "3223-66",
+          "horseProfileUrl": "https://www.tjk.org/...",
+          "jockeyProfileUrl": "https://www.tjk.org/..."
         }
       ]
     }
@@ -605,6 +699,14 @@ Requirements:
 - recentFormRaw MUST contain the runner's visible "Son 6 Y." / "SON 6 YR" value exactly as displayed
 - examples of recentFormRaw are "3223-66", "558635", "001311"
 - do not derive or invent recentFormRaw
+- horseProfileUrl MUST be the visible TJK horse link when available
+- jockeyProfileUrl MUST be the visible TJK jockey link when available
+- never invent profile URLs
+- return null when a profile URL is genuinely unavailable
+- every runner must use:
+  number, name, jockey, weight, hp, agfPercent, recentFormRaw, horseProfileUrl, jockeyProfileUrl
+- every race must use:
+  raceNumber, time, distanceMeters, track, performanceUrl, runners
 - use null for optional fields only when not shown
 - time must be HH:mm
 `
@@ -620,10 +722,19 @@ Requirements:
     );
   }
 
-  return normalizeJsonMeeting(
-    await response.json(),
-    city
-  );
+  const meeting =
+    normalizeJsonMeeting(
+      await response.json(),
+      city
+    );
+
+  /*
+   * JSON fallback must satisfy the SAME canonical
+   * contract as HTML/SCRAPE/CONTENT.
+   */
+  assertJsonCanonicalParity(meeting);
+
+  return meeting;
 }
 
 async function meetingThroughFourStages(

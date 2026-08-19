@@ -19,6 +19,12 @@ export interface RunnerInput {
   recentFormRaw: string | null;
 
   horseProfileUrl: string | null;
+
+  /*
+   * Race-specific jockey profile.
+   * The same horse may race with different jockeys.
+   */
+  jockeyProfileUrl: string | null;
 }
 
 export interface RaceInput {
