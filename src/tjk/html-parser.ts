@@ -402,8 +402,25 @@ export function parseTjkMeetingPage(
     track: string | null;
   }> = [];
 
-  $("h1,h2,h3,h4,h5,h6").each((_, element) => {
-    const text = clean($(element).text());
+  /*
+   * TJK renders race metadata in a separate heading after
+   * the race header:
+   *
+   *   1. Koşu 17.45
+   *   Maiden/... 1200 Kum ...
+   *
+   * This mirrors the proven horsai parser:
+   * collect headings in document order, and for each race
+   * header take the first following heading containing a
+   * recognized surface.
+   */
+  const headingTexts = $("h1,h2,h3,h4,h5,h6")
+    .map((_, element) =>
+      clean($(element).text())
+    )
+    .get();
+
+  headingTexts.forEach((text, index) => {
     const header = parseRaceHeader(text);
 
     if (!header) {
@@ -411,94 +428,54 @@ export function parseTjkMeetingPage(
     }
 
     /*
-     * TJK renders race metadata (for example "1400 Çim")
-     * in a following heading/block, not necessarily inside the
-     * race-header element's parent. Search forward in document
-     * order until the next race header or runner table.
-     */
-    const surfaceParts: string[] = [];
-
-    const ownParentText = clean(
-      $(element)
-        .parent()
-        .text()
-        .slice(0, 2000)
-    );
-
-    if (ownParentText) {
-      surfaceParts.push(ownParentText);
-    }
-
-    let cursor = $(element).parent().next();
-    let scanned = 0;
-
-    while (
-      cursor.length &&
-      scanned < 12
-    ) {
-      const cursorText = clean(
-        cursor.text().slice(0, 2000)
-      );
-
-      const nextRaceHeader =
-        parseRaceHeader(cursorText);
-
-      if (nextRaceHeader) {
-        break;
-      }
-
-      /*
-       * Runner table marks the end of useful race metadata.
-       */
-      if (cursor.is("table")) {
-        const tableText = lower(cursor.text());
-
-        if (
-          tableText.includes("at ismi") &&
-          tableText.includes("jokey")
-        ) {
-          break;
-        }
-      }
-
-      if (cursorText) {
-        surfaceParts.push(cursorText);
-      }
-
-      const foundSurface =
-        parseSurface(
-          surfaceParts.join(" ")
-        );
-
-      if (
-        foundSurface.distanceMeters != null &&
-        foundSurface.track != null
-      ) {
-        break;
-      }
-
-      cursor = cursor.next();
-      scanned++;
-    }
-
-    const surface = parseSurface(
-      surfaceParts.join(" ")
-    );
-
-    /*
-     * Same race header may occur more than once in navigation.
+     * Navigation may contain duplicate race headers.
+     * Only keep the first occurrence for each race number.
      */
     if (
-      !headers.some(
+      headers.some(
         item =>
           item.raceNumber === header.raceNumber
       )
     ) {
-      headers.push({
-        ...header,
-        ...surface
-      });
+      return;
     }
+
+    let surface = {
+      distanceMeters: null as number | null,
+      track: null as string | null
+    };
+
+    for (
+      let nextIndex = index + 1;
+      nextIndex < headingTexts.length;
+      nextIndex++
+    ) {
+      const candidate =
+        headingTexts[nextIndex];
+
+      /*
+       * Stop if we reached the next actual race header.
+       */
+      if (parseRaceHeader(candidate)) {
+        break;
+      }
+
+      const parsed =
+        parseSurface(candidate);
+
+      if (
+        parsed.distanceMeters != null &&
+        parsed.track != null
+      ) {
+        surface = parsed;
+        break;
+      }
+    }
+
+    headers.push({
+      ...header,
+      ...surface
+    });
   });
 
   const runnerTables: TjkRunner[][] = [];
