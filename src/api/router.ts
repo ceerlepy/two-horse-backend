@@ -539,6 +539,373 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
 
+
+ if(url.pathname==="/api/debug/coverage") {
+  try {
+   const date =
+    turkeyDate();
+
+   const runnerCoverage=
+    await env.DB.prepare(`
+     SELECT
+      r.city,
+      r.race_number,
+
+      COUNT(*) runner_count,
+
+      SUM(
+       CASE
+        WHEN r.agf_percent IS NOT NULL
+        THEN 1 ELSE 0
+       END
+      ) agf_count,
+
+      SUM(
+       CASE
+        WHEN r.recent_form_raw IS NOT NULL
+         AND TRIM(r.recent_form_raw) <> ''
+        THEN 1 ELSE 0
+       END
+      ) form_count,
+
+      SUM(
+       CASE
+        WHEN EXISTS(
+         SELECT 1
+         FROM expert_predictions ep
+         JOIN source_registry sr
+          ON sr.source_key =
+             ep.source_key
+
+         WHERE
+          ep.race_date =
+           r.race_date
+          AND ep.city =
+           r.city
+          AND ep.race_number =
+           r.race_number
+          AND ep.horse_number =
+           r.horse_number
+          AND sr.enabled = 1
+        )
+        THEN 1 ELSE 0
+       END
+      ) expert_runner_count,
+
+      SUM(
+       CASE
+        WHEN EXISTS(
+         SELECT 1
+         FROM agf_market_snapshots ms
+         WHERE
+          ms.race_date =
+           r.race_date
+          AND ms.city =
+           r.city
+          AND ms.race_number =
+           r.race_number
+          AND ms.horse_number =
+           r.horse_number
+        )
+        THEN 1 ELSE 0
+       END
+      ) market_runner_count,
+
+      SUM(
+       CASE
+        WHEN EXISTS(
+         SELECT 1
+         FROM field_signals fs
+         WHERE
+          fs.race_date =
+           r.race_date
+          AND fs.city =
+           r.city
+          AND fs.race_number =
+           r.race_number
+          AND fs.horse_number =
+           r.horse_number
+          AND fs.tjk_score
+              IS NOT NULL
+        )
+        THEN 1 ELSE 0
+       END
+      ) field_runner_count
+
+     FROM runners r
+
+     WHERE
+      r.race_date = ?
+
+     GROUP BY
+      r.city,
+      r.race_number
+
+     ORDER BY
+      r.city,
+      r.race_number
+    `)
+     .bind(date)
+     .all<any>();
+
+
+   const expertRows=
+    await env.DB.prepare(`
+     SELECT
+      ep.city,
+      ep.race_number,
+
+      COUNT(*) prediction_rows,
+
+      COUNT(
+       DISTINCT ep.source_key
+      ) source_count,
+
+      COUNT(
+       DISTINCT ep.horse_number
+      ) horse_count
+
+     FROM expert_predictions ep
+
+     JOIN source_registry sr
+      ON sr.source_key =
+         ep.source_key
+
+     WHERE
+      ep.race_date = ?
+      AND sr.enabled = 1
+
+     GROUP BY
+      ep.city,
+      ep.race_number
+
+     ORDER BY
+      ep.city,
+      ep.race_number
+    `)
+     .bind(date)
+     .all<any>();
+
+
+   const expertBySource=
+    await env.DB.prepare(`
+     SELECT
+      ep.source_key,
+      sr.source_name,
+
+      COUNT(*) prediction_rows,
+
+      COUNT(
+       DISTINCT ep.city || '|' ||
+       ep.race_number
+      ) race_count,
+
+      COUNT(
+       DISTINCT ep.horse_number
+      ) distinct_horse_numbers,
+
+      MAX(ep.updated_at)
+       latest_prediction
+
+     FROM expert_predictions ep
+
+     JOIN source_registry sr
+      ON sr.source_key =
+         ep.source_key
+
+     WHERE
+      ep.race_date = ?
+      AND sr.enabled = 1
+
+     GROUP BY
+      ep.source_key,
+      sr.source_name
+
+     ORDER BY
+      prediction_rows DESC
+    `)
+     .bind(date)
+     .all<any>();
+
+
+   const market=
+    await env.DB.prepare(`
+     SELECT
+      city,
+      race_number,
+
+      COUNT(*) snapshot_rows,
+
+      COUNT(
+       DISTINCT horse_number
+      ) horse_count,
+
+      COUNT(
+       DISTINCT captured_at
+      ) capture_count,
+
+      MIN(captured_at)
+       first_capture,
+
+      MAX(captured_at)
+       latest_capture
+
+     FROM agf_market_snapshots
+
+     WHERE race_date = ?
+
+     GROUP BY
+      city,
+      race_number
+
+     ORDER BY
+      city,
+      race_number
+    `)
+     .bind(date)
+     .all<any>();
+
+
+   const field=
+    await env.DB.prepare(`
+     SELECT
+      r.city,
+      r.race_number,
+
+      COUNT(fs.horse_number)
+       signal_rows,
+
+      SUM(
+       CASE
+        WHEN fs.tjk_score IS NOT NULL
+        THEN 1 ELSE 0
+       END
+      ) scored_rows,
+
+      MAX(frs.status)
+       refresh_status,
+
+      MAX(frs.acquisition_method)
+       acquisition_method,
+
+      MAX(frs.last_success_at)
+       last_success_at,
+
+      MAX(frs.last_attempt_at)
+       last_attempt_at,
+
+      MAX(frs.last_error)
+       last_error
+
+     FROM races r
+
+     LEFT JOIN field_signals fs
+      ON fs.race_date =
+         r.race_date
+      AND fs.city =
+         r.city
+      AND fs.race_number =
+         r.race_number
+
+     LEFT JOIN field_refresh_state frs
+      ON frs.race_date =
+         r.race_date
+      AND frs.city =
+         r.city
+      AND frs.race_number =
+         r.race_number
+
+     WHERE
+      r.race_date = ?
+
+     GROUP BY
+      r.city,
+      r.race_number
+
+     ORDER BY
+      r.city,
+      r.race_number
+    `)
+     .bind(date)
+     .all<any>();
+
+
+   const totals=
+    await env.DB.prepare(`
+     SELECT
+      COUNT(*) total_runners,
+
+      SUM(
+       CASE
+        WHEN agf_percent IS NOT NULL
+        THEN 1 ELSE 0
+       END
+      ) agf_runners,
+
+      SUM(
+       CASE
+        WHEN recent_form_raw IS NOT NULL
+         AND TRIM(recent_form_raw) <> ''
+        THEN 1 ELSE 0
+       END
+      ) form_runners
+
+     FROM runners
+
+     WHERE race_date = ?
+    `)
+     .bind(date)
+     .first<any>();
+
+
+   return json({
+    ok:true,
+    date,
+
+    totals:{
+     runners:
+      Number(
+       totals?.total_runners ??
+       0
+      ),
+
+     agf:
+      Number(
+       totals?.agf_runners ??
+       0
+      ),
+
+     form:
+      Number(
+       totals?.form_runners ??
+       0
+      )
+    },
+
+    runnerCoverage:
+     runnerCoverage.results,
+
+    expertRaces:
+     expertRows.results,
+
+    expertBySource:
+     expertBySource.results,
+
+    marketRaces:
+     market.results,
+
+    fieldRaces:
+     field.results
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/debug/refresh-state") return json({states:(await env.DB.prepare("SELECT * FROM refresh_state ORDER BY pipeline_key").all()).results});
  return json({error:"not_found",path:url.pathname},404);
 }
