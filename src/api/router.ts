@@ -214,6 +214,95 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
 
+
+ if(url.pathname==="/api/debug/learning-pipeline") {
+  try {
+   const races=await env.DB.prepare(`
+    SELECT
+     COUNT(*) total,
+     SUM(CASE WHEN labelled_at IS NOT NULL THEN 1 ELSE 0 END) labelled,
+     MIN(race_date) first_date,
+     MAX(race_date) last_date
+    FROM learning_races
+   `).first<any>();
+
+   const runners=await env.DB.prepare(`
+    SELECT
+     COUNT(*) total,
+     SUM(CASE WHEN finish_position IS NOT NULL THEN 1 ELSE 0 END) labelled,
+     SUM(CASE WHEN model_score IS NOT NULL THEN 1 ELSE 0 END) scored
+    FROM learning_runner_features
+   `).first<any>();
+
+   const candidates=await env.DB.prepare(`
+    SELECT
+     COUNT(*) total,
+     MIN(starts_at) earliest_start,
+     MAX(starts_at) latest_start,
+     MAX(captured_at) latest_capture
+    FROM learning_snapshot_candidates
+   `).first<any>();
+
+   const results=await env.DB.prepare(`
+    SELECT
+     race_date,
+     city,
+     status,
+     method,
+     last_attempt_at,
+     last_success_at,
+     detail
+    FROM official_result_runs
+    ORDER BY last_attempt_at DESC
+    LIMIT 20
+   `).all();
+
+   const unlabelled=await env.DB.prepare(`
+    SELECT
+     race_date,
+     city,
+     race_number,
+     starts_at,
+     snapshot_at
+    FROM learning_races
+    WHERE labelled_at IS NULL
+      AND starts_at IS NOT NULL
+      AND starts_at < datetime('now')
+    ORDER BY starts_at DESC
+    LIMIT 20
+   `).all();
+
+   const recent=await env.DB.prepare(`
+    SELECT
+     race_date,
+     city,
+     race_number,
+     starts_at,
+     snapshot_at,
+     labelled_at
+    FROM learning_races
+    ORDER BY race_date DESC, starts_at DESC
+    LIMIT 20
+   `).all();
+
+   return json({
+    ok:true,
+    races,
+    runners,
+    snapshotCandidates:candidates,
+    officialResultRuns:results.results,
+    startedButUnlabelled:unlabelled.results,
+    recentLearningRaces:recent.results
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/debug/refresh-state") return json({states:(await env.DB.prepare("SELECT * FROM refresh_state ORDER BY pipeline_key").all()).results});
  return json({error:"not_found",path:url.pathname},404);
 }
