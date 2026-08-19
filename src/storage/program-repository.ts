@@ -164,7 +164,18 @@ export async function getToday(env: Env): Promise<any> {
                             race.race_number,
                             runner.horse_number
                           )
-                        ] ?? []
+                        ] ?? [],
+                        {
+                          /*
+                           * Only the final pre-race market
+                           * window is allowed to affect score.
+                           */
+                          raceStartsAt:
+                            race.starts_at,
+
+                          windowMinutes:
+                            90
+                        }
                       );
 
                     return {

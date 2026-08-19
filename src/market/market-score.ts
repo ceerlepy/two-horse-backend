@@ -50,14 +50,75 @@ function classifyDirection(
   return "flat";
 }
 
+export interface MarketWindowOptions {
+  raceStartsAt?: string | null;
+
+  /*
+   * Final pre-race movement window.
+   */
+  windowMinutes?: number;
+}
+
 export function analyzeMarketMovement(
   input:
-    AgfSnapshotPoint[]
+    AgfSnapshotPoint[],
+  options:
+    MarketWindowOptions = {}
 ): MarketMovement {
+  const raceStartsAt =
+    options.raceStartsAt
+      ? Date.parse(
+          options.raceStartsAt
+        )
+      : NaN;
+
+  const windowMinutes =
+    options.windowMinutes ??
+    90;
+
+  const windowStart =
+    Number.isFinite(
+      raceStartsAt
+    )
+      ? raceStartsAt -
+        windowMinutes *
+        60_000
+      : NaN;
+
   const ordered =
     input
       .filter(
         validPoint
+      )
+      .filter(
+        point => {
+          if (
+            !Number.isFinite(
+              raceStartsAt
+            )
+          ) {
+            return true;
+          }
+
+          const capturedAt =
+            Date.parse(
+              point.capturedAt
+            );
+
+          /*
+           * Strictly pre-race.
+           *
+           * Ignore observations:
+           * - after race start
+           * - older than final market window
+           */
+          return (
+            capturedAt <=
+              raceStartsAt &&
+            capturedAt >=
+              windowStart
+          );
+        }
       )
       .sort(
         (a, b) =>
@@ -267,11 +328,14 @@ export function analyzeMarketMovement(
 
 export function scoreMarketMovement(
   input:
-    AgfSnapshotPoint[]
+    AgfSnapshotPoint[],
+  options:
+    MarketWindowOptions = {}
 ): number | null {
   return (
     analyzeMarketMovement(
-      input
+      input,
+      options
     ).score
   );
 }

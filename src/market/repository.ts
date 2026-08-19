@@ -11,7 +11,8 @@ import type {
 } from "./types";
 
 import {
-  turkeyDate
+  turkeyDate,
+  turkeyDateTime
 } from "../shared";
 
 export interface MarketSnapshotMap {
@@ -39,9 +40,11 @@ export async function recordAgfSnapshots(
   const date =
     turkeyDate();
 
+  const now =
+    new Date();
+
   const capturedAt =
-    new Date()
-      .toISOString();
+    now.toISOString();
 
   const statements:
     D1PreparedStatement[] = [];
@@ -54,6 +57,36 @@ export async function recordAgfSnapshots(
       const race of
       meeting.races
     ) {
+      /*
+       * Market is strictly PRE-RACE information.
+       *
+       * Once the race starts, its market history freezes.
+       *
+       * This prevents:
+       * - post-race refreshes
+       * - evening cron runs
+       * - manual force refreshes
+       *
+       * from contaminating the pre-race market signal.
+       */
+      if (!race.time) {
+        continue;
+      }
+
+      const startsAt =
+        turkeyDateTime(
+          date,
+          race.time
+        );
+
+      if (
+        !startsAt ||
+        startsAt.getTime() <=
+          now.getTime()
+      ) {
+        continue;
+      }
+
       for (
         const runner of
         race.runners

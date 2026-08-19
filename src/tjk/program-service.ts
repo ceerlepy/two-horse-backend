@@ -26,6 +26,10 @@ import {
 } from "../market/refresh-policy";
 
 import {
+  assertCanonicalTjkProgram
+} from "./meeting-classification";
+
+import {
   getTjkProgramUrl,
   rediscoverTjkProgramUrl
 } from "./registry";
@@ -210,7 +214,18 @@ export async function refreshProgramIfDue(
       ...extracted.diagnostics
     );
 
-    const program = extracted.program;
+    const program =
+      extracted.program;
+
+    /*
+     * Hard canonical invariant.
+     *
+     * Nothing reaches AGF snapshots, D1, scoring or
+     * coupons unless the programme is canonical.
+     */
+    assertCanonicalTjkProgram(
+      program
+    );
 
     /*
      * Snapshot after successful canonical validation,

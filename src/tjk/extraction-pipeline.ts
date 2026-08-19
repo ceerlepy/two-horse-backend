@@ -10,6 +10,10 @@ import {
   type TjkMeeting
 } from "./html-parser";
 
+import {
+  filterCanonicalTjkMeetings
+} from "./meeting-classification";
+
 export type TjkStage =
   | "HTTP_FETCH"
   | "HTTP_PARSE"
@@ -753,15 +757,28 @@ function meetingsFromMasterHtml(
       TJK_MASTER_URL
     );
 
+  /*
+   * Master discovery may legitimately expose TJK
+   * composite programmes such as "Karma".
+   *
+   * Canonical ingestion deliberately keeps only
+   * physical/domestic venue meetings.
+   */
   if (links.length) {
-    return links;
+    return filterCanonicalTjkMeetings(
+      links
+    );
   }
 
-  return discoverDomesticMeetingNames(html)
-    .map(city => ({
+  return filterCanonicalTjkMeetings(
+    discoverDomesticMeetingNames(
+      html
+    ).map(city => ({
       city,
-      url: buildCityUrl(city)
-    }));
+      url:
+        buildCityUrl(city)
+    }))
+  );
 }
 
 async function discoverMeetings(
