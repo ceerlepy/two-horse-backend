@@ -32,6 +32,9 @@ export interface ExpertPickInput {
   isBanko: boolean;
   isStrong: boolean;
   isStar: boolean;
+  isRival: boolean;
+  isSurprise: boolean;
+  isAvoid: boolean;
   sourceRank: number | null;
   confidence: number;
 }

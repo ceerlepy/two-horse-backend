@@ -33,7 +33,21 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   catch(e){ return json({ok:false,error:errorMessage(e)},502); }
  }
  if(url.pathname==="/api/debug/sources") {
-  const sources=await env.DB.prepare("SELECT source_key,source_name,domain,health_status,last_checked_at,last_success_at,last_failure_at,consecutive_failures,content_hash FROM source_registry ORDER BY source_name").all();
+  const sources=await env.DB.prepare("SELECT
+ source_key,
+ source_name,
+ domain,
+ source_type,
+ base_weight,
+ enabled,
+ health_status,
+ last_checked_at,
+ last_success_at,
+ last_failure_at,
+ consecutive_failures,
+ content_hash
+ FROM source_registry
+ ORDER BY enabled DESC,source_name").all();
   return json({ok:true,count:sources.results.length,sources:sources.results});
  }
  if(url.pathname==="/api/debug/refresh-state") return json({states:(await env.DB.prepare("SELECT * FROM refresh_state ORDER BY pipeline_key").all()).results});
