@@ -146,7 +146,16 @@ async function timed<T>(
   }
 }
 
-async function httpHtml(url: string): Promise<string> {
+interface HttpHtmlResult {
+  html: string;
+  requestedUrl: string;
+  finalUrl: string;
+  status: number;
+  contentType: string;
+  bodyLength: number;
+}
+
+async function httpHtml(url: string): Promise<HttpHtmlResult> {
   const controller = new AbortController();
 
   const timeout = setTimeout(
@@ -185,10 +194,64 @@ async function httpHtml(url: string): Promise<string> {
       );
     }
 
-    return html;
+    return {
+      html,
+      requestedUrl: url,
+      finalUrl: response.url || url,
+      status: response.status,
+      contentType:
+        response.headers.get("content-type") ?? "",
+      bodyLength: html.length
+    };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function annotateDiagnostic(
+  diagnostics: TjkDiagnostic[],
+  scope: string,
+  stage: TjkStage,
+  update: Partial<TjkDiagnostic>
+): void {
+  for (let index = diagnostics.length - 1; index >= 0; index--) {
+    const diagnostic = diagnostics[index];
+
+    if (
+      diagnostic.scope === scope &&
+      diagnostic.stage === stage &&
+      diagnostic.ok
+    ) {
+      Object.assign(diagnostic, update);
+      return;
+    }
+  }
+}
+
+function httpDiagnosticDetail(
+  result: HttpHtmlResult
+): string {
+  return [
+    `requestedUrl=${result.requestedUrl}`,
+    `finalUrl=${result.finalUrl}`,
+    `contentType=${result.contentType || "unknown"}`,
+    `bodyLength=${result.bodyLength}`
+  ].join(" ");
+}
+
+function meetingDiagnosticDetail(
+  meeting: TjkMeeting
+): string {
+  const runnerCount = meeting.races.reduce(
+    (total, race) =>
+      total + race.runners.length,
+    0
+  );
+
+  return [
+    `raceCount=${meeting.races.length}`,
+    `runnerCount=${runnerCount}`
+  ].join(" ");
 }
 
 function unwrapQuickAction(value: any): any {
@@ -484,25 +547,51 @@ async function meetingThroughFourStages(
    * 1. ordinary HTTP
    */
   try {
-    const html = await timed(
+    const httpResult = await timed(
       scope,
       "HTTP_FETCH",
       diagnostics,
       () => httpHtml(url)
     );
 
-    return await timed(
+    annotateDiagnostic(
+      diagnostics,
+      scope,
+      "HTTP_FETCH",
+      {
+        status: httpResult.status,
+        detail:
+          httpDiagnosticDetail(httpResult)
+      }
+    );
+
+    const meeting = await timed(
       scope,
       "HTTP_PARSE",
       diagnostics,
       async () => {
-        const meeting =
-          parseTjkMeetingPage(html, city);
+        const parsed =
+          parseTjkMeetingPage(
+            httpResult.html,
+            city
+          );
 
-        assertCompleteMeeting(meeting);
-        return meeting;
+        assertCompleteMeeting(parsed);
+        return parsed;
       }
     );
+
+    annotateDiagnostic(
+      diagnostics,
+      scope,
+      "HTTP_PARSE",
+      {
+        detail:
+          meetingDiagnosticDetail(meeting)
+      }
+    );
+
+    return meeting;
   } catch {
     // next stage
   }
@@ -582,6 +671,26 @@ async function meetingThroughFourStages(
   );
 }
 
+function meetingsFromMasterHtml(
+  html: string
+): Array<{ city: string; url: string }> {
+  const links =
+    discoverDomesticMeetingLinks(
+      html,
+      TJK_MASTER_URL
+    );
+
+  if (links.length) {
+    return links;
+  }
+
+  return discoverDomesticMeetingNames(html)
+    .map(city => ({
+      city,
+      url: buildCityUrl(city)
+    }));
+}
+
 async function discoverMeetings(
   env: Env,
   diagnostics: TjkDiagnostic[]
@@ -592,25 +701,28 @@ async function discoverMeetings(
    * Stage 1
    */
   try {
-    const html = await timed(
+    const httpResult = await timed(
       scope,
       "HTTP_FETCH",
       diagnostics,
       () => httpHtml(TJK_MASTER_URL)
     );
 
-    const links =
-      discoverDomesticMeetingLinks(
-        html,
-        TJK_MASTER_URL
-      );
+    annotateDiagnostic(
+      diagnostics,
+      scope,
+      "HTTP_FETCH",
+      {
+        status: httpResult.status,
+        detail:
+          httpDiagnosticDetail(httpResult)
+      }
+    );
 
-    const meetings = links.length
-      ? links
-      : discoverDomesticMeetingNames(html).map(city => ({
-          city,
-          url: buildCityUrl(city)
-        }));
+    const meetings =
+      meetingsFromMasterHtml(
+        httpResult.html
+      );
 
     if (!meetings.length) {
       throw new Error(
@@ -623,7 +735,8 @@ async function discoverMeetings(
       stage: "HTTP_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${meetings.length} meetings`
+      detail:
+        `meetingCount=${meetings.length}`
     });
 
     return meetings;
@@ -648,18 +761,8 @@ async function discoverMeetings(
       () => scrapeHtml(env, TJK_MASTER_URL)
     );
 
-    const links =
-      discoverDomesticMeetingLinks(
-        html,
-        TJK_MASTER_URL
-      );
-
-    const meetings = links.length
-      ? links
-      : discoverDomesticMeetingNames(html).map(city => ({
-          city,
-          url: buildCityUrl(city)
-        }));
+    const meetings =
+      meetingsFromMasterHtml(html);
 
     if (!meetings.length) {
       throw new Error(
@@ -672,7 +775,8 @@ async function discoverMeetings(
       stage: "SCRAPE_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${meetings.length} meetings`
+      detail:
+        `meetingCount=${meetings.length}`
     });
 
     return meetings;
@@ -697,18 +801,8 @@ async function discoverMeetings(
       () => contentHtml(env, TJK_MASTER_URL)
     );
 
-    const links =
-      discoverDomesticMeetingLinks(
-        html,
-        TJK_MASTER_URL
-      );
-
-    const meetings = links.length
-      ? links
-      : discoverDomesticMeetingNames(html).map(city => ({
-          city,
-          url: buildCityUrl(city)
-        }));
+    const meetings =
+      meetingsFromMasterHtml(html);
 
     if (!meetings.length) {
       throw new Error(
@@ -721,7 +815,8 @@ async function discoverMeetings(
       stage: "CONTENT_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${meetings.length} meetings`
+      detail:
+        `meetingCount=${meetings.length}`
     });
 
     return meetings;
