@@ -227,6 +227,28 @@ export async function getToday(env: Env): Promise<any> {
         )
     };
 
+  const learningState =
+    await env.DB.prepare(`
+      SELECT
+        learning_scale
+      FROM learning_model_state
+      WHERE id = 1
+    `)
+      .first<any>();
+
+  const learningScale =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        Number(
+          learningState
+            ?.learning_scale ??
+          1
+        )
+      )
+    );
+
   const contextPriors =
     await env.DB.prepare(`
       SELECT *
@@ -535,7 +557,10 @@ export async function getToday(env: Env): Promise<any> {
                             priorFor(
                               "horse_jockey",
                               pairId
-                            )
+                            ),
+
+                          scale:
+                            learningScale
                         }
                       )
                   };

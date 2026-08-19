@@ -14,6 +14,10 @@ import {
   rebuildLearningPriors
 } from "../learning/priors";
 
+import {
+  evaluateLearningModel
+} from "../learning/evaluation";
+
 
 export async function ingestOfficialResults(
   env: Env,
@@ -53,6 +57,14 @@ export async function ingestOfficialResults(
       labels.labelledRunners > 0
     ) {
       await rebuildLearningPriors(
+        env
+      );
+
+      /*
+       * Compare base vs learned model only after
+       * fresh official labels have landed.
+       */
+      await evaluateLearningModel(
         env
       );
     }

@@ -116,6 +116,12 @@ export function applyLearningAdjustment(
 
     pair:
       ContextPrior | null;
+
+    /*
+     * Runtime safety gate.
+     * Never allowed to amplify learning above 1.
+     */
+    scale?: number;
   }
 ): HorseModelScore & {
   baseScore: number;
@@ -217,10 +223,19 @@ export function applyLearningAdjustment(
    *
    * Race-day model remains primary.
    */
+  const safetyScale =
+    clamp(
+      input.scale ??
+        1,
+      0,
+      1
+    );
+
   const adjustment =
     round(
       clamp(
-        combined,
+        combined *
+          safetyScale,
         -5,
         5
       ),
