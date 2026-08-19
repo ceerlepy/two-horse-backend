@@ -3,6 +3,7 @@ import type { TjkProgramInput } from "../types/models";
 
 import {
   discoverDomesticMeetingNames,
+  discoverDomesticMeetingLinks,
   parseTjkMeetingPage,
   assertCompleteMeeting,
   assertCompleteProgram,
@@ -474,9 +475,9 @@ Requirements:
 async function meetingThroughFourStages(
   env: Env,
   city: string,
+  url: string,
   diagnostics: TjkDiagnostic[]
 ): Promise<TjkMeeting> {
-  const url = buildCityUrl(city);
   const scope = `meeting:${city}`;
 
   /*
@@ -581,10 +582,10 @@ async function meetingThroughFourStages(
   );
 }
 
-async function discoverCities(
+async function discoverMeetings(
   env: Env,
   diagnostics: TjkDiagnostic[]
-): Promise<string[]> {
+): Promise<Array<{ city: string; url: string }>> {
   const scope = "master";
 
   /*
@@ -598,9 +599,20 @@ async function discoverCities(
       () => httpHtml(TJK_MASTER_URL)
     );
 
-    const cities = discoverDomesticMeetingNames(html);
+    const links =
+      discoverDomesticMeetingLinks(
+        html,
+        TJK_MASTER_URL
+      );
 
-    if (!cities.length) {
+    const meetings = links.length
+      ? links
+      : discoverDomesticMeetingNames(html).map(city => ({
+          city,
+          url: buildCityUrl(city)
+        }));
+
+    if (!meetings.length) {
       throw new Error(
         "NO_DOMESTIC_MEETINGS"
       );
@@ -611,10 +623,10 @@ async function discoverCities(
       stage: "HTTP_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${cities.length} meetings`
+      detail: `${meetings.length} meetings`
     });
 
-    return cities;
+    return meetings;
   } catch (error) {
     diagnostics.push({
       scope,
@@ -636,9 +648,20 @@ async function discoverCities(
       () => scrapeHtml(env, TJK_MASTER_URL)
     );
 
-    const cities = discoverDomesticMeetingNames(html);
+    const links =
+      discoverDomesticMeetingLinks(
+        html,
+        TJK_MASTER_URL
+      );
 
-    if (!cities.length) {
+    const meetings = links.length
+      ? links
+      : discoverDomesticMeetingNames(html).map(city => ({
+          city,
+          url: buildCityUrl(city)
+        }));
+
+    if (!meetings.length) {
       throw new Error(
         "NO_DOMESTIC_MEETINGS"
       );
@@ -649,10 +672,10 @@ async function discoverCities(
       stage: "SCRAPE_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${cities.length} meetings`
+      detail: `${meetings.length} meetings`
     });
 
-    return cities;
+    return meetings;
   } catch (error) {
     diagnostics.push({
       scope,
@@ -674,9 +697,20 @@ async function discoverCities(
       () => contentHtml(env, TJK_MASTER_URL)
     );
 
-    const cities = discoverDomesticMeetingNames(html);
+    const links =
+      discoverDomesticMeetingLinks(
+        html,
+        TJK_MASTER_URL
+      );
 
-    if (!cities.length) {
+    const meetings = links.length
+      ? links
+      : discoverDomesticMeetingNames(html).map(city => ({
+          city,
+          url: buildCityUrl(city)
+        }));
+
+    if (!meetings.length) {
       throw new Error(
         "NO_DOMESTIC_MEETINGS"
       );
@@ -687,10 +721,10 @@ async function discoverCities(
       stage: "CONTENT_PARSE",
       ok: true,
       durationMs: 0,
-      detail: `${cities.length} meetings`
+      detail: `${meetings.length} meetings`
     });
 
-    return cities;
+    return meetings;
   } catch (error) {
     diagnostics.push({
       scope,
@@ -821,18 +855,20 @@ export async function extractTjkProgramWithFallbacks(
   const diagnostics: TjkDiagnostic[] = [];
 
   try {
-    const cities = await discoverCities(
-      env,
-      diagnostics
-    );
+    const discoveredMeetings =
+      await discoverMeetings(
+        env,
+        diagnostics
+      );
 
     const meetings = await mapLimited(
-      cities,
+      discoveredMeetings,
       CITY_CONCURRENCY,
-      city =>
+      discovered =>
         meetingThroughFourStages(
           env,
-          city,
+          discovered.city,
+          discovered.url,
           diagnostics
         )
     );

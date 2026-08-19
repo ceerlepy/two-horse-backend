@@ -75,6 +75,73 @@ function anchorText(
  *
  * We extract those semantic labels from rendered text.
  */
+
+export interface TjkMeetingLink {
+  city: string;
+  url: string;
+}
+
+/**
+ * Prefer TJK's server-provided city-detail href.
+ *
+ * The master page currently links domestic meetings to:
+ * /TR/YarisSever/Info/Sehir/GunlukYarisProgrami
+ * and includes server-owned parameters such as SehirId.
+ *
+ * Keeping that href avoids guessing city IDs or routing semantics.
+ */
+export function discoverDomesticMeetingLinks(
+  html: string,
+  baseUrl: string
+): TjkMeetingLink[] {
+  const $ = cheerio.load(html);
+  const result = new Map<string, TjkMeetingLink>();
+
+  $("a[href]").each((_, element) => {
+    const href = clean($(element).attr("href"));
+    const label = clean($(element).text());
+
+    if (
+      !href ||
+      !/\/Info\/Sehir\/GunlukYarisProgrami/i.test(href) ||
+      /\(\s*YD\b/iu.test(label)
+    ) {
+      return;
+    }
+
+    try {
+      const url = new URL(href, baseUrl);
+
+      const queryCity = clean(
+        url.searchParams.get("SehirAdi")
+      );
+
+      const labelCity = clean(
+        label.replace(/\([^)]*\)/g, "")
+      );
+
+      const city = queryCity || labelCity;
+
+      if (!city) {
+        return;
+      }
+
+      const key = city.toLocaleLowerCase("tr-TR");
+
+      if (!result.has(key)) {
+        result.set(key, {
+          city,
+          url: url.toString()
+        });
+      }
+    } catch {
+      // malformed href: ignore and allow semantic fallback
+    }
+  });
+
+  return [...result.values()];
+}
+
 export function discoverDomesticMeetingNames(html: string): string[] {
   const $ = cheerio.load(html);
   const result = new Map<string, string>();
