@@ -3,13 +3,8 @@ import type {
 } from "../env";
 
 import {
-  acquireAndParse
-} from "../acquisition/deterministic";
-
-import {
-  parseTjkFieldPerformancePage,
-  validateTjkFieldPerformancePage
-} from "./tjk-performance-parser";
+  acquireTjkFieldPage
+} from "./acquisition";
 
 import {
   scoreTjkFieldHistory
@@ -92,11 +87,9 @@ export async function refreshFieldSignalsIfDue(
     async candidate => {
       try {
         const acquired =
-          await acquireAndParse(
+          await acquireTjkFieldPage(
             env,
-            candidate.performanceUrl,
-            parseTjkFieldPerformancePage,
-            validateTjkFieldPerformancePage
+            candidate.performanceUrl
           );
 
         const byHorse =
@@ -163,7 +156,7 @@ export async function refreshFieldSignalsIfDue(
           env,
           candidate,
           scores,
-          acquired.acquired.stage
+          acquired.method
         );
       } catch (error) {
         await markFieldRaceFailure(
