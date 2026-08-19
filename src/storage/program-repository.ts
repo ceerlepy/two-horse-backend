@@ -4,6 +4,15 @@ import { turkeyDate, turkeyDateTime } from "../shared";
 import { aggregateExpertPredictions } from "../experts/aggregator";
 import { scoreRace, raceUncertainty } from "../scoring/race-score";
 
+import {
+  getTodayMarketSnapshots,
+  marketRunnerKey
+} from "../market/repository";
+
+import {
+  analyzeMarketMovement
+} from "../market/market-score";
+
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
   const statements: D1PreparedStatement[] = [];
@@ -86,6 +95,11 @@ export async function getToday(env: Env): Promise<any> {
   const meetings = await env.DB.prepare("SELECT city,updated_at FROM meetings WHERE race_date=? ORDER BY city").bind(date).all<any>();
   const races = await env.DB.prepare("SELECT * FROM races WHERE race_date=? ORDER BY city,race_number").bind(date).all<any>();
   const runners = await env.DB.prepare("SELECT * FROM runners WHERE race_date=? ORDER BY city,race_number,horse_number").bind(date).all<any>();
+  const marketSnapshots =
+    await getTodayMarketSnapshots(
+      env
+    );
+
   const experts = await env.DB.prepare(`
     SELECT
       ep.*,
@@ -142,8 +156,30 @@ export async function getToday(env: Env): Promise<any> {
                             runner.horse_number
                       );
 
+                    const marketMovement =
+                      analyzeMarketMovement(
+                        marketSnapshots[
+                          marketRunnerKey(
+                            m.city,
+                            race.race_number,
+                            runner.horse_number
+                          )
+                        ] ?? []
+                      );
+
                     return {
                       ...runner,
+
+                      /*
+                       * Diagnostics/UI representation.
+                       */
+                      marketMovement,
+
+                      /*
+                       * Final model input.
+                       */
+                      market_score:
+                        marketMovement.score,
 
                       expertPredictions,
 

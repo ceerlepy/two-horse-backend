@@ -15,6 +15,12 @@ export interface ScoringRunner {
    */
   recent_form_raw?: string | null;
 
+  /*
+   * Computed from time-separated AGF snapshots.
+   * Null means insufficient movement history.
+   */
+  market_score?: number | null;
+
   expertConsensus:
     ExpertConsensus;
 }

@@ -47,6 +47,51 @@ const HTTP_TIMEOUT_MS = 15_000;
 const BROWSER_TIMEOUT_MS = 25_000;
 const CITY_CONCURRENCY = 4;
 
+/*
+ * HTTP parsing remains concurrently fast.
+ *
+ * Only Browser Run fallback is bounded.
+ * This protects Browser limits/cost when multiple
+ * TJK city pages fail HTTP simultaneously.
+ */
+const BROWSER_FALLBACK_CONCURRENCY = 2;
+
+let browserFallbackActive = 0;
+
+const browserFallbackWaiters:
+  Array<() => void> = [];
+
+async function withBrowserFallbackSlot<T>(
+  work: () => Promise<T>
+): Promise<T> {
+  if (
+    browserFallbackActive >=
+    BROWSER_FALLBACK_CONCURRENCY
+  ) {
+    await new Promise<void>(
+      resolve =>
+        browserFallbackWaiters.push(
+          resolve
+        )
+    );
+  }
+
+  browserFallbackActive += 1;
+
+  try {
+    return await work();
+  } finally {
+    browserFallbackActive -= 1;
+
+    const next =
+      browserFallbackWaiters.shift();
+
+    if (next) {
+      next();
+    }
+  }
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error
     ? error.message
@@ -308,9 +353,12 @@ async function scrapeHtml(
   env: Env,
   url: string
 ): Promise<string> {
-  const response = await env.BROWSER.quickAction(
-    "scrape",
-    {
+  const response =
+    await withBrowserFallbackSlot(
+      () =>
+        env.BROWSER.quickAction(
+          "scrape",
+          {
       url,
 
       elements: [
@@ -329,8 +377,9 @@ async function scrapeHtml(
         "media",
         "font"
       ]
-    }
-  );
+          }
+        )
+    );
 
   if (!response.ok) {
     const body = await response.text();
@@ -359,9 +408,12 @@ async function contentHtml(
   env: Env,
   url: string
 ): Promise<string> {
-  const response = await env.BROWSER.quickAction(
-    "content",
-    {
+  const response =
+    await withBrowserFallbackSlot(
+      () =>
+        env.BROWSER.quickAction(
+          "content",
+          {
       url,
 
       gotoOptions: {
@@ -374,8 +426,9 @@ async function contentHtml(
         "media",
         "font"
       ]
-    }
-  );
+          }
+        )
+    );
 
   if (!response.ok) {
     const body = await response.text();
@@ -488,12 +541,15 @@ async function jsonMeeting(
   city: string,
   url: string
 ): Promise<TjkMeeting> {
-  const response = await env.BROWSER.quickAction(
-    "json",
-    {
-      url,
+  const response =
+    await withBrowserFallbackSlot(
+      () =>
+        env.BROWSER.quickAction(
+          "json",
+          {
+            url,
 
-      prompt: `
+            prompt: `
 Read this official Turkish Jockey Club daily race program for ${city}.
 
 Return JSON in this exact logical shape:
@@ -534,8 +590,9 @@ Requirements:
 - use null for optional fields only when not shown
 - time must be HH:mm
 `
-    }
-  );
+          }
+        )
+    );
 
   if (!response.ok) {
     const body = await response.text();

@@ -18,6 +18,14 @@ import {
 } from "../storage/program-repository";
 
 import {
+  recordAgfSnapshots
+} from "../market/repository";
+
+import {
+  adaptiveTjkPolicy
+} from "../market/refresh-policy";
+
+import {
   getTjkProgramUrl,
   rediscoverTjkProgramUrl
 } from "./registry";
@@ -31,11 +39,64 @@ import {
 const KEY = "tjk:program";
 
 /*
- * Canonical race structure changes slowly.
- * AGF / live market will use a separate adaptive pipeline.
+ * Canonical program + live AGF share ONE validated
+ * TJK acquisition.
+ *
+ * Adaptive cadence determines how often that one
+ * acquisition runs.
  */
-const TTL_MS =
-  60 * 60 * 1000;
+
+function summarizeTjkDiagnostics(
+  diagnostics:
+    TjkDiagnostic[]
+): {
+  fallbackUsed: boolean;
+  browserFallbackUsed: boolean;
+  successfulStages: string[];
+} {
+  const successfulStages =
+    diagnostics
+      .filter(
+        item => item.ok
+      )
+      .map(
+        item =>
+          `${item.scope}:${item.stage}`
+      );
+
+  const browserFallbackUsed =
+    diagnostics.some(
+      item =>
+        item.ok &&
+        (
+          item.stage ===
+            "CF_SCRAPE" ||
+          item.stage ===
+            "SCRAPE_PARSE" ||
+          item.stage ===
+            "CF_CONTENT" ||
+          item.stage ===
+            "CONTENT_PARSE" ||
+          item.stage ===
+            "CF_JSON" ||
+          item.stage ===
+            "JSON_VALIDATE"
+        )
+    );
+
+  return {
+    fallbackUsed:
+      diagnostics.some(
+        item =>
+          !item.ok
+      ) ||
+      browserFallbackUsed,
+
+    browserFallbackUsed,
+
+    successfulStages
+  };
+}
 
 export async function refreshProgramIfDue(
   env: Env,
@@ -44,20 +105,42 @@ export async function refreshProgramIfDue(
   refreshed: boolean;
   reason: string;
   diagnostics: TjkDiagnostic[];
+
+  acquisitionSummary: {
+    fallbackUsed: boolean;
+    browserFallbackUsed: boolean;
+    successfulStages: string[];
+  };
 }> {
   const state = await getState(
     env,
     KEY
   );
 
+  const policy =
+    await adaptiveTjkPolicy(
+      env
+    );
+
   if (
     !force &&
-    !isDue(state, TTL_MS)
+    !isDue(
+      state,
+      policy.ttlMs
+    )
   ) {
     return {
       refreshed: false,
-      reason: "fresh",
-      diagnostics: []
+      reason:
+        `fresh:${policy.reason}`,
+
+      diagnostics: [],
+
+      acquisitionSummary: {
+        fallbackUsed: false,
+        browserFallbackUsed: false,
+        successfulStages: []
+      }
     };
   }
 
@@ -70,8 +153,16 @@ export async function refreshProgramIfDue(
   ) {
     return {
       refreshed: false,
-      reason: "already-refreshing",
-      diagnostics: []
+      reason:
+        "already-refreshing",
+
+      diagnostics: [],
+
+      acquisitionSummary: {
+        fallbackUsed: false,
+        browserFallbackUsed: false,
+        successfulStages: []
+      }
     };
   }
 
@@ -121,6 +212,18 @@ export async function refreshProgramIfDue(
 
     const program = extracted.program;
 
+    /*
+     * Snapshot after successful canonical validation,
+     * BEFORE source-hash de-duplication.
+     *
+     * An unchanged AGF is still meaningful evidence
+     * of a flat market.
+     */
+    await recordAgfSnapshots(
+      env,
+      program
+    );
+
     const sourceHash = await sha256(
       JSON.stringify(program)
     );
@@ -163,7 +266,12 @@ export async function refreshProgramIfDue(
           ? "unchanged"
           : "updated",
 
-      diagnostics
+      diagnostics,
+
+      acquisitionSummary:
+        summarizeTjkDiagnostics(
+          diagnostics
+        )
     };
   } catch (error) {
     if (

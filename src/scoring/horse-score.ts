@@ -86,7 +86,11 @@ export function scoreHorse(
 
     {
       key: "market" as const,
-      score: null,
+
+      score:
+        runner.market_score ??
+        null,
+
       configuredWeight:
         SCORING_WEIGHTS.market
     },
