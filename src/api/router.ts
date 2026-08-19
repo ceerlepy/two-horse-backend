@@ -30,6 +30,26 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
         }
     }
 
+    if(url.pathname==="/api/admin/refresh-experts" && request.method==="POST") {
+  try {
+    const experts =
+      await refreshExpertsIfDue(
+        env,
+        true
+      );
+
+    return json({
+      ok:true,
+      experts
+    });
+  } catch(e) {
+    return json({
+      ok:false,
+      error:errorMessage(e)
+    },502);
+  }
+ }
+
     if(url.pathname==="/api/admin/refresh-field" && request.method==="POST") {
   try {
     await refreshFieldSignalsIfDue(

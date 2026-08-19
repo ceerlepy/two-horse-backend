@@ -7,7 +7,8 @@ import type {
 } from "../types/models";
 
 import {
-  unwrapQuickActionJson
+  unwrapQuickActionJson,
+  turkeyDate
 } from "../shared";
 
 import {
@@ -36,12 +37,43 @@ export async function extractExperts(
   url: string,
   sourceName: string
 ): Promise<ExtractedExperts> {
+  const raceDate =
+    turkeyDate();
+
+  const meetings =
+    await env.DB.prepare(`
+      SELECT city
+      FROM meetings
+      WHERE race_date = ?
+      ORDER BY city
+    `)
+      .bind(raceDate)
+      .all<any>();
+
+  const cities =
+    (
+      meetings.results ??
+      []
+    )
+      .map(
+        (row:any) =>
+          String(row.city)
+      );
+
+  if (!cities.length) {
+    throw new Error(
+      "EXPERT_NO_CANONICAL_MEETINGS"
+    );
+  }
+
   const result =
     await extractSemanticJson<any>(
       env,
       url,
       expertExtractionPrompt(
-        sourceName
+        sourceName,
+        raceDate,
+        cities
       ),
       {
         type:

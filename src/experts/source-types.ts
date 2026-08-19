@@ -19,7 +19,8 @@ export interface ExpertRefreshResult {
     | "updated"
     | "unchanged"
     | "failed"
-    | "no-url";
+    | "no-url"
+    | "no-current-card";
 
   count?: number;
 

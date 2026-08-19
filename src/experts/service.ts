@@ -191,6 +191,27 @@ async function processSource(
       .extraction
       .picks;
 
+  /*
+   * A source may simply not have published today's
+   * card yet. That is not the same as parser failure.
+   */
+  if (
+    extractedPicks.length === 0
+  ) {
+    return {
+      source:
+        source.source_key,
+
+      status:
+        "no-current-card",
+
+      count: 0,
+
+      extractionMethod:
+        extracted.method
+    };
+  }
+
   const picks =
     await validateExpertPicks(
       env,
@@ -198,17 +219,14 @@ async function processSource(
     );
 
   /*
-   * Semantic extraction may succeed syntactically but
-   * still describe yesterday / another meeting.
-   *
-   * Do NOT mark the source healthy when none of the
-   * extracted picks match today's canonical TJK card.
+   * Non-empty extraction where ZERO picks match
+   * canonical TJK runners is a wrong/stale-card error.
    */
   if (
     picks.length === 0
   ) {
     throw new Error(
-      `EXPERT_NO_VALID_TODAY_PICKS:` +
+      `EXPERT_WRONG_CARD:` +
       `${source.source_key}:` +
       `extracted=${extractedPicks.length}`
     );
