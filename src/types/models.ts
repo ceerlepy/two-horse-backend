@@ -5,6 +5,7 @@ export interface RunnerInput {
   weight: number | null;
   hp: number | null;
   agfPercent: number | null;
+  horseProfileUrl: string | null;
 }
 
 export interface RaceInput {

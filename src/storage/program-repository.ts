@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import type { TjkProgramInput } from "../types/models";
 import { turkeyDate, turkeyDateTime } from "../shared";
 import { aggregateExpertPredictions } from "../experts/aggregator";
+import { scoreRace, raceUncertainty } from "../scoring/race-score";
 
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
@@ -27,10 +28,49 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
         start_time=excluded.start_time,starts_at=excluded.starts_at,distance_meters=excluded.distance_meters,track=excluded.track,updated_at=CURRENT_TIMESTAMP`)
         .bind(date, meeting.city, race.raceNumber, race.time, startsAt, race.distanceMeters, race.track));
       for (const r of race.runners) {
-        statements.push(env.DB.prepare(`INSERT INTO runners(race_date,city,race_number,horse_number,horse_name,jockey,weight,hp,agf_percent,updated_at)
-          VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(race_date,city,race_number,horse_number) DO UPDATE SET
-          horse_name=excluded.horse_name,jockey=excluded.jockey,weight=excluded.weight,hp=excluded.hp,agf_percent=excluded.agf_percent,updated_at=CURRENT_TIMESTAMP`)
-          .bind(date, meeting.city, race.raceNumber, r.number, r.name, r.jockey, r.weight, r.hp, r.agfPercent));
+        statements.push(env.DB.prepare(`INSERT INTO runners(
+            race_date,
+            city,
+            race_number,
+            horse_number,
+            horse_name,
+            jockey,
+            weight,
+            hp,
+            agf_percent,
+            horse_profile_url,
+            updated_at
+          )
+          VALUES(
+            ?,?,?,?,?,?,?,?,?,?,
+            CURRENT_TIMESTAMP
+          )
+          ON CONFLICT(
+            race_date,
+            city,
+            race_number,
+            horse_number
+          )
+          DO UPDATE SET
+            horse_name=excluded.horse_name,
+            jockey=excluded.jockey,
+            weight=excluded.weight,
+            hp=excluded.hp,
+            agf_percent=excluded.agf_percent,
+            horse_profile_url=excluded.horse_profile_url,
+            updated_at=CURRENT_TIMESTAMP`)
+          .bind(
+            date,
+            meeting.city,
+            race.raceNumber,
+            r.number,
+            r.name,
+            r.jockey,
+            r.weight,
+            r.hp,
+            r.agfPercent,
+            r.horseProfileUrl
+          ));
       }
     }
   }
@@ -59,33 +99,77 @@ export async function getToday(env: Env): Promise<any> {
       ep.source_rank,
       ep.horse_number
   `).bind(date).all<any>();
-  return (meetings.results ?? []).map((m:any) => ({
-    city:m.city,
-    races:(races.results ?? []).filter((r:any)=>r.city===m.city).map((r:any)=>({
-      ...r,
-      runners:(runners.results ?? []).filter((x:any)=>x.city===m.city && x.race_number===r.race_number).map((x:any)=>({
-        ...x,
+  return (meetings.results ?? []).map((m:any) => {
+    const meetingRaces =
+      (races.results ?? [])
+        .filter(
+          (r:any) =>
+            r.city === m.city
+        );
 
-        expertPredictions:
-          (experts.results ?? [])
-            .filter(
-              (e:any) =>
-                e.city === m.city &&
-                e.race_number === r.race_number &&
-                e.horse_number === x.horse_number
-            ),
+    return {
+      city: m.city,
 
-        expertConsensus:
-          aggregateExpertPredictions(
-            (experts.results ?? [])
-              .filter(
-                (e:any) =>
-                  e.city === m.city &&
-                  e.race_number === r.race_number &&
-                  e.horse_number === x.horse_number
-              )
-          )
-      }))
-    }))
-  }));
+      races:
+        meetingRaces.map(
+          (race:any) => {
+            const raceExperts =
+              (experts.results ?? [])
+                .filter(
+                  (e:any) =>
+                    e.city === m.city &&
+                    e.race_number ===
+                      race.race_number
+                );
+
+            const assembledRunners =
+              (runners.results ?? [])
+                .filter(
+                  (runner:any) =>
+                    runner.city === m.city &&
+                    runner.race_number ===
+                      race.race_number
+                )
+                .map(
+                  (runner:any) => {
+                    const expertPredictions =
+                      raceExperts.filter(
+                        (e:any) =>
+                          e.horse_number ===
+                            runner.horse_number
+                      );
+
+                    return {
+                      ...runner,
+
+                      expertPredictions,
+
+                      expertConsensus:
+                        aggregateExpertPredictions(
+                          expertPredictions
+                        )
+                    };
+                  }
+                );
+
+            const scoredRunners =
+              scoreRace(
+                assembledRunners
+              );
+
+            return {
+              ...race,
+
+              uncertainty:
+                raceUncertainty(
+                  scoredRunners
+                ),
+
+              runners:
+                scoredRunners
+            };
+          }
+        )
+    };
+  });
 }

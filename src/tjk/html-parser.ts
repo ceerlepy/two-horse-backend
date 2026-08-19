@@ -53,6 +53,36 @@ function parseAgf(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function anchorHref(
+  $: cheerio.CheerioAPI,
+  cell: cheerio.Cheerio<any>
+): string | null {
+  const anchor =
+    cell.find("a[href]").first();
+
+  if (!anchor.length) {
+    return null;
+  }
+
+  const href =
+    clean(
+      anchor.attr("href")
+    );
+
+  if (!href) {
+    return null;
+  }
+
+  try {
+    return new URL(
+      href,
+      "https://www.tjk.org"
+    ).toString();
+  } catch {
+    return null;
+  }
+}
+
 function anchorText(
   $: cheerio.CheerioAPI,
   cell: cheerio.Cheerio<any>
@@ -317,7 +347,13 @@ function parseRunnerTable(
       agfPercent:
         agfCell
           ? parseAgf(agfCell.text())
-          : null
+          : null,
+
+      horseProfileUrl:
+        anchorHref(
+          $,
+          nameCell
+        )
     });
   });
 

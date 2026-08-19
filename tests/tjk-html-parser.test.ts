@@ -140,6 +140,55 @@ describe("TJK city parser", () => {
     });
   });
 
+  it("retains horse profile URL for form ingestion", () => {
+    const linkedHtml = `
+      <html>
+        <body>
+          <h3>1. Koşu 17.00</h3>
+          <h3>1200 Kum</h3>
+
+          <table>
+            <tr>
+              <th>No</th>
+              <th>At İsmi</th>
+              <th>Sıklet</th>
+              <th>Jokey</th>
+              <th>HP</th>
+              <th>AGF</th>
+            </tr>
+
+            <tr>
+              <td>1</td>
+              <td>
+                <a href="/TR/Kurumsal/Query/ConnectedPage/AtKosuBilgileri?QueryParameter_AtId=99665">
+                  HIZLI ÇOCUK
+                </a>
+              </td>
+              <td>61.5</td>
+              <td>S.KAYA</td>
+              <td>94</td>
+              <td>%29</td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const meeting =
+      parseTjkMeetingPage(
+        linkedHtml,
+        "İstanbul"
+      );
+
+    expect(
+      meeting.races[0]
+        .runners[0]
+        .horseProfileUrl
+    ).toContain(
+      "QueryParameter_AtId=99665"
+    );
+  });
+
   it("keeps runner number/name pairs intact", () => {
     const meeting =
       parseTjkMeetingPage(
