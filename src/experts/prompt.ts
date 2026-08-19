@@ -1,13 +1,17 @@
 export function expertExtractionPrompt(
   sourceName: string,
-  raceDate: string,
-  cities: string[]
+  raceDate = "BUGÜN",
+  cities: string[] = []
 ): string {
   return `
 ${sourceName} sayfasındaki Türkiye at yarışı tahmin ve yorumlarını çıkar.
 
 HEDEF TARİH: ${raceDate}
-HEDEF ŞEHİRLER: ${cities.join(", ")}
+HEDEF ŞEHİRLER: ${
+  cities.length
+    ? cities.join(", ")
+    : "BUGÜNÜN RESMİ PROGRAMINDAKİ ŞEHİRLER"
+}
 
 Yalnızca HEDEF TARİH ve HEDEF ŞEHİRLER için açıkça görülen tahminleri çıkar.
 
