@@ -328,7 +328,13 @@ export async function getToday(env: Env): Promise<any> {
     FROM expert_predictions ep
     LEFT JOIN source_registry sr
       ON sr.source_key = ep.source_key
-    WHERE ep.race_date = ?
+    WHERE
+      ep.race_date = ?
+      AND COALESCE(
+        sr.enabled,
+        0
+      ) = 1
+
     ORDER BY
       ep.city,
       ep.race_number,

@@ -26,6 +26,10 @@ import {
   evaluateAdvancedLearning
 } from "../learning/advanced-evaluation";
 
+import {
+  evaluateCouponStrategies
+} from "../coupon/evaluation";
+
 
 export async function ingestOfficialResults(
   env: Env,
@@ -81,6 +85,10 @@ export async function ingestOfficialResults(
       );
 
       await evaluateAdvancedLearning(
+        env
+      );
+
+      await evaluateCouponStrategies(
         env
       );
     }

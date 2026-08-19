@@ -444,6 +444,31 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
      ORDER BY entity_type
     `).all<any>();
 
+   const couponMetrics=
+    await env.DB.prepare(`
+     SELECT
+      mode,
+      evaluated_races,
+      winner_covered_races,
+      hit_rate,
+      avg_selection_count,
+      updated_at
+     FROM coupon_strategy_metrics
+     ORDER BY mode
+    `).all<any>();
+
+   const labelAudit=
+    await env.DB.prepare(`
+     SELECT
+      reason,
+      COUNT(*) count,
+      MAX(attempted_at)
+        last_seen_at
+     FROM learning_label_audit
+     GROUP BY reason
+     ORDER BY count DESC
+    `).all<any>();
+
    const sourceHealth=
     await env.DB.prepare(`
      SELECT
@@ -477,6 +502,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
 
     expertCategories:
      categories.results,
+
+    couponMetrics:
+     couponMetrics.results,
+
+    labelAudit:
+     labelAudit.results,
 
     sourceHealth:
      sourceHealth.results

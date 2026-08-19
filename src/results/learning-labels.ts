@@ -27,6 +27,45 @@ interface FrozenRunner {
 }
 
 
+async function auditSkip(
+  env: Env,
+  input: {
+    raceDate: string;
+    city: string;
+    raceNumber: number;
+    reason: string;
+    frozenCount: number;
+    officialCount: number;
+    detail?: string;
+  }
+): Promise<void> {
+  await env.DB.prepare(`
+    INSERT INTO learning_label_audit(
+      race_date,
+      city,
+      race_number,
+      attempted_at,
+      reason,
+      frozen_runner_count,
+      official_runner_count,
+      detail
+    )
+    VALUES(?,?,?,?,?,?,?,?)
+  `)
+    .bind(
+      input.raceDate,
+      input.city,
+      input.raceNumber,
+      new Date().toISOString(),
+      input.reason,
+      input.frozenCount,
+      input.officialCount,
+      input.detail ?? null
+    )
+    .run();
+}
+
+
 /*
  * Attach labels ONLY when official result runners
  * match our immutable pre-race runner set.
@@ -80,6 +119,28 @@ export async function attachMeetingResultsToLearning(
      * nothing leakage-safe to train from.
      */
     if (expected.length === 0) {
+      await auditSkip(
+        env,
+        {
+          raceDate:
+            result.raceDate,
+
+          city:
+            result.city,
+
+          raceNumber:
+            race.raceNumber,
+
+          reason:
+            "NO_FROZEN_SNAPSHOT",
+
+          frozenCount: 0,
+
+          officialCount:
+            race.runners.length
+        }
+      );
+
       skippedRaces += 1;
       continue;
     }
@@ -88,6 +149,29 @@ export async function attachMeetingResultsToLearning(
       expected.length !==
       race.runners.length
     ) {
+      await auditSkip(
+        env,
+        {
+          raceDate:
+            result.raceDate,
+
+          city:
+            result.city,
+
+          raceNumber:
+            race.raceNumber,
+
+          reason:
+            "RUNNER_COUNT_MISMATCH",
+
+          frozenCount:
+            expected.length,
+
+          officialCount:
+            race.runners.length
+        }
+      );
+
       skippedRaces += 1;
       continue;
     }
@@ -134,6 +218,29 @@ export async function attachMeetingResultsToLearning(
     }
 
     if (!exactMatch) {
+      await auditSkip(
+        env,
+        {
+          raceDate:
+            result.raceDate,
+
+          city:
+            result.city,
+
+          raceNumber:
+            race.raceNumber,
+
+          reason:
+            "RUNNER_IDENTITY_MISMATCH",
+
+          frozenCount:
+            expected.length,
+
+          officialCount:
+            race.runners.length
+        }
+      );
+
       skippedRaces += 1;
       continue;
     }

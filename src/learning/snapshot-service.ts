@@ -25,6 +25,12 @@ import {
   loadRaceMarketFeatures
 } from "./market-features";
 
+import {
+  MODEL_VERSION,
+  LEARNING_POLICY_VERSION,
+  COUPON_POLICY_VERSION
+} from "../model/version";
+
 
 interface CandidateRow {
   race_date: string;
@@ -156,6 +162,23 @@ export async function capturePreRaceCandidates(
               track:
                 race.track ??
                 null,
+
+              uncertainty:
+                race.uncertainty ??
+                null,
+
+              couponStrategy:
+                race.couponStrategy ??
+                null,
+
+              modelVersion:
+                MODEL_VERSION,
+
+              learningPolicyVersion:
+                LEARNING_POLICY_VERSION,
+
+              couponPolicyVersion:
+                COUPON_POLICY_VERSION,
 
               runners:
                 race.runners ?? []
@@ -340,6 +363,57 @@ export async function promoteStartedCandidates(
 
         track:
           snapshot.track ??
+          null,
+
+        modelVersion:
+          snapshot.modelVersion ??
+          MODEL_VERSION,
+
+        learningPolicyVersion:
+          snapshot.learningPolicyVersion ??
+          LEARNING_POLICY_VERSION,
+
+        couponPolicyVersion:
+          snapshot.couponPolicyVersion ??
+          COUPON_POLICY_VERSION,
+
+        couponMode:
+          snapshot
+            .couponStrategy
+            ?.mode ??
+          null,
+
+        couponHorseNumbers:
+          Array.isArray(
+            snapshot
+              .couponStrategy
+              ?.horseNumbers
+          )
+            ? snapshot
+                .couponStrategy
+                .horseNumbers
+                .map(Number)
+                .filter(
+                  Number.isFinite
+                )
+            : [],
+
+        couponConfidence:
+          snapshot
+            .couponStrategy
+            ?.confidence ??
+          null,
+
+        couponExpansionPressure:
+          snapshot
+            .couponStrategy
+            ?.expansionPressure ??
+          null,
+
+        couponReason:
+          snapshot
+            .couponStrategy
+            ?.reason ??
           null,
 
         /*

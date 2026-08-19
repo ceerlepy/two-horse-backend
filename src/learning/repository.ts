@@ -63,6 +63,17 @@ export async function insertLearningRace(
     startsAt: string | null;
     distanceMeters: number | null;
     track: string | null;
+
+    modelVersion: string;
+    learningPolicyVersion: string;
+    couponPolicyVersion: string;
+
+    couponMode: string | null;
+    couponHorseNumbers: number[];
+    couponConfidence: number | null;
+    couponExpansionPressure: number | null;
+    couponReason: string | null;
+
     snapshotAt: string;
   }
 ): Promise<void> {
@@ -74,9 +85,25 @@ export async function insertLearningRace(
       starts_at,
       distance_meters,
       track,
+
+      model_version,
+      learning_policy_version,
+      coupon_policy_version,
+
+      coupon_mode,
+      coupon_horse_numbers_json,
+      coupon_confidence,
+      coupon_expansion_pressure,
+      coupon_reason,
+
       snapshot_at
     )
-    VALUES(?,?,?,?,?,?,?)
+    VALUES(
+      ?,?,?,?,?,?,
+      ?,?,?,
+      ?,?,?,?,?,
+      ?
+    )
 
     ON CONFLICT(
       race_date,
@@ -92,6 +119,19 @@ export async function insertLearningRace(
       input.startsAt,
       input.distanceMeters,
       input.track,
+
+      input.modelVersion,
+      input.learningPolicyVersion,
+      input.couponPolicyVersion,
+
+      input.couponMode,
+      JSON.stringify(
+        input.couponHorseNumbers
+      ),
+      input.couponConfidence,
+      input.couponExpansionPressure,
+      input.couponReason,
+
       input.snapshotAt
     )
     .run();
