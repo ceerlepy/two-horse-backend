@@ -384,6 +384,112 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
 
+
+ if(url.pathname==="/api/debug/model") {
+  try {
+   const state=
+    await env.DB.prepare(`
+     SELECT *
+     FROM learning_model_state
+     WHERE id=1
+    `).first<any>();
+
+   const advanced=
+    await env.DB.prepare(`
+     SELECT *
+     FROM learning_advanced_metrics
+     WHERE id=1
+    `).first<any>();
+
+   const expert=
+    await env.DB.prepare(`
+     SELECT
+      source_key,
+      sample_size,
+      winner_hit_rate,
+      top3_hit_rate,
+      multiplier,
+      updated_at
+     FROM expert_learning_priors
+     ORDER BY
+      sample_size DESC,
+      source_key
+    `).all<any>();
+
+   const categories=
+    await env.DB.prepare(`
+     SELECT
+      source_key,
+      category,
+      sample_size,
+      winner_hit_rate,
+      top3_hit_rate,
+      multiplier,
+      updated_at
+     FROM expert_category_priors
+     ORDER BY
+      source_key,
+      category
+    `).all<any>();
+
+   const context=
+    await env.DB.prepare(`
+     SELECT
+      entity_type,
+      COUNT(*) prior_count,
+      SUM(sample_size) total_samples,
+      MAX(sample_size) max_samples
+     FROM learning_context_priors
+     GROUP BY entity_type
+     ORDER BY entity_type
+    `).all<any>();
+
+   const sourceHealth=
+    await env.DB.prepare(`
+     SELECT
+      source_key,
+      source_name,
+      health_status,
+      enabled,
+      consecutive_failures,
+      last_success_at,
+      last_failure_at
+     FROM source_registry
+     ORDER BY
+      enabled DESC,
+      source_name
+    `).all<any>();
+
+   return json({
+    ok:true,
+
+    learningGate:
+     state ?? null,
+
+    advancedEvaluation:
+     advanced ?? null,
+
+    contextPriors:
+     context.results,
+
+    expertSources:
+     expert.results,
+
+    expertCategories:
+     categories.results,
+
+    sourceHealth:
+     sourceHealth.results
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/debug/refresh-state") return json({states:(await env.DB.prepare("SELECT * FROM refresh_state ORDER BY pipeline_key").all()).results});
  return json({error:"not_found",path:url.pathname},404);
 }

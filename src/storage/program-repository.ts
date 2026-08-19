@@ -33,6 +33,14 @@ import {
   type GlobalOutcomeRates
 } from "../learning/adjustment";
 
+import {
+  expertCategory
+} from "../learning/expert-category";
+
+import {
+  recommendCouponStrategy
+} from "../coupon/strategy";
+
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
   const statements: D1PreparedStatement[] = [];
@@ -276,6 +284,42 @@ export async function getToday(env: Env): Promise<any> {
       )
     );
 
+  const expertCategoryPriors =
+    await env.DB.prepare(`
+      SELECT
+        source_key,
+        category,
+        multiplier
+      FROM expert_category_priors
+    `)
+      .all<any>();
+
+  const expertCategoryMultiplier =
+    new Map<string, number>(
+      (
+        expertCategoryPriors
+          .results ??
+        []
+      ).map(
+        (row:any) => [
+          `${
+            String(
+              row.source_key
+            )
+          }|${
+            String(
+              row.category
+            )
+          }`,
+
+          Number(
+            row.multiplier ??
+            1
+          )
+        ]
+      )
+    );
+
   const experts = await env.DB.prepare(`
     SELECT
       ep.*,
@@ -333,27 +377,63 @@ export async function getToday(env: Env): Promise<any> {
                               runner.horse_number
                         )
                         .map(
-                          (e:any) => ({
-                            ...e,
+                          (e:any) => {
+                            const category =
+                              expertCategory(
+                                e
+                              );
 
-                            /*
-                             * Historical learning only changes
-                             * this source's own contribution.
-                             */
-                            base_weight:
-                              Number(
-                                e.base_weight ??
-                                1
-                              ) *
-                              (
-                                expertMultiplier.get(
-                                  String(
-                                    e.source_key
-                                  )
-                                ) ??
-                                1
-                              )
-                          })
+                            const generalMultiplier =
+                              expertMultiplier.get(
+                                String(
+                                  e.source_key
+                                )
+                              ) ??
+                              1;
+
+                            const categoryMultiplier =
+                              category == null
+                                ? 1
+                                : (
+                                    expertCategoryMultiplier
+                                      .get(
+                                        `${
+                                          String(
+                                            e.source_key
+                                          )
+                                        }|${
+                                          category
+                                        }`
+                                      ) ??
+                                    1
+                                  );
+
+                            return {
+                              ...e,
+
+                              /*
+                               * Source calibration and
+                               * category calibration affect
+                               * only this expert source.
+                               *
+                               * Neither changes AGF/form/
+                               * HP/market/field components.
+                               */
+                              base_weight:
+                                Number(
+                                  e.base_weight ??
+                                  1
+                                ) *
+                                generalMultiplier *
+                                categoryMultiplier,
+
+                              learningCalibration: {
+                                generalMultiplier,
+                                category,
+                                categoryMultiplier
+                              }
+                            };
+                          }
                         );
 
                     const marketMovement =
@@ -567,13 +647,23 @@ export async function getToday(env: Env): Promise<any> {
                 }
               );
 
+            const uncertainty =
+              raceUncertainty(
+                scoredRunners
+              );
+
+            const couponStrategy =
+              recommendCouponStrategy(
+                scoredRunners,
+                uncertainty
+              );
+
             return {
               ...race,
 
-              uncertainty:
-                raceUncertainty(
-                  scoredRunners
-                ),
+              uncertainty,
+
+              couponStrategy,
 
               runners:
                 scoredRunners
