@@ -487,6 +487,16 @@ function normalizeJsonMeeting(
           ? null
           : String(race.track),
 
+      performanceUrl:
+        race?.performanceUrl == null
+          ? null
+          : (
+              String(
+                race.performanceUrl
+              ).trim() ||
+              null
+            ),
+
       runners:
         Array.isArray(race?.runners)
           ? race.runners.map((runner: any) => ({
@@ -566,6 +576,7 @@ Return JSON in this exact logical shape:
       "time": "HH:mm",
       "distanceMeters": 1200,
       "track": "Kum",
+      "performanceUrl": "https://www.tjk.org/TR/YarisSever/Query/Page/AtPerformans?...",
       "runners": [
         {
           "number": 1,
@@ -585,6 +596,9 @@ Requirements:
 - extract EVERY race displayed for ${city}
 - extract EVERY listed runner
 - use the real visible race start time
+- if a visible "Detaylı At Karşılaştırma" link exists for the race, return its complete URL as performanceUrl
+- never invent performanceUrl
+- use null when that link cannot be resolved
 - do not invent horses
 - do not omit horses
 - keep horse number and horse name paired correctly

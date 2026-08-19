@@ -110,7 +110,11 @@ export function scoreHorse(
 
     {
       key: "field" as const,
-      score: null,
+
+      score:
+        runner.field_score ??
+        null,
+
       configuredWeight:
         SCORING_WEIGHTS.field
     }

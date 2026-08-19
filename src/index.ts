@@ -4,6 +4,7 @@ import { refreshProgramIfDue } from "./tjk/program-service";
 import { refreshExpertsIfDue } from "./experts/service";
 import { cleanup, finalizeStartedRaces } from "./history/service";
 import { cleanupMarketSnapshots } from "./market/repository";
+import { refreshFieldSignalsIfDue } from "./field/service";
 
 export default {
  fetch(request:Request,env:Env,ctx:ExecutionContext){ return route(request,env,ctx); },
@@ -12,6 +13,7 @@ export default {
    await refreshProgramIfDue(env).catch(console.error);
    await finalizeStartedRaces(env).catch(console.error);
    await refreshExpertsIfDue(env).catch(console.error);
+   await refreshFieldSignalsIfDue(env).catch(console.error);
    await cleanup(env).catch(console.error);
    await cleanupMarketSnapshots(env).catch(console.error);
   })());

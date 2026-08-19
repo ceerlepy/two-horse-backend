@@ -26,6 +26,15 @@ export interface RaceInput {
   time: string | null;
   distanceMeters: number | null;
   track: string | null;
+
+  /*
+   * TJK "Detaylı At Karşılaştırma".
+   *
+   * This URL is already parameterized by the
+   * current venue, distance, surface and race code.
+   */
+  performanceUrl?: string | null;
+
   runners: RunnerInput[];
 }
 

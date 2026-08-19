@@ -13,6 +13,14 @@ import {
   analyzeMarketMovement
 } from "../market/market-score";
 
+import {
+  scoreExpertFieldComments
+} from "../field/expert-field-score";
+
+import {
+  combineFieldScores
+} from "../field/combined-field-score";
+
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
   const statements: D1PreparedStatement[] = [];
@@ -32,10 +40,43 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
           throw new Error(`Unable to build starts_at: ${meeting.city} R${race.raceNumber}`);
         }
         const startsAt = startsAtDate.toISOString();
-      statements.push(env.DB.prepare(`INSERT INTO races(race_date,city,race_number,start_time,starts_at,distance_meters,track,updated_at)
-        VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(race_date,city,race_number) DO UPDATE SET
-        start_time=excluded.start_time,starts_at=excluded.starts_at,distance_meters=excluded.distance_meters,track=excluded.track,updated_at=CURRENT_TIMESTAMP`)
-        .bind(date, meeting.city, race.raceNumber, race.time, startsAt, race.distanceMeters, race.track));
+      statements.push(env.DB.prepare(`INSERT INTO races(
+        race_date,
+        city,
+        race_number,
+        start_time,
+        starts_at,
+        distance_meters,
+        track,
+        performance_url,
+        updated_at
+      )
+        VALUES(
+          ?,?,?,?,?,?,?,?,
+          CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(
+          race_date,
+          city,
+          race_number
+        )
+        DO UPDATE SET
+          start_time=excluded.start_time,
+          starts_at=excluded.starts_at,
+          distance_meters=excluded.distance_meters,
+          track=excluded.track,
+          performance_url=excluded.performance_url,
+          updated_at=CURRENT_TIMESTAMP`)
+        .bind(
+          date,
+          meeting.city,
+          race.raceNumber,
+          race.time,
+          startsAt,
+          race.distanceMeters,
+          race.track,
+          race.performanceUrl ?? null
+        ));
       for (const r of race.runners) {
         statements.push(env.DB.prepare(`INSERT INTO runners(
             race_date,
@@ -99,6 +140,20 @@ export async function getToday(env: Env): Promise<any> {
     await getTodayMarketSnapshots(
       env
     );
+
+  const fieldSignals =
+    await env.DB.prepare(`
+      SELECT
+        city,
+        race_number,
+        horse_number,
+        tjk_score,
+        sample_size
+      FROM field_signals
+      WHERE race_date = ?
+    `)
+      .bind(date)
+      .all<any>();
 
   const experts = await env.DB.prepare(`
     SELECT
@@ -178,19 +233,67 @@ export async function getToday(env: Env): Promise<any> {
                         }
                       );
 
+                    const storedField =
+                      (
+                        fieldSignals.results ??
+                        []
+                      ).find(
+                        (item:any) =>
+                          item.city ===
+                            m.city &&
+                          item.race_number ===
+                            race.race_number &&
+                          item.horse_number ===
+                            runner.horse_number
+                      );
+
+                    const expertFieldScore =
+                      scoreExpertFieldComments(
+                        expertPredictions.map(
+                          (prediction:any) =>
+                            prediction.comment
+                        ),
+                        race.track
+                      );
+
+                    const fieldSignal =
+                      combineFieldScores(
+                        storedField?.tjk_score == null
+                          ? null
+                          : Number(
+                              storedField.tjk_score
+                            ),
+
+                        expertFieldScore
+                      );
+
                     return {
                       ...runner,
 
-                      /*
-                       * Diagnostics/UI representation.
-                       */
                       marketMovement,
+
+                      market_score:
+                        marketMovement.score,
+
+                      /*
+                       * Diagnostics/UI.
+                       */
+                      fieldSignal: {
+                        ...fieldSignal,
+
+                        tjkSampleSize:
+                          storedField?.sample_size == null
+                            ? 0
+                            : Number(
+                                storedField.sample_size
+                              )
+                      },
 
                       /*
                        * Final model input.
                        */
-                      market_score:
-                        marketMovement.score,
+                      field_score:
+                        fieldSignal.score,
 
                       expertPredictions,
 

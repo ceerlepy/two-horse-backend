@@ -21,6 +21,12 @@ export interface ScoringRunner {
    */
   market_score?: number | null;
 
+  /*
+   * Combined exact-condition TJK history +
+   * explicit expert field commentary.
+   */
+  field_score?: number | null;
+
   expertConsensus:
     ExpertConsensus;
 }

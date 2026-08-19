@@ -576,6 +576,50 @@ export function parseTjkMeetingPage(
     )
   );
 
+  /*
+   * TJK exposes exactly one "Detaylı At Karşılaştırma"
+   * link for each race.
+   *
+   * The href includes:
+   * - HIPODROMYERI
+   * - KKODU
+   * - MESAFE
+   * - PISTADI
+   *
+   * Keep TJK's own URL rather than reconstructing it.
+   */
+  const performanceUrls =
+    $("a[href]")
+      .map((_, element) => {
+        const href =
+          clean(
+            $(element).attr("href")
+          );
+
+        if (
+          !href ||
+          !/\/Query\/Page\/AtPerformans/i.test(
+            href
+          )
+        ) {
+          return null;
+        }
+
+        try {
+          return new URL(
+            href,
+            "https://www.tjk.org"
+          ).toString();
+        } catch {
+          return null;
+        }
+      })
+      .get()
+      .filter(
+        (value): value is string =>
+          Boolean(value)
+      );
+
   const runnerTables: TjkRunner[][] = [];
 
   $("table").each((_, element) => {
@@ -605,11 +649,24 @@ export function parseTjkMeetingPage(
 
   for (let index = 0; index < count; index++) {
     races.push({
-      raceNumber: headers[index].raceNumber,
-      time: headers[index].time,
-      distanceMeters: headers[index].distanceMeters,
-      track: headers[index].track,
-      runners: runnerTables[index]
+      raceNumber:
+        headers[index].raceNumber,
+
+      time:
+        headers[index].time,
+
+      distanceMeters:
+        headers[index].distanceMeters,
+
+      track:
+        headers[index].track,
+
+      performanceUrl:
+        performanceUrls[index] ??
+        null,
+
+      runners:
+        runnerTables[index]
     });
   }
 
