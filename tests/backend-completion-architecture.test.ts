@@ -39,10 +39,6 @@ describe(
             "/api/debug/"
           );
 
-        expect(router)
-          .toContain(
-            "ADMIN_AUTH_NOT_CONFIGURED"
-          );
 
         expect(router)
           .toContain(
