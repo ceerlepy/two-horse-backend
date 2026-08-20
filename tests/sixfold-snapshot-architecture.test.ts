@@ -34,6 +34,12 @@ describe(
         expect(
           source
         ).toContain(
+          "INSERT OR IGNORE INTO sixfold_coupon_snapshots"
+        );
+
+        expect(
+          source
+        ).not.toContain(
           "ON CONFLICT(snapshot_key)"
         );
       }
