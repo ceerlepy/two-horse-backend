@@ -104,6 +104,36 @@ export async function persistSixFoldCoupons(
         })
       );
 
+    const selectionsJson =
+      JSON.stringify(
+        selections
+      );
+
+    /*
+     * Deterministic snapshot identity.
+     *
+     * Same card + profile + budget + exact selections
+     * must not create another row merely because the
+     * API was requested again.
+     *
+     * If model inputs move and the selected horses or
+     * cost changes, identity changes and a new genuine
+     * pre-race snapshot is retained.
+     */
+    const snapshotKey =
+      [
+        input.raceDate,
+        input.city,
+        input.sixfold,
+        coupon.profile,
+        coupon.budgetTl,
+        coupon.totalTl,
+        coupon.combinations,
+        coupon.unitPriceTl,
+        coupon.multiplier,
+        selectionsJson
+      ].join("|");
+
     await env.DB.prepare(`
       INSERT INTO sixfold_coupon_snapshots(
         race_date,
@@ -124,16 +154,36 @@ export async function persistSixFoldCoupons(
 
         estimated_survival_probability,
 
-        generated_at
+        generated_at,
+        snapshot_key
       )
-      VALUES(
+
+      SELECT
         ?,?,?,?,
         ?,?,
         ?,?,?,?,?,
         ?,
         ?,
-        ?
+        ?,?
+
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM sixfold_coupon_snapshots existing
+        WHERE
+          existing.race_date = ?
+          AND existing.city = ?
+          AND existing.sixfold_number = ?
+          AND existing.profile = ?
+          AND existing.budget_tl = ?
+          AND existing.total_tl = ?
+          AND existing.combinations = ?
+          AND existing.unit_price_tl = ?
+          AND existing.multiplier = ?
+          AND existing.selections_json = ?
       )
+
+      ON CONFLICT(snapshot_key)
+      DO NOTHING
     `)
       .bind(
         input.raceDate,
@@ -150,14 +200,24 @@ export async function persistSixFoldCoupons(
         coupon.unitPriceTl,
         coupon.multiplier,
 
-        JSON.stringify(
-          selections
-        ),
+        selectionsJson,
 
         coupon
           .estimatedSurvivalProbability,
 
-        generatedAt
+        generatedAt,
+        snapshotKey,
+
+        input.raceDate,
+        input.city,
+        input.sixfold,
+        coupon.profile,
+        coupon.budgetTl,
+        coupon.totalTl,
+        coupon.combinations,
+        coupon.unitPriceTl,
+        coupon.multiplier,
+        selectionsJson
       )
       .run();
   }
