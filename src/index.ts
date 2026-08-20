@@ -44,6 +44,128 @@ import {
   evaluatePendingSixFoldCoupons
 } from "./coupons/repository";
 
+import {
+  logger,
+  observed
+} from "./observability/logger";
+
+
+async function runScheduledPipeline(
+  env: Env
+): Promise<void> {
+  const started =
+    Date.now();
+
+  await observed(
+    env,
+    "program.refresh",
+    () =>
+      refreshProgramIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "experts.refresh",
+    () =>
+      refreshExpertsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "field.refresh",
+    () =>
+      refreshFieldSignalsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "learning.capture-pre-race",
+    () =>
+      capturePreRaceCandidates(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "learning.promote-started",
+    () =>
+      promoteStartedCandidates(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "history.finalize-started",
+    () =>
+      finalizeStartedRaces(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "results.ingest-official",
+    () =>
+      ingestOfficialResultsDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "coupons.evaluate",
+    () =>
+      evaluatePendingSixFoldCoupons(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "market.cleanup",
+    () =>
+      cleanupMarketSnapshots(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "learning.cleanup",
+    () =>
+      cleanupLearning(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "history.cleanup",
+    () =>
+      cleanup(
+        env
+      )
+  );
+
+  logger.info(
+    env,
+    "cron.run.complete",
+    {
+      durationMs:
+        Date.now() -
+        started
+    }
+  );
+}
+
 
 export default {
   fetch(
@@ -65,93 +187,9 @@ export default {
     ctx: ExecutionContext
   ) {
     ctx.waitUntil(
-      (
-        async () => {
-          /*
-           * 1. Refresh all observable pre-race inputs.
-           */
-          await refreshProgramIfDue(
-            env
-          ).catch(
-            console.error
-          );
-
-          await refreshExpertsIfDue(
-            env
-          ).catch(
-            console.error
-          );
-
-          await refreshFieldSignalsIfDue(
-            env
-          ).catch(
-            console.error
-          );
-
-          /*
-           * 2. Persist latest canonical PRE-RACE
-           * candidate for every upcoming race.
-           */
-          await capturePreRaceCandidates(
-            env
-          ).catch(
-            console.error
-          );
-
-          /*
-           * 3. After start, promote ONLY an already
-           * captured pre-race candidate.
-           */
-          await promoteStartedCandidates(
-            env
-          ).catch(
-            console.error
-          );
-
-          await finalizeStartedRaces(
-            env
-          ).catch(
-            console.error
-          );
-
-          /*
-           * 4. Official results are labels only.
-           */
-          await ingestOfficialResultsDue(
-            env
-          ).catch(
-            console.error
-          );
-
-          /*
-           * Evaluate frozen six-fold coupons only after
-           * official race labels are available.
-           */
-          await evaluatePendingSixFoldCoupons(
-            env
-          ).catch(
-            console.error
-          );
-
-          await cleanupMarketSnapshots(
-            env
-          ).catch(
-            console.error
-          );
-
-          await cleanupLearning(
-            env
-          ).catch(
-            console.error
-          );
-
-          await cleanup(
-            env
-          ).catch(
-            console.error
-          );
-        }
-      )()
+      runScheduledPipeline(
+        env
+      )
     );
   }
 };

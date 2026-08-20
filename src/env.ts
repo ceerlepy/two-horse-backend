@@ -6,4 +6,6 @@ export interface Env {
   APP_VERSION: string;
   AI_MODEL?: string;
   ADMIN_TOKEN?: string;
+  LOG_LEVEL?: string;
+  LOG_DEBUG_SAMPLE_RATE?: string;
 }

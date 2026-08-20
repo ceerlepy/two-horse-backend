@@ -7,59 +7,9 @@ import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
 import { generateSixFoldCoupons } from "../coupons/service";
-
-function protectedOperationalRequest(
- request: Request
-): boolean {
- const url = new URL(request.url);
-
- return (
-  url.pathname.startsWith("/api/admin/") ||
-  url.pathname.startsWith("/api/debug/") ||
-  (
-   url.pathname === "/api/coupons/generate" &&
-   request.method === "POST"
-  )
- );
-}
-
-function adminAuthFailure(
- request: Request,
- env: Env
-): Response | null {
- if (!protectedOperationalRequest(request)) {
-  return null;
- }
-
- const expected = env.ADMIN_TOKEN?.trim();
-
- if (!expected) {
-  return json({
-   ok:false,
-   error:"ADMIN_AUTH_NOT_CONFIGURED"
-  },503);
- }
-
- const authorization =
-  request.headers.get("authorization");
-
- const explicit =
-  request.headers.get("x-admin-token");
-
- const supplied =
-  authorization?.startsWith("Bearer ")
-   ? authorization.slice(7).trim()
-   : explicit?.trim();
-
- if (!supplied || supplied !== expected) {
-  return json({
-   ok:false,
-   error:"UNAUTHORIZED"
-  },401);
- }
-
- return null;
-}
+import { adminAuthFailure } from "./auth";
+import { logger } from "../observability/logger";
+import { systemDiagnosticResponse } from "./system-diagnostics";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -67,6 +17,16 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
 
  const authFailure=adminAuthFailure(request,env);
  if(authFailure) return authFailure;
+
+ logger.debug(
+  env,
+  "http.request",
+  {
+   method:request.method,
+   route:url.pathname,
+   cfRay:request.headers.get("cf-ray")
+  }
+ );
 
  if(url.pathname==="/api/health") return json({ok:true,app:env.APP_NAME,version:env.APP_VERSION,timestamp:new Date().toISOString()});
  if(url.pathname==="/api/today") {
@@ -292,6 +252,16 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    },502);
   }
  }
+ const systemDiagnostic=
+  await systemDiagnosticResponse(
+   request,
+   env
+  );
+
+ if(systemDiagnostic) {
+  return systemDiagnostic;
+ }
+
  if(url.pathname==="/api/debug/sixfold") {
   try {
    const windows=
