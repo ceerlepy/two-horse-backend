@@ -12,11 +12,16 @@ describe(
     it(
       "has granular diagnostics",
       () => {
-        const source =
+        const source = [
           fs.readFileSync(
             "src/api/system-diagnostics.ts",
             "utf8"
-          );
+          ),
+          fs.readFileSync(
+            "src/api/diagnostics/routes.ts",
+            "utf8"
+          )
+        ].join("\n");
 
         for (
           const path of [
