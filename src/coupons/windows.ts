@@ -3,22 +3,74 @@ export interface SixFoldWindow {
   startRace: number;
   endRace: number;
   raceNumbers: number[];
+
+  source:
+    | "tjk-program"
+    | "canonical-program";
+}
+
+
+export interface ExplicitSixFoldStart {
+  sixfold: number;
+  startRace: number;
+}
+
+
+function windowFromStart(
+  ordered:
+    number[],
+  sixfold:
+    number,
+  startRace:
+    number,
+  source:
+    SixFoldWindow["source"]
+): SixFoldWindow | null {
+  const index =
+    ordered.indexOf(
+      startRace
+    );
+
+  if (index < 0) {
+    return null;
+  }
+
+  const raceNumbers =
+    ordered.slice(
+      index,
+      index + 6
+    );
+
+  if (
+    raceNumbers.length !== 6
+  ) {
+    return null;
+  }
+
+  return {
+    sixfold,
+    startRace:
+      raceNumbers[0],
+    endRace:
+      raceNumbers[5],
+    raceNumbers,
+    source
+  };
 }
 
 
 /*
- * Canonical card-level six-fold windows.
+ * Prefer official TJK start markers.
  *
- * We derive the playable six-race windows from the
- * actual canonical TJK race numbers, not array offsets.
- *
- * For an 8-race card:
- * 1st six-fold = 1..6
- * 2nd six-fold = 3..8
+ * Only fall back to card-derived windows for a
+ * six-fold number whose explicit marker was not
+ * available or could not form six consecutive races.
  */
 export function resolveSixFoldWindows(
   raceNumbers:
-    number[]
+    number[],
+  explicitStarts:
+    ExplicitSixFoldStart[] = []
 ): SixFoldWindow[] {
   const ordered =
     [...new Set(
@@ -39,43 +91,87 @@ export function resolveSixFoldWindows(
     return [];
   }
 
-  const first =
-    ordered.slice(
-      0,
-      6
-    );
+  const result =
+    new Map<
+      number,
+      SixFoldWindow
+    >();
 
-  const windows:
-    SixFoldWindow[] = [
-      {
-        sixfold: 1,
-        startRace:
-          first[0],
-        endRace:
-          first[5],
-        raceNumbers:
-          first
-      }
-    ];
-
-  if (
-    ordered.length > 6
+  for (
+    const explicit of
+    explicitStarts
   ) {
-    const second =
-      ordered.slice(
-        ordered.length - 6
+    if (
+      explicit.sixfold !== 1 &&
+      explicit.sixfold !== 2
+    ) {
+      continue;
+    }
+
+    const window =
+      windowFromStart(
+        ordered,
+        explicit.sixfold,
+        explicit.startRace,
+        "tjk-program"
       );
 
-    windows.push({
-      sixfold: 2,
-      startRace:
-        second[0],
-      endRace:
-        second[5],
-      raceNumbers:
-        second
-    });
+    if (window) {
+      result.set(
+        explicit.sixfold,
+        window
+      );
+    }
   }
 
-  return windows;
+  if (
+    !result.has(1)
+  ) {
+    const first =
+      windowFromStart(
+        ordered,
+        1,
+        ordered[0],
+        "canonical-program"
+      );
+
+    if (first) {
+      result.set(
+        1,
+        first
+      );
+    }
+  }
+
+  if (
+    ordered.length > 6 &&
+    !result.has(2)
+  ) {
+    const fallbackStart =
+      ordered[
+        ordered.length - 6
+      ];
+
+    const second =
+      windowFromStart(
+        ordered,
+        2,
+        fallbackStart,
+        "canonical-program"
+      );
+
+    if (second) {
+      result.set(
+        2,
+        second
+      );
+    }
+  }
+
+  return [...result.values()]
+    .sort(
+      (a, b) =>
+        a.sixfold -
+        b.sixfold
+    );
 }

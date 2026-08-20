@@ -69,10 +69,11 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
         distance_meters,
         track,
         performance_url,
+        sixfold_start_numbers_json,
         updated_at
       )
         VALUES(
-          ?,?,?,?,?,?,?,?,
+          ?,?,?,?,?,?,?,?,?,
           CURRENT_TIMESTAMP
         )
         ON CONFLICT(
@@ -86,6 +87,8 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
           distance_meters=excluded.distance_meters,
           track=excluded.track,
           performance_url=excluded.performance_url,
+          sixfold_start_numbers_json=
+            excluded.sixfold_start_numbers_json,
           updated_at=CURRENT_TIMESTAMP`)
         .bind(
           date,
@@ -95,7 +98,11 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
           startsAt,
           race.distanceMeters,
           race.track,
-          race.performanceUrl ?? null
+          race.performanceUrl ?? null,
+          JSON.stringify(
+            race.sixfoldStartNumbers ??
+            []
+          )
         ));
       for (const r of race.runners) {
         statements.push(env.DB.prepare(`INSERT INTO runners(

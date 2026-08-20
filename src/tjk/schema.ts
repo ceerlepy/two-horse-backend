@@ -16,6 +16,12 @@ export const tjkMeetingJsonSchema = {
           time: { type: "string" },
           distanceMeters: { type: ["integer", "null"] },
           track: { type: ["string", "null"] },
+          sixfoldStartNumbers: {
+            type: "array",
+            items: {
+              type: "integer"
+            }
+          },
           runners: {
             type: "array",
             items: {

@@ -62,7 +62,7 @@ export async function upsertSixFoldWindows(
         window.sixfold,
         window.startRace,
         window.endRace,
-        "canonical-program",
+        window.source,
         now
       )
       .run();

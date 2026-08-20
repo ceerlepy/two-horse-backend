@@ -41,6 +41,17 @@ export interface RaceInput {
    */
   performanceUrl?: string | null;
 
+  /*
+   * Official TJK six-fold start markers attached
+   * to this race.
+   *
+   * Example:
+   *   [1]    -> 1st six-fold starts here
+   *   [2]    -> 2nd six-fold starts here
+   *   [1, 2] -> both start here
+   */
+  sixfoldStartNumbers?: number[];
+
   runners: RunnerInput[];
 }
 

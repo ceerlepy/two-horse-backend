@@ -411,6 +411,130 @@ function parseRaceHeader(text: string): {
   };
 }
 
+
+function directText(
+  $: cheerio.CheerioAPI,
+  element: any
+): string {
+  return clean(
+    $(element)
+      .contents()
+      .filter(
+        (_, node: any) =>
+          node.type === "text"
+      )
+      .map(
+        (_, node: any) =>
+          $(node).text()
+      )
+      .get()
+      .join(" ")
+  );
+}
+
+
+function parseSixFoldStartNumbers(
+  $: cheerio.CheerioAPI
+): Map<number, number[]> {
+  const result =
+    new Map<
+      number,
+      Set<number>
+    >();
+
+  let currentRace:
+    number | null =
+    null;
+
+  /*
+   * Walk DOM in document order.
+   *
+   * TJK prints the six-fold marker inside the
+   * corresponding race section:
+   *
+   *   1. 6'LI GANYAN Bu koşudan başlar
+   *   2. 6'LI GANYAN Bu koşudan başlar
+   *
+   * We intentionally inspect each element's own
+   * text node rather than .text(), preventing a
+   * large parent DIV from duplicating descendant
+   * markers.
+   */
+  $("*").each(
+    (_, element) => {
+      const text =
+        directText(
+          $,
+          element
+        );
+
+      if (!text) {
+        return;
+      }
+
+      const header =
+        parseRaceHeader(
+          text
+        );
+
+      if (header) {
+        currentRace =
+          header.raceNumber;
+
+        return;
+      }
+
+      if (
+        currentRace == null
+      ) {
+        return;
+      }
+
+      const marker =
+        text.match(
+          /\b([12])\s*\.\s*6\s*['’]?\s*LI\s+GANYAN\b.*\bbu\s+koşudan\s+başlar\b/iu
+        );
+
+      if (!marker) {
+        return;
+      }
+
+      const sixfold =
+        Number(marker[1]);
+
+      const set =
+        result.get(
+          currentRace
+        ) ??
+        new Set<number>();
+
+      set.add(
+        sixfold
+      );
+
+      result.set(
+        currentRace,
+        set
+      );
+    }
+  );
+
+  return new Map(
+    [...result.entries()]
+      .map(
+        ([raceNumber, values]) => [
+          raceNumber,
+          [...values]
+            .sort(
+              (a, b) =>
+                a - b
+            )
+        ]
+      )
+  );
+}
+
+
 function parseSurface(text: string): {
   distanceMeters: number | null;
   track: string | null;
@@ -455,6 +579,11 @@ export function parseTjkMeetingPage(
   city: string
 ): TjkMeeting {
   const $ = cheerio.load(html);
+
+  const sixfoldStarts =
+    parseSixFoldStartNumbers(
+      $
+    );
 
   const headers: Array<{
     raceNumber: number;
@@ -672,6 +801,12 @@ export function parseTjkMeetingPage(
       performanceUrl:
         performanceUrls[index] ??
         null,
+
+      sixfoldStartNumbers:
+        sixfoldStarts.get(
+          headers[index]
+            .raceNumber
+        ) ?? [],
 
       runners:
         runnerTables[index]

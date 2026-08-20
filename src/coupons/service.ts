@@ -138,6 +138,51 @@ export async function generateSixFoldCoupons(
   const raceDate =
     turkeyDate();
 
+  const explicitStarts =
+    races.flatMap(
+      (race:any) => {
+        let values:
+          unknown = [];
+
+        try {
+          values =
+            JSON.parse(
+              String(
+                race
+                  .sixfold_start_numbers_json ??
+                "[]"
+              )
+            );
+        } catch {
+          values = [];
+        }
+
+        if (
+          !Array.isArray(values)
+        ) {
+          return [];
+        }
+
+        return values
+          .map(Number)
+          .filter(
+            value =>
+              value === 1 ||
+              value === 2
+          )
+          .map(
+            sixfoldNumber => ({
+              sixfold:
+                sixfoldNumber,
+              startRace:
+                Number(
+                  race.race_number
+                )
+            })
+          );
+      }
+    );
+
   const windows =
     resolveSixFoldWindows(
       races.map(
@@ -145,7 +190,8 @@ export async function generateSixFoldCoupons(
           Number(
             race.race_number
           )
-      )
+      ),
+      explicitStarts
     );
 
   await upsertSixFoldWindows(
