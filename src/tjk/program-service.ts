@@ -255,18 +255,20 @@ export async function refreshProgramIfDue(
         .first<any>();
 
     /*
-     * Only write when canonical data changed.
+     * Always reconcile the authoritative daily card.
+     *
+     * Even when the source hash is unchanged, stale rows
+     * from a previous card/date transition may still exist
+     * in D1 and must be removed.
+     *
+     * upsertProgram is idempotent for the current canonical
+     * program and also performs stale-card cleanup.
      */
-    if (
-      existing?.source_hash !==
+    await upsertProgram(
+      env,
+      program,
       sourceHash
-    ) {
-      await upsertProgram(
-        env,
-        program,
-        sourceHash
-      );
-    }
+    );
 
     await markSuccess(
       env,
