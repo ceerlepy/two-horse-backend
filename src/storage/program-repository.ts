@@ -111,6 +111,25 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
     )
     .run();
 
+  /*
+   * sixfold_windows is live derived state.
+   * Keep it aligned with the authoritative daily
+   * meeting list as well.
+   *
+   * Do NOT delete sixfold_coupon_snapshots:
+   * those are immutable historical predictions.
+   */
+  await env.DB.prepare(`
+    DELETE FROM sixfold_windows
+    WHERE race_date = ?
+      AND city NOT IN (${placeholders})
+  `)
+    .bind(
+      date,
+      ...activeCities
+    )
+    .run();
+
   for (const meeting of program.meetings) {
     statements.push(env.DB.prepare(`INSERT INTO meetings(race_date,city,source_hash,updated_at)
       VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(race_date,city) DO UPDATE SET source_hash=excluded.source_hash,updated_at=CURRENT_TIMESTAMP`)

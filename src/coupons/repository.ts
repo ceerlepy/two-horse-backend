@@ -24,6 +24,67 @@ export async function upsertSixFoldWindows(
     new Date()
       .toISOString();
 
+  /*
+   * Reconcile this meeting's live six-fold windows.
+   *
+   * Example:
+   * Yesterday/previous parse had windows 1 and 2,
+   * but the authoritative current card exposes only 1.
+   * The obsolete #2 row must not survive.
+   *
+   * Historical coupon snapshots are intentionally
+   * NOT touched here.
+   */
+  const activeNumbers =
+    [...new Set(
+      input.windows
+        .map(
+          window =>
+            Number(
+              window.sixfold
+            )
+        )
+        .filter(
+          value =>
+            value === 1 ||
+            value === 2
+        )
+    )];
+
+  if (
+    activeNumbers.length
+  ) {
+    const placeholders =
+      activeNumbers
+        .map(() => "?")
+        .join(",");
+
+    await env.DB.prepare(`
+      DELETE FROM sixfold_windows
+      WHERE race_date = ?
+        AND city = ?
+        AND sixfold_number
+          NOT IN (${placeholders})
+    `)
+      .bind(
+        input.raceDate,
+        input.city,
+        ...activeNumbers
+      )
+      .run();
+  } else {
+    await env.DB.prepare(`
+      DELETE FROM sixfold_windows
+      WHERE race_date = ?
+        AND city = ?
+    `)
+      .bind(
+        input.raceDate,
+        input.city
+      )
+      .run();
+  }
+
   for (
     const window of
     input.windows
