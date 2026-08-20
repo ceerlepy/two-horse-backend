@@ -29,7 +29,93 @@ export async function cleanup(env:Env):Promise<void>{
  `);
 }
 
-export async function getHistory(env:Env):Promise<any[]>{
- const rows=(await env.DB.prepare("SELECT snapshot_json FROM race_history WHERE race_date>=date('now','+3 hours','-2 days') ORDER BY race_date DESC,city,race_number").all<any>()).results??[];
- return rows.map(r=>JSON.parse(r.snapshot_json));
+export async function getHistory(
+ env:Env
+):Promise<any[]>{
+ const rows=
+  (
+   await env.DB.prepare(`
+    SELECT snapshot_json
+    FROM race_history
+    WHERE race_date >=
+      date('now','+3 hours','-2 days')
+    ORDER BY
+      race_date DESC,
+      city,
+      race_number
+   `).all<any>()
+  ).results ?? [];
+
+ const output:any[]=[];
+
+ for(const row of rows){
+  const snapshot=
+   JSON.parse(
+    String(
+     row.snapshot_json
+    )
+   );
+
+  const results=
+   (
+    await env.DB.prepare(`
+     SELECT
+       horse_number,
+       finish_position
+     FROM learning_runner_features
+     WHERE
+       race_date = ?
+       AND city = ?
+       AND race_number = ?
+       AND finish_position IS NOT NULL
+    `)
+     .bind(
+      snapshot.raceDate,
+      snapshot.city,
+      snapshot.raceNumber
+     )
+     .all<any>()
+   ).results ?? [];
+
+  const finishByHorse=
+   new Map<number,number>(
+    results.map(
+     (item:any)=>[
+      Number(
+       item.horse_number
+      ),
+      Number(
+       item.finish_position
+      )
+     ]
+    )
+   );
+
+  snapshot.runners=
+   (
+    snapshot.runners ??
+    []
+   ).map(
+    (runner:any)=>({
+     ...runner,
+
+     finishPosition:
+      finishByHorse.get(
+       Number(
+        runner.horse_number
+       )
+      ) ??
+      null
+    })
+   );
+
+  snapshot.resultAvailable=
+   finishByHorse.size>0;
+
+  output.push(
+   snapshot
+  );
+ }
+
+ return output;
 }
