@@ -135,7 +135,7 @@ export async function persistSixFoldCoupons(
       ].join("|");
 
     await env.DB.prepare(`
-      INSERT INTO sixfold_coupon_snapshots(
+      INSERT OR IGNORE INTO sixfold_coupon_snapshots(
         race_date,
         city,
         sixfold_number,
@@ -182,8 +182,6 @@ export async function persistSixFoldCoupons(
           AND existing.selections_json = ?
       )
 
-      ON CONFLICT(snapshot_key)
-      DO NOTHING
     `)
       .bind(
         input.raceDate,

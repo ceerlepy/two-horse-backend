@@ -44,6 +44,73 @@ import {
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
   const date = turkeyDate();
   const statements: D1PreparedStatement[] = [];
+
+  /*
+   * The daily TJK programme is authoritative.
+   *
+   * A refresh crossing midnight or a changed card must not
+   * leave yesterday/previous-card meetings attached to the
+   * current race_date.
+   */
+  const activeCities =
+    [...new Set(
+      program.meetings
+        .map(
+          meeting =>
+            meeting.city.trim()
+        )
+        .filter(Boolean)
+    )];
+
+  if (!activeCities.length) {
+    throw new Error(
+      "REFUSING_EMPTY_ACTIVE_PROGRAM"
+    );
+  }
+
+  const placeholders =
+    activeCities
+      .map(() => "?")
+      .join(",");
+
+  /*
+   * Delete children first.
+   * Historical/learning snapshots live in their own tables
+   * and are intentionally not touched here.
+   */
+  await env.DB.prepare(`
+    DELETE FROM runners
+    WHERE race_date = ?
+      AND city NOT IN (${placeholders})
+  `)
+    .bind(
+      date,
+      ...activeCities
+    )
+    .run();
+
+  await env.DB.prepare(`
+    DELETE FROM races
+    WHERE race_date = ?
+      AND city NOT IN (${placeholders})
+  `)
+    .bind(
+      date,
+      ...activeCities
+    )
+    .run();
+
+  await env.DB.prepare(`
+    DELETE FROM meetings
+    WHERE race_date = ?
+      AND city NOT IN (${placeholders})
+  `)
+    .bind(
+      date,
+      ...activeCities
+    )
+    .run();
+
   for (const meeting of program.meetings) {
     statements.push(env.DB.prepare(`INSERT INTO meetings(race_date,city,source_hash,updated_at)
       VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(race_date,city) DO UPDATE SET source_hash=excluded.source_hash,updated_at=CURRENT_TIMESTAMP`)
