@@ -18,6 +18,15 @@ import {
   optimizeSixFoldCoupons
 } from "./optimizer";
 
+import {
+  resolveSixFoldWindows
+} from "./windows";
+
+import {
+  persistSixFoldCoupons,
+  upsertSixFoldWindows
+} from "./repository";
+
 
 function normalize(
   value:
@@ -126,25 +135,57 @@ export async function generateSixFoldCoupons(
     );
   }
 
-  /*
-   * First six-fold:
-   *   first six races.
-   *
-   * Second six-fold:
-   *   last six races.
-   *
-   * For an 8-race card this is 1-6 and 3-8.
-   */
-  const startIndex =
-    sixfold === 1
-      ? 0
-      : races.length - 6;
+  const raceDate =
+    turkeyDate();
+
+  const windows =
+    resolveSixFoldWindows(
+      races.map(
+        (race:any) =>
+          Number(
+            race.race_number
+          )
+      )
+    );
+
+  await upsertSixFoldWindows(
+    env,
+    {
+      raceDate,
+      city:
+        String(
+          meeting.city
+        ),
+      windows
+    }
+  );
+
+  const window =
+    windows.find(
+      item =>
+        item.sixfold ===
+        sixfold
+    );
+
+  if (!window) {
+    throw new Error(
+      "SIX_FOLD_WINDOW_NOT_AVAILABLE"
+    );
+  }
 
   const selectedRaces =
-    races.slice(
-      startIndex,
-      startIndex + 6
-    );
+    window.raceNumbers
+      .map(
+        raceNumber =>
+          races.find(
+            (race:any) =>
+              Number(
+                race.race_number
+              ) ===
+              raceNumber
+          )
+      )
+      .filter(Boolean);
 
   if (
     selectedRaces.length !== 6
@@ -240,9 +281,26 @@ export async function generateSixFoldCoupons(
         1
     });
 
+  await persistSixFoldCoupons(
+    env,
+    {
+      raceDate,
+      city:
+        String(
+          meeting.city
+        ),
+      sixfold,
+      startRace:
+        window.startRace,
+      endRace:
+        window.endRace,
+      coupons
+    }
+  );
+
   return {
     date:
-      turkeyDate(),
+      raceDate,
 
     city:
       meeting.city,

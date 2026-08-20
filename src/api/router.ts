@@ -233,6 +233,59 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    },502);
   }
  }
+ if(url.pathname==="/api/debug/sixfold") {
+  try {
+   const windows=
+    await env.DB.prepare(`
+     SELECT *
+     FROM sixfold_windows
+     ORDER BY
+      race_date DESC,
+      city,
+      sixfold_number
+     LIMIT 50
+    `).all();
+
+   const coupons=
+    await env.DB.prepare(`
+     SELECT
+      race_date,
+      city,
+      sixfold_number,
+      profile,
+      budget_tl,
+      total_tl,
+      combinations,
+      generated_at,
+      evaluated_at,
+      hit_legs,
+      six_of_six,
+      five_of_six
+
+     FROM sixfold_coupon_snapshots
+
+     ORDER BY
+      generated_at DESC
+
+     LIMIT 100
+    `).all();
+
+   return json({
+    ok:true,
+    windows:
+     windows.results,
+    coupons:
+     coupons.results
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/debug/sources") {
   const sources=await env.DB.prepare(`
  SELECT

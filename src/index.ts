@@ -40,6 +40,10 @@ import {
   ingestOfficialResultsDue
 } from "./results/runtime";
 
+import {
+  evaluatePendingSixFoldCoupons
+} from "./coupons/repository";
+
 
 export default {
   fetch(
@@ -114,6 +118,16 @@ export default {
            * 4. Official results are labels only.
            */
           await ingestOfficialResultsDue(
+            env
+          ).catch(
+            console.error
+          );
+
+          /*
+           * Evaluate frozen six-fold coupons only after
+           * official race labels are available.
+           */
+          await evaluatePendingSixFoldCoupons(
             env
           ).catch(
             console.error
