@@ -18,6 +18,12 @@ describe(
             "utf8"
           );
 
+        const auth =
+          fs.readFileSync(
+            "src/api/auth.ts",
+            "utf8"
+          );
+
         const env =
           fs.readFileSync(
             "src/env.ts",
@@ -29,20 +35,29 @@ describe(
             "ADMIN_TOKEN"
           );
 
-        expect(router)
+        expect(auth)
           .toContain(
             "/api/admin/"
           );
 
-        expect(router)
+        expect(auth)
           .toContain(
             "/api/debug/"
           );
 
+        expect(auth)
+          .toContain(
+            "ADMIN_AUTH_NOT_CONFIGURED"
+          );
+
+        expect(auth)
+          .toContain(
+            "UNAUTHORIZED"
+          );
 
         expect(router)
           .toContain(
-            "UNAUTHORIZED"
+            "adminAuthFailure"
           );
       }
     );
