@@ -821,3 +821,755 @@ sorularına cevap verebilmektir.
 Bu nedenle clean architecture, diagnostics, structured logging, versioning ve
 tests birbirinden bağımsız özellikler değil aynı operability stratejisinin
 parçalarıdır.
+
+---
+
+# 21. Source-code reading philosophy
+
+Bu projede bir TypeScript dosyasını yalnız dosya adına göre anlamaya çalışma.
+
+Her dosya için şu 8 soruyu sor:
+
+1. Bu dosyanın bounded responsibility'si ne?
+2. Kim bunu çağırıyor?
+3. Bu dosya kimi çağırıyor?
+4. Hangi DB tables'a dokunuyor?
+5. Hangi external source'a dokunuyor?
+6. Hangi invariantı koruyor?
+7. Fail olursa downstream'de ne bozulur?
+8. Hangi diagnostic endpoint bunu gözlemleyebilir?
+
+Bu 8 soru bütün kod tabanının zihinsel haritasını oluşturur.
+
+---
+
+# 22. TJK pipeline derin modeli
+
+TJK pipeline yalnız "HTML parse" değildir.
+
+Katmanlar:
+
+transport
+→ response validation
+→ content interpretation
+→ race discovery
+→ runner extraction
+→ normalization
+→ canonical persistence
+→ reconciliation
+→ stale removal
+
+Her katmanda farklı failure class vardır.
+
+Transport başarısızsa:
+
+source'a hiç ulaşılamadı.
+
+Response geldi ama race yoksa:
+
+transport başarılı,
+semantic extraction başarısız veya source gerçekten boş.
+
+Bu ikisi diagnostic olarak ayrı tutulmalıdır.
+
+Reconciliation aşaması özellikle önemlidir.
+
+Bugünün canonical card'ı değiştiğinde eski city/race state'in sessizce kalması yanlış prediction üretir.
+
+---
+
+# 23. Canonical program authority
+
+Canonical program şu alanların authoritative kaynağıdır:
+
+race identity
+race number
+city
+runner identity
+horse number
+race start time
+TJK explicit metadata
+
+Expert veya market source canonical identity yaratmamalıdır.
+
+Örneğin expert source "horse 5" diyorsa önce canonical runners içindeki horse 5'e map edilir.
+
+Map yoksa source row canonical truth haline gelmez.
+
+---
+
+# 24. Expert semantic model
+
+Expert kaynaklar binary vote sistemi değildir.
+
+Semantic labels örneğin:
+
+banko
+tek
+favori
+ilk şans
+rakip
+ihmal edilmemeli
+sürpriz
+bomba
+
+gibi farklı conviction seviyeleri taşıyabilir.
+
+Normalize katmanı source-specific ifadeyi internal semantic strength'e dönüştürür.
+
+Consensus bu normalize edilmiş source opinions üzerinden hesaplanmalıdır.
+
+Source count ile opinion strength aynı kavram değildir.
+
+---
+
+# 25. Form modeli
+
+Form yalnız son yarış sıralaması değildir.
+
+Form pipeline potansiyel olarak şunları temsil eder:
+
+recent outcomes
+consistency
+direction/trend
+recency
+surface/context relevance
+
+Raw history ile derived form score ayrılmalıdır.
+
+Raw history yeniden hesaplanabilir source evidence'dır.
+
+Form score ise model interpretation'dır.
+
+---
+
+# 26. HP ve weight
+
+HP gibi canonical numeric attributes doğrudan normalize edilmeden component score olarak kullanılmamalıdır.
+
+Weight etkisi de absolute "az kilo iyidir" gibi tek boyutlu rule olmamalıdır.
+
+Race context ve population distribution önemlidir.
+
+Dokümanda weight bir model component olarak görülür; gerçek production transformation source code'daki implementation'dır.
+
+---
+
+# 27. Market movement
+
+AGF current value ve AGF trajectory ayrıdır.
+
+Örnek:
+
+Horse A
+
+08:00 AGF 8
+10:00 AGF 12
+12:00 AGF 18
+
+Horse B
+
+08:00 AGF 18
+10:00 AGF 18
+12:00 AGF 18
+
+İki at current AGF olarak aynı seviyeye yaklaşabilir fakat market momentum farklıdır.
+
+Snapshot table'ın amacı bu zaman boyutunu korumaktır.
+
+---
+
+# 28. Scoring weight normalization
+
+Configured feature weights toplamı 100 olabilir.
+
+Fakat bütün signals her runner için mevcut olmayabilir.
+
+Eksik signal'a sıfır score verip configured weight'i korumak yanlış penalty yaratabilir.
+
+Bu nedenle available-weight renormalization kullanılır.
+
+Örnek:
+
+AGF 25
+Expert 22
+Form 18
+HP 15
+Market 10
+Weight 5
+Field 5
+
+Sadece:
+
+AGF
+Form
+HP
+Weight
+
+mevcut.
+
+Available weight:
+
+25 + 18 + 15 + 5 = 63
+
+Effective AGF:
+
+25 / 63
+
+Effective Form:
+
+18 / 63
+
+vs.
+
+Final score mevcut evidence üzerinde normalize edilir.
+
+Confidence ise "feature completeness" bilgisi taşır.
+
+---
+
+# 29. Score vs confidence
+
+Score:
+
+Mevcut evidence altında runner strength.
+
+Confidence:
+
+Score'u destekleyen feature coverage miktarı.
+
+İki runner aynı score'a sahip olabilir fakat confidence farklı olabilir.
+
+Bu kupon optimizer için önemlidir.
+
+High score + low confidence
+
+ile
+
+high score + high confidence
+
+aynı risk profili değildir.
+
+---
+
+# 30. Probability transform
+
+Raw model score doğrudan calibrated win probability değildir.
+
+Race-relative transform yapılır.
+
+Best score baseline alınır.
+
+Exponential transform düşük score farklarını smooth eder.
+
+Temperature modelin sharpness parametresidir.
+
+Düşük temperature:
+
+top runner probability daha keskin ayrılır.
+
+Yüksek temperature:
+
+probability daha flat olur.
+
+Bu nedenle temperature sıradan constant değil behavior policy'dir.
+
+---
+
+# 31. Coupon combinatorics
+
+Altılı kupon maliyeti her leg selection count'ın çarpımıdır.
+
+Örnek:
+
+Leg1 3
+Leg2 2
+Leg3 1
+Leg4 4
+Leg5 2
+Leg6 3
+
+Combinations:
+
+3×2×1×4×2×3 = 144
+
+Unit 1.25 TL ise:
+
+180 TL
+
+Bir leg'e yalnız +1 horse eklemek tüm diğer legs ile Cartesian multiplication yaratır.
+
+Bu yüzden greedy expansion kolayca suboptimal olur.
+
+---
+
+# 32. Global optimizer rationale
+
+Greedy:
+
+en yüksek marginal horse'u ekle
+
+yaklaşımı local gain'e bakar.
+
+Ama gerçek marginal cost:
+
+other legs selection counts
+
+ile çarpılır.
+
+Global optimizer bütün legal count combinations içinde budget constraint altında survival objective'i değerlendirir.
+
+Meet-in-the-middle yöntemi search space'i iki parçaya bölerek kombinasyon maliyetini azaltır.
+
+Bu algoritmanın amacı:
+
+budget altında highest modeled survival.
+
+Budget'ı tam harcamak secondary outcome olabilir; primary objective değildir.
+
+---
+
+# 33. Six-fold window lifecycle
+
+Window metadata:
+
+race_date
+city
+sixfold_number
+start_race
+end_race
+source
+updated_at
+
+source şu tiplerden biri olabilir:
+
+tjk-program
+canonical-program
+fallback-derived
+
+Official explicit metadata varsa source authority daha yüksektir.
+
+Reconciliation stale row'ları current canonical card ile uyumlu tutar.
+
+---
+
+# 34. Coupon snapshot lifecycle
+
+Generation zamanı:
+
+race card mevcut
+→ sixfold window resolve
+→ runner scores
+→ probability
+→ optimize
+→ response
+
+POST ise ayrıca:
+
+pre-race timing validate
+→ snapshot identity
+→ idempotent persistence
+
+Race başladıktan sonra oluşturulan kupon prediction olarak gösterilebilir olsa bile historical pre-race evaluation dataset'ine yazılmamalıdır.
+
+---
+
+# 35. Learning candidate lifecycle
+
+Candidate:
+
+race başlamadan capture edilmiş feature state.
+
+Promotion:
+
+Race başladıktan sonra yalnız pre-race captured candidate valid historical example olur.
+
+Result attach:
+
+Official result geldiğinde label eklenir.
+
+Evaluation:
+
+Base vs learned model karşılaştırılır.
+
+Gate:
+
+Yeterli sample ve improvement yoksa learned production adjustment açılmaz.
+
+Bu architecture overfitting ve leakage riskini azaltır.
+
+---
+
+# 36. Temporal leakage
+
+En tehlikeli ML buglarından biridir.
+
+Örnek:
+
+Race starts_at 14:00
+
+Feature capture 14:05
+
+Bu row prediction anında mevcut olmayan information içerebilir.
+
+Bu nedenle:
+
+captured_at < starts_at
+
+database invariant seviyesinde izlenir.
+
+Bu invariant bozulursa geçmiş accuracy metrics güvenilir değildir.
+
+---
+
+# 37. Official result semantics
+
+Official result:
+
+label
+
+özelliğindedir.
+
+Prediction input değildir.
+
+Finish position veya winner identity ancak yarış sonrasında learning/evaluation katmanına bağlanır.
+
+Result ingestion'ın scoring input pipeline'a dependency oluşturması architecture violation sayılmalıdır.
+
+---
+
+# 38. Scheduled pipeline
+
+Scheduled operations birbirini tamamen crash ettirmemelidir.
+
+Örnek sequence:
+
+program refresh
+experts refresh
+field refresh
+learning capture
+learning promotion
+history finalize
+official results
+coupon evaluation
+retention cleanup
+
+Observed wrapper sayesinde tek operation failure loglanır ve diğer operasyonların çalışmasına izin verilebilir.
+
+Bu resilience için önemlidir.
+
+---
+
+# 39. Logging interpretation
+
+Structured log field örnekleri:
+
+timestamp
+
+UTC log time.
+
+level
+
+debug/info/warn/error.
+
+message
+
+Stable event name.
+
+operation
+
+Pipeline/function-level semantic operation.
+
+durationMs
+
+Latency.
+
+route
+
+HTTP route.
+
+city
+
+Race city context.
+
+raceNumber
+
+Race context.
+
+error
+
+Sanitized error.
+
+Log message text yerine stable event name kullanmak query/aggregation için daha iyidir.
+
+---
+
+# 40. D1 table ownership model
+
+Her table için dört kategori düşün:
+
+Canonical
+
+TJK program identity.
+
+Enrichment
+
+Expert, market, field, form.
+
+Learning/evaluation
+
+Snapshots, labels, model state.
+
+Operational
+
+Refresh/source runtime state.
+
+Bir table'ın ownership'i belirsizse code smell vardır.
+
+---
+
+# 41. Table lifecycle questions
+
+Her table için:
+
+Who writes?
+
+Who reads?
+
+What is identity?
+
+Can it be rebuilt?
+
+Is it immutable historical evidence?
+
+Is it mutable cache?
+
+What makes it stale?
+
+What diagnostic exposes it?
+
+Bu sorular docs ve incident response için zorunludur.
+
+---
+
+# 42. Router clean-code target
+
+Router şunları yapmalı:
+
+method/path match
+auth
+parameter extraction
+service dispatch
+response
+
+Router şunları yapmamalı:
+
+scrape HTML
+calculate model score
+run optimizer internals
+write large SQL business queries
+perform learning math
+
+Bu ayrım okunabilirliğin temelidir.
+
+---
+
+# 43. Repository clean-code target
+
+Repository:
+
+SQL ownership.
+
+Service:
+
+business orchestration.
+
+Parser:
+
+source interpretation.
+
+Scorer:
+
+mathematical scoring.
+
+Optimizer:
+
+search/selection.
+
+Diagnostics:
+
+read-only observability.
+
+Bu boundaries merge edilirse complexity hızla artar.
+
+---
+
+# 44. Debug API as architecture map
+
+Diagnostic endpoints yalnız support tool değildir.
+
+Aynı zamanda architecture'nın runtime projection'ıdır.
+
+overview
+
+system-level.
+
+card
+
+canonical program-level.
+
+race
+
+race aggregate-level.
+
+runner
+
+entity-level.
+
+table
+
+storage-level.
+
+Bu hierarchy projenin bounded layers'ını aynalar.
+
+---
+
+# 45. Incident example — horse prediction unexpectedly low
+
+1. runner endpoint
+
+Canonical row var mı?
+
+2. experts
+
+Expert opinions missing mi?
+
+3. market
+
+AGF snapshot stale mi?
+
+4. field
+
+Field score var mı?
+
+5. data-quality
+
+City-wide issue mi tek runner issue mu?
+
+6. scoring-config
+
+Weights/version beklenen mi?
+
+7. model diagnostics
+
+Model behavior mı değişmiş?
+
+Bu sıra score function'a körlemesine patch atmayı önler.
+
+---
+
+# 46. Incident example — coupon too expensive
+
+1. requested budget
+
+2. unitPriceTl
+
+3. multiplier
+
+4. leg horse counts
+
+5. Cartesian combination
+
+6. optimizer target budget
+
+7. final totalTl <= budgetTl invariant
+
+Combination count doğruysa bug pricing değil strategy olabilir.
+
+---
+
+# 47. Incident example — no expert data
+
+runner.experts=[]
+
+tek başına parser bug kanıtı değildir.
+
+Kontrol:
+
+source_registry enabled?
+
+source health?
+
+expert current card mapping?
+
+race identity match?
+
+horse_number match?
+
+current date source publication var mı?
+
+Bu zincir tamamlanmadan parser değiştirilmez.
+
+---
+
+# 48. Incident example — learning accuracy impossible high
+
+İlk kontrol:
+
+invalidCaptureTiming.
+
+Sonra:
+
+result time.
+
+candidate captured_at.
+
+promotion timing.
+
+historical feature source.
+
+Official result leakage varsa bütün metric invalidate edilir.
+
+---
+
+# 49. Engineering rule
+
+Bir production fix uygulanmadan önce:
+
+symptom
+root cause
+owning subsystem
+minimum-risk change
+invariant impact
+test
+diagnostic proof
+
+belirlenmelidir.
+
+---
+
+# 50. Final mental picture
+
+Two Horse backend beş plane olarak okunabilir:
+
+DATA PLANE
+
+TJK + external sources + D1.
+
+FEATURE PLANE
+
+expert + form + HP + market + weight + field.
+
+DECISION PLANE
+
+scoring + probability + optimizer.
+
+LEARNING PLANE
+
+snapshot + result + evaluation + gate.
+
+CONTROL PLANE
+
+router + auth + diagnostics + logs + versions + refresh state.
+
+Bu beş plane birlikte sistemi oluşturur.
