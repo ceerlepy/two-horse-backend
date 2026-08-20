@@ -1,0 +1,884 @@
+import type {
+  Env
+} from "../../env";
+
+import {
+  json,
+  errorMessage,
+  turkeyDate
+} from "../../shared";
+
+import {
+  DIAGNOSTIC_ROUTES
+} from "./catalog";
+
+import {
+  boundedLimit,
+  databaseCounts,
+  scalarCount,
+  tableNames,
+  validIdentifier
+} from "./db";
+
+import {
+  SCORING_WEIGHTS,
+  TOTAL_SCORING_WEIGHT
+} from "../../scoring/weights";
+
+import {
+  MODEL_VERSION,
+  LEARNING_POLICY_VERSION,
+  COUPON_POLICY_VERSION
+} from "../../model/version";
+
+function integerParam(
+  url: URL,
+  name: string
+): number | null {
+  const value =
+    Number(
+      url.searchParams.get(name)
+    );
+
+  return Number.isInteger(value)
+    ? value
+    : null;
+}
+
+export async function routeDiagnostics(
+  request: Request,
+  env: Env
+): Promise<Response | null> {
+  const url =
+    new URL(request.url);
+
+  const path =
+    url.pathname;
+
+  if (
+    path ===
+    "/api/debug/routes"
+  ) {
+    return json({
+      ok: true,
+      count:
+        DIAGNOSTIC_ROUTES.length,
+      routes:
+        DIAGNOSTIC_ROUTES
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/config"
+  ) {
+    return json({
+      ok: true,
+
+      application: {
+        name:
+          env.APP_NAME,
+        version:
+          env.APP_VERSION
+      },
+
+      model: {
+        scoring:
+          MODEL_VERSION,
+        learning:
+          LEARNING_POLICY_VERSION,
+        coupon:
+          COUPON_POLICY_VERSION
+      },
+
+      security: {
+        adminTokenConfigured:
+          Boolean(
+            env.ADMIN_TOKEN?.trim()
+          )
+      },
+
+      logging: {
+        level:
+          env.LOG_LEVEL ??
+          "info",
+        debugSampleRate:
+          env.LOG_DEBUG_SAMPLE_RATE ??
+          "0.10"
+      }
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/scoring-config"
+  ) {
+    return json({
+      ok: true,
+      weights:
+        SCORING_WEIGHTS,
+      totalWeight:
+        TOTAL_SCORING_WEIGHT,
+      modelVersion:
+        MODEL_VERSION,
+      learningPolicyVersion:
+        LEARNING_POLICY_VERSION,
+      couponPolicyVersion:
+        COUPON_POLICY_VERSION
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/db/schema"
+  ) {
+    try {
+      const result =
+        await env.DB.prepare(`
+          SELECT
+            type,
+            name,
+            tbl_name,
+            sql
+          FROM sqlite_master
+          WHERE name NOT LIKE 'sqlite_%'
+          ORDER BY
+            type,
+            name
+        `).all<any>();
+
+      return json({
+        ok: true,
+        objects:
+          result.results
+      });
+    } catch (error) {
+      return json(
+        {
+          ok: false,
+          error:
+            errorMessage(error)
+        },
+        500
+      );
+    }
+  }
+
+  if (
+    path ===
+    "/api/debug/db/counts"
+  ) {
+    return json({
+      ok: true,
+      counts:
+        await databaseCounts(env)
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/table"
+  ) {
+    const name =
+      String(
+        url.searchParams.get(
+          "name"
+        ) ??
+        ""
+      );
+
+    if (!validIdentifier(name)) {
+      return json(
+        {
+          ok: false,
+          error:
+            "VALID_TABLE_NAME_REQUIRED"
+        },
+        400
+      );
+    }
+
+    const allowed =
+      await tableNames(env);
+
+    if (!allowed.includes(name)) {
+      return json(
+        {
+          ok: false,
+          error:
+            "TABLE_NOT_FOUND",
+          tables:
+            allowed
+        },
+        404
+      );
+    }
+
+    const limit =
+      boundedLimit(
+        url.searchParams.get(
+          "limit"
+        )
+      );
+
+    const rows =
+      await env.DB.prepare(
+        'SELECT * FROM "' +
+        name +
+        '" LIMIT ?'
+      )
+        .bind(limit)
+        .all<any>();
+
+    return json({
+      ok: true,
+      table:
+        name,
+      limit,
+      rows:
+        rows.results
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/card"
+  ) {
+    const date =
+      url.searchParams.get(
+        "date"
+      ) ??
+      turkeyDate();
+
+    const races =
+      await env.DB.prepare(`
+        SELECT
+          city,
+          COUNT(*) race_count,
+          MIN(race_number) first_race,
+          MAX(race_number) last_race,
+          MIN(starts_at) first_start,
+          MAX(starts_at) last_start
+        FROM races
+        WHERE race_date = ?
+        GROUP BY city
+        ORDER BY city
+      `)
+        .bind(date)
+        .all<any>();
+
+    const runners =
+      await env.DB.prepare(`
+        SELECT
+          city,
+          COUNT(*) runner_count
+        FROM runners
+        WHERE race_date = ?
+        GROUP BY city
+        ORDER BY city
+      `)
+        .bind(date)
+        .all<any>();
+
+    return json({
+      ok: true,
+      date,
+      races:
+        races.results,
+      runners:
+        runners.results
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/race"
+  ) {
+    const date =
+      url.searchParams.get(
+        "date"
+      ) ??
+      turkeyDate();
+
+    const city =
+      String(
+        url.searchParams.get(
+          "city"
+        ) ??
+        ""
+      );
+
+    const race =
+      integerParam(
+        url,
+        "race"
+      );
+
+    if (
+      !city ||
+      race == null
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            "CITY_AND_RACE_REQUIRED"
+        },
+        400
+      );
+    }
+
+    const raceRow =
+      await env.DB.prepare(`
+        SELECT *
+        FROM races
+        WHERE
+          race_date = ?
+          AND city = ?
+          AND race_number = ?
+      `)
+        .bind(
+          date,
+          city,
+          race
+        )
+        .first<any>();
+
+    const runners =
+      await env.DB.prepare(`
+        SELECT *
+        FROM runners
+        WHERE
+          race_date = ?
+          AND city = ?
+          AND race_number = ?
+        ORDER BY horse_number
+      `)
+        .bind(
+          date,
+          city,
+          race
+        )
+        .all<any>();
+
+    return json({
+      ok:
+        raceRow != null,
+      date,
+      city,
+      raceNumber:
+        race,
+      race:
+        raceRow ??
+        null,
+      runners:
+        runners.results
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/runner"
+  ) {
+    const date =
+      url.searchParams.get(
+        "date"
+      ) ??
+      turkeyDate();
+
+    const city =
+      String(
+        url.searchParams.get(
+          "city"
+        ) ??
+        ""
+      );
+
+    const race =
+      integerParam(
+        url,
+        "race"
+      );
+
+    const horse =
+      integerParam(
+        url,
+        "horse"
+      );
+
+    if (
+      !city ||
+      race == null ||
+      horse == null
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            "CITY_RACE_HORSE_REQUIRED"
+        },
+        400
+      );
+    }
+
+    const runner =
+      await env.DB.prepare(`
+        SELECT *
+        FROM runners
+        WHERE
+          race_date = ?
+          AND city = ?
+          AND race_number = ?
+          AND horse_number = ?
+      `)
+        .bind(
+          date,
+          city,
+          race,
+          horse
+        )
+        .first<any>();
+
+    const experts =
+      await env.DB.prepare(`
+        SELECT *
+        FROM expert_predictions
+        WHERE
+          race_date = ?
+          AND city = ?
+          AND race_number = ?
+          AND horse_number = ?
+        ORDER BY source_key
+      `)
+        .bind(
+          date,
+          city,
+          race,
+          horse
+        )
+        .all<any>();
+
+    const market =
+      await env.DB.prepare(`
+        SELECT *
+        FROM agf_market_snapshots
+        WHERE
+          race_date = ?
+          AND city = ?
+          AND race_number = ?
+          AND horse_number = ?
+        ORDER BY captured_at DESC
+        LIMIT 30
+      `)
+        .bind(
+          date,
+          city,
+          race,
+          horse
+        )
+        .all<any>();
+
+    const field =
+      await env.DB.prepare(`
+        SELECT *
+        FROM field_signals
+        WHERE
+          race_date = ?
+          AND city = ?
+          AND race_number = ?
+          AND horse_number = ?
+      `)
+        .bind(
+          date,
+          city,
+          race,
+          horse
+        )
+        .all<any>();
+
+    return json({
+      ok:
+        runner != null,
+      identity: {
+        date,
+        city,
+        race,
+        horse
+      },
+      runner:
+        runner ??
+        null,
+      experts:
+        experts.results,
+      market:
+        market.results,
+      field:
+        field.results
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/data-quality"
+  ) {
+    const date =
+      url.searchParams.get(
+        "date"
+      ) ??
+      turkeyDate();
+
+    const runners =
+      await env.DB.prepare(`
+        SELECT
+          city,
+          COUNT(*) runners,
+
+          SUM(
+            CASE
+              WHEN agf_percent IS NULL
+              THEN 1 ELSE 0
+            END
+          ) missing_agf,
+
+          SUM(
+            CASE
+              WHEN recent_form_raw IS NULL
+                OR TRIM(recent_form_raw) = ''
+              THEN 1 ELSE 0
+            END
+          ) missing_form,
+
+          SUM(
+            CASE
+              WHEN hp IS NULL
+              THEN 1 ELSE 0
+            END
+          ) missing_hp,
+
+          SUM(
+            CASE
+              WHEN weight IS NULL
+              THEN 1 ELSE 0
+            END
+          ) missing_weight
+
+        FROM runners
+        WHERE race_date = ?
+        GROUP BY city
+        ORDER BY city
+      `)
+        .bind(date)
+        .all<any>();
+
+    const expertRows =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM expert_predictions
+          WHERE race_date = ?
+        `,
+        date
+      );
+
+    const marketRows =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM agf_market_snapshots
+          WHERE race_date = ?
+        `,
+        date
+      );
+
+    const fieldRows =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM field_signals
+          WHERE
+            race_date = ?
+            AND tjk_score IS NOT NULL
+        `,
+        date
+      );
+
+    return json({
+      ok: true,
+      date,
+      byCity:
+        runners.results,
+      signalRows: {
+        experts:
+          expertRows,
+        market:
+          marketRows,
+        field:
+          fieldRows
+      }
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/invariants"
+  ) {
+    const invalidCaptureTiming =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM learning_snapshot_candidates
+          WHERE captured_at >= starts_at
+        `
+      );
+
+    const orphanRunners =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM runners r
+          LEFT JOIN races rc
+            ON rc.race_date = r.race_date
+           AND rc.city = r.city
+           AND rc.race_number = r.race_number
+          WHERE rc.race_number IS NULL
+        `
+      );
+
+    const duplicateWindows =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM (
+            SELECT
+              race_date,
+              city,
+              sixfold_number
+            FROM sixfold_windows
+            GROUP BY
+              race_date,
+              city,
+              sixfold_number
+            HAVING COUNT(*) > 1
+          )
+        `
+      );
+
+    const duplicateSnapshotKeys =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM (
+            SELECT snapshot_key
+            FROM sixfold_coupon_snapshots
+            WHERE snapshot_key IS NOT NULL
+            GROUP BY snapshot_key
+            HAVING COUNT(*) > 1
+          )
+        `
+      );
+
+    const checks = {
+      invalidCaptureTiming,
+      orphanRunners,
+      duplicateWindows,
+      duplicateSnapshotKeys
+    };
+
+    return json({
+      ok:
+        Object.values(checks)
+          .every(
+            value =>
+              value === 0
+          ),
+      checks
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/pipeline"
+  ) {
+    const refresh =
+      await env.DB.prepare(`
+        SELECT *
+        FROM refresh_state
+        ORDER BY pipeline_key
+      `).all<any>();
+
+    const sources =
+      await env.DB.prepare(`
+        SELECT
+          enabled,
+          health_status,
+          COUNT(*) total
+        FROM source_registry
+        GROUP BY
+          enabled,
+          health_status
+        ORDER BY
+          enabled DESC,
+          health_status
+      `).all<any>();
+
+    const learning =
+      await env.DB.prepare(`
+        SELECT
+          COUNT(*) candidate_count,
+          SUM(
+            CASE
+              WHEN captured_at >= starts_at
+              THEN 1 ELSE 0
+            END
+          ) invalid_capture_timing,
+          MAX(captured_at) latest_capture
+        FROM learning_snapshot_candidates
+      `).first<any>();
+
+    const coupons =
+      await env.DB.prepare(`
+        SELECT
+          COUNT(*) total,
+          SUM(
+            CASE
+              WHEN evaluated_at IS NULL
+              THEN 1 ELSE 0
+            END
+          ) pending,
+          MAX(generated_at) latest_generation
+        FROM sixfold_coupon_snapshots
+      `).first<any>();
+
+    return json({
+      ok: true,
+      serverNow:
+        new Date()
+          .toISOString(),
+      refreshState:
+        refresh.results,
+      sourceSummary:
+        sources.results,
+      learning,
+      coupons
+    });
+  }
+
+  if (
+    path ===
+    "/api/debug/health/deep"
+  ) {
+    try {
+      await env.DB.prepare(
+        "SELECT 1"
+      ).first();
+
+      const invalidCaptureTiming =
+        await scalarCount(
+          env,
+          `
+            SELECT COUNT(*) total
+            FROM learning_snapshot_candidates
+            WHERE captured_at >= starts_at
+          `
+        );
+
+      const degradedSources =
+        await scalarCount(
+          env,
+          `
+            SELECT COUNT(*) total
+            FROM source_registry
+            WHERE
+              enabled = 1
+              AND health_status <> 'healthy'
+          `
+        );
+
+      return json({
+        ok: true,
+        status:
+          invalidCaptureTiming > 0
+            ? "degraded"
+            : "healthy",
+        database:
+          "healthy",
+        invalidCaptureTiming,
+        degradedSources,
+        serverNow:
+          new Date()
+            .toISOString()
+      });
+    } catch (error) {
+      return json(
+        {
+          ok: false,
+          status:
+            "unhealthy",
+          error:
+            errorMessage(error)
+        },
+        500
+      );
+    }
+  }
+
+  if (
+    path ===
+    "/api/debug/overview"
+  ) {
+    const date =
+      turkeyDate();
+
+    const raceCount =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM races
+          WHERE race_date = ?
+        `,
+        date
+      );
+
+    const runnerCount =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM runners
+          WHERE race_date = ?
+        `,
+        date
+      );
+
+    const sourceCount =
+      await scalarCount(
+        env,
+        `
+          SELECT COUNT(*) total
+          FROM source_registry
+          WHERE enabled = 1
+        `
+      );
+
+    return json({
+      ok: true,
+      date,
+      raceCount,
+      runnerCount,
+      enabledSources:
+        sourceCount,
+      diagnostics:
+        DIAGNOSTIC_ROUTES
+    });
+  }
+
+  return null;
+}
