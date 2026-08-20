@@ -77,6 +77,8 @@ export async function generateSixFoldCoupons(
     sixfold?: number;
 
     multiplier?: number;
+
+    persistSnapshot?: boolean;
   }
 ) {
   const meetings =
@@ -327,22 +329,82 @@ export async function generateSixFoldCoupons(
         1
     });
 
-  await persistSixFoldCoupons(
-    env,
-    {
-      raceDate,
-      city:
-        String(
-          meeting.city
-        ),
-      sixfold,
-      startRace:
-        window.startRace,
-      endRace:
-        window.endRace,
-      coupons
+  let snapshotPersisted =
+    false;
+
+  let snapshotPersistenceReason =
+    input.persistSnapshot
+      ? "not-evaluated"
+      : "read-only-request";
+
+  if (input.persistSnapshot) {
+    const now =
+      Date.now();
+
+    const starts =
+      selectedRaces.map(
+        (race:any) => {
+          if (!race.starts_at) {
+            return null;
+          }
+
+          const value =
+            Date.parse(
+              String(
+                race.starts_at
+              )
+            );
+
+          return Number.isFinite(value)
+            ? value
+            : null;
+        }
+      );
+
+    const allStartsKnown =
+      starts.every(
+        value =>
+          value != null
+      );
+
+    const allStillFuture =
+      allStartsKnown &&
+      starts.every(
+        value =>
+          Number(value) > now
+      );
+
+    if (!allStartsKnown) {
+      snapshotPersistenceReason =
+        "missing-start-time";
+    } else if (!allStillFuture) {
+      snapshotPersistenceReason =
+        "race-already-started";
+    } else {
+      await persistSixFoldCoupons(
+        env,
+        {
+          raceDate,
+          city:
+            String(
+              meeting.city
+            ),
+          sixfold,
+          startRace:
+            window.startRace,
+          endRace:
+            window.endRace,
+          coupons
+        }
+      );
+
+      snapshotPersisted =
+        true;
+
+      snapshotPersistenceReason =
+        "pre-race-frozen";
     }
-  );
+  }
 
   return {
     date:
@@ -377,6 +439,10 @@ export async function generateSixFoldCoupons(
     generatedAt:
       new Date()
         .toISOString(),
+
+    snapshotPersisted,
+
+    snapshotPersistenceReason,
 
     coupons
   };

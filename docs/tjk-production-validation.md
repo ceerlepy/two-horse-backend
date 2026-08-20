@@ -537,3 +537,67 @@ Future TJK parser/extraction changes must preserve these regression criteria.
 
 TJK correctness must remain green before expert/scoring/UI work is allowed to
 change the production pipeline.
+
+
+---
+
+# Phase 2 — Backend Completion Production Validation
+
+STATUS: PENDING LIVE VALIDATION
+
+Run these checks during the next production validation session.
+
+Security prerequisite:
+Configure the Cloudflare Worker secret named ADMIN_TOKEN.
+Never commit the token value to GitHub.
+
+Test 5 — Operational authentication
+- /api/admin/* without token must return 401.
+- /api/debug/* without token must return 401.
+- If ADMIN_TOKEN is missing, protected endpoints must fail closed with 503.
+- Correct Bearer token or X-Admin-Token must succeed.
+- /api/health and /api/today remain public.
+
+Test 6 — GET coupon generation read-only
+- Record sixfold_coupon_snapshots count.
+- Call GET /api/coupons/generate repeatedly.
+- Snapshot count must remain unchanged.
+- Response must report snapshotPersisted false.
+- Response reason must be read-only-request.
+
+Test 7 — Pre-race POST snapshot
+- Before the first selected leg starts, authenticated POST generation must report snapshotPersisted true.
+- Reason must be pre-race-frozen.
+- Repeating identical POST must remain idempotent.
+
+Test 8 — Post-start protection
+- After any selected leg has started, authenticated POST must not persist.
+- Reason must be race-already-started.
+- No post-start snapshot may enter historical evaluation.
+
+Test 9 — Global maximum coverage
+- Every coupon must remain within requested budget.
+- Maximum-coverage survival probability must be at least cautious and balanced.
+- Unused budget is acceptable if no higher-survival legal combination fits.
+
+Test 10 — Official TJK sixfold windows
+- Prefer source tjk-program when explicit TJK metadata exists.
+- canonical-program is fallback only.
+- No stale windows or stale cities may remain.
+
+Test 11 — Current-card reconciliation
+- Refresh current TJK program.
+- Coverage must contain only cities in the authoritative current card.
+
+Test 12 — Learning and results
+- invalidCaptureTiming must remain zero.
+- Official results must label already-captured pre-race data only.
+- Completed sixfold coupons must receive evaluated_at, hit_legs, six_of_six and five_of_six.
+
+Test 13 — Expert, market and field coverage
+- Validate current-card market coverage.
+- Validate field scored coverage where source data exists.
+- Validate expert coverage after publishers release the current card.
+- Individual source failures must degrade gracefully.
+
+Phase 2 completion requires all tests above plus CI PASS.

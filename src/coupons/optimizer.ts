@@ -267,137 +267,235 @@ function ticketCost(
 }
 
 
-/*
- * Choose which ONE additional horse is most
- * valuable at the current state.
- *
- * Objective:
- *
- * marginal increase in log six-fold survival
- * -------------------------------------------
- * marginal ticket cost
- *
- * Uncertainty slightly rewards expansion in
- * genuinely difficult legs.
- */
-function bestExpansion(
-  legs:
-    PreparedLeg[],
-  counts:
-    number[],
-  unitPriceTl:
-    number,
-  multiplier:
-    number,
-  maxBudgetTl:
-    number
-): {
-  legIndex: number;
-  utility: number;
-} | null {
-  const currentCost =
-    ticketCost(
-      counts,
-      unitPriceTl,
-      multiplier
-    ).totalTl;
+interface HalfCandidate {
+  counts: number[];
+  combinations: number;
+  survival: number;
+}
+
+function enumerateHalf(
+  legs: PreparedLeg[]
+): HalfCandidate[] {
+  const output: HalfCandidate[] = [];
+
+  function visit(
+    index: number,
+    counts: number[],
+    combinations: number,
+    survival: number
+  ): void {
+    if (index === legs.length) {
+      output.push({
+        counts:[...counts],
+        combinations,
+        survival
+      });
+      return;
+    }
+
+    const leg = legs[index];
+
+    for (
+      let count = 1;
+      count <= leg.runners.length;
+      count += 1
+    ) {
+      counts.push(count);
+
+      visit(
+        index + 1,
+        counts,
+        combinations * count,
+        survival *
+          selectedCoverage(
+            leg,
+            count
+          )
+      );
+
+      counts.pop();
+    }
+  }
+
+  visit(0, [], 1, 1);
+  return output;
+}
+
+function globallyOptimalCounts(
+  legs: PreparedLeg[],
+  unitPriceTl: number,
+  multiplier: number,
+  budgetTl: number
+): number[] {
+  const combinationPrice =
+    unitPriceTl * multiplier;
+
+  const maxCombinations =
+    Math.floor(
+      (budgetTl + 1e-9) /
+      combinationPrice
+    );
+
+  if (maxCombinations < 1) {
+    throw new Error(
+      `BUDGET_BELOW_MINIMUM:${combinationPrice}`
+    );
+  }
+
+  const split =
+    Math.floor(
+      legs.length / 2
+    );
+
+  const left =
+    enumerateHalf(
+      legs.slice(0, split)
+    );
+
+  const right =
+    enumerateHalf(
+      legs.slice(split)
+    )
+      .filter(
+        item =>
+          item.combinations <=
+          maxCombinations
+      )
+      .sort(
+        (a,b) =>
+          a.combinations -
+          b.combinations
+      );
+
+  if (!right.length) {
+    throw new Error(
+      "NO_AFFORDABLE_COUPON"
+    );
+  }
+
+  const prefixBest:
+    HalfCandidate[] = [];
 
   let best:
+    HalfCandidate | null =
+    null;
+
+  for (const item of right) {
+    if (
+      best == null ||
+      item.survival >
+        best.survival + 1e-15 ||
+      (
+        Math.abs(
+          item.survival -
+          best.survival
+        ) <= 1e-15 &&
+        item.combinations >
+          best.combinations
+      )
+    ) {
+      best = item;
+    }
+
+    prefixBest.push(best);
+  }
+
+  function lastAffordable(
+    value: number
+  ): number {
+    let lo = 0;
+    let hi = right.length;
+
+    while (lo < hi) {
+      const mid =
+        Math.floor(
+          (lo + hi) / 2
+        );
+
+      if (
+        right[mid].combinations <=
+        value
+      ) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+
+    return lo - 1;
+  }
+
+  let winner:
     {
-      legIndex: number;
-      utility: number;
+      counts: number[];
+      survival: number;
+      combinations: number;
     } | null =
     null;
 
-  for (
-    let i = 0;
-    i < legs.length;
-    i += 1
-  ) {
-    const leg =
-      legs[i];
-
+  for (const lhs of left) {
     if (
-      counts[i] >=
-      leg.runners.length
+      lhs.combinations >
+      maxCombinations
     ) {
       continue;
     }
 
-    const candidateCounts =
-      [...counts];
+    const limit =
+      Math.floor(
+        maxCombinations /
+        lhs.combinations
+      );
 
-    candidateCounts[i] += 1;
+    const index =
+      lastAffordable(limit);
 
-    const nextCost =
-      ticketCost(
-        candidateCounts,
-        unitPriceTl,
-        multiplier
-      ).totalTl;
-
-    if (
-      nextCost >
-      maxBudgetTl +
-        1e-9
-    ) {
+    if (index < 0) {
       continue;
     }
 
-    const before =
-      Math.max(
-        1e-12,
-        selectedCoverage(
-          leg,
-          counts[i]
-        )
-      );
+    const rhs =
+      prefixBest[index];
 
-    const after =
-      Math.max(
-        before,
-        selectedCoverage(
-          leg,
-          candidateCounts[i]
-        )
-      );
+    const survival =
+      lhs.survival *
+      rhs.survival;
 
-    const survivalGain =
-      Math.log(after) -
-      Math.log(before);
+    const combinations =
+      lhs.combinations *
+      rhs.combinations;
 
-    const extraCost =
-      Math.max(
-        0.01,
-        nextCost -
-        currentCost
-      );
-
-    const uncertaintyBoost =
-      1 +
-      0.35 *
-      leg.uncertainty;
-
-    const utility =
+    if (
+      winner == null ||
+      survival >
+        winner.survival + 1e-15 ||
       (
-        survivalGain *
-        uncertaintyBoost
-      ) /
-      extraCost;
-
-    if (
-      best == null ||
-      utility >
-        best.utility
+        Math.abs(
+          survival -
+          winner.survival
+        ) <= 1e-15 &&
+        combinations >
+          winner.combinations
+      )
     ) {
-      best = {
-        legIndex: i,
-        utility
+      winner = {
+        counts:[
+          ...lhs.counts,
+          ...rhs.counts
+        ],
+        survival,
+        combinations
       };
     }
   }
 
-  return best;
+  if (!winner) {
+    throw new Error(
+      "NO_AFFORDABLE_COUPON"
+    );
+  }
+
+  return winner.counts;
 }
 
 
@@ -432,51 +530,13 @@ function optimizeProfile(
       targetBudgetTl
     );
 
-  /*
-   * Start with one horse in every leg.
-   * This is the minimum valid six-fold.
-   */
   const counts =
-    legs.map(() => 1);
-
-  const minimum =
-    ticketCost(
-      counts,
+    globallyOptimalCounts(
+      legs,
       unitPriceTl,
-      multiplier
+      multiplier,
+      effectiveBudget
     );
-
-  if (
-    minimum.totalTl >
-    budgetTl
-  ) {
-    throw new Error(
-      `BUDGET_BELOW_MINIMUM:` +
-      `${minimum.totalTl}`
-    );
-  }
-
-  while (true) {
-    const expansion =
-      bestExpansion(
-        legs,
-        counts,
-        unitPriceTl,
-        multiplier,
-        effectiveBudget
-      );
-
-    if (
-      expansion == null ||
-      expansion.utility <= 0
-    ) {
-      break;
-    }
-
-    counts[
-      expansion.legIndex
-    ] += 1;
-  }
 
   const cost =
     ticketCost(

@@ -8,9 +8,66 @@ import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
 import { generateSixFoldCoupons } from "../coupons/service";
 
+function protectedOperationalRequest(
+ request: Request
+): boolean {
+ const url = new URL(request.url);
+
+ return (
+  url.pathname.startsWith("/api/admin/") ||
+  url.pathname.startsWith("/api/debug/") ||
+  (
+   url.pathname === "/api/coupons/generate" &&
+   request.method === "POST"
+  )
+ );
+}
+
+function adminAuthFailure(
+ request: Request,
+ env: Env
+): Response | null {
+ if (!protectedOperationalRequest(request)) {
+  return null;
+ }
+
+ const expected = env.ADMIN_TOKEN?.trim();
+
+ if (!expected) {
+  return json({
+   ok:false,
+   error:"ADMIN_AUTH_NOT_CONFIGURED"
+  },503);
+ }
+
+ const authorization =
+  request.headers.get("authorization");
+
+ const explicit =
+  request.headers.get("x-admin-token");
+
+ const supplied =
+  authorization?.startsWith("Bearer ")
+   ? authorization.slice(7).trim()
+   : explicit?.trim();
+
+ if (!supplied || supplied !== expected) {
+  return json({
+   ok:false,
+   error:"UNAUTHORIZED"
+  },401);
+ }
+
+ return null;
+}
+
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
- if(request.method==="OPTIONS") return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"GET,POST,OPTIONS"}});
+ if(request.method==="OPTIONS") return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"GET,POST,OPTIONS","access-control-allow-headers":"authorization,x-admin-token,content-type"}});
+
+ const authFailure=adminAuthFailure(request,env);
+ if(authFailure) return authFailure;
+
  if(url.pathname==="/api/health") return json({ok:true,app:env.APP_NAME,version:env.APP_VERSION,timestamp:new Date().toISOString()});
  if(url.pathname==="/api/today") {
   const meetings=await getToday(env);
@@ -106,7 +163,9 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
       city,
       budgetTl,
       sixfold,
-      multiplier
+      multiplier,
+      persistSnapshot:
+       request.method==="POST"
      }
     );
 
