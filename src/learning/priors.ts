@@ -20,7 +20,24 @@ interface GroupRow {
   sample_size: number;
   wins: number;
   top3: number;
-  avg_finish: number | null;
+
+  finish_sum: number;
+  finish_count: number;
+}
+
+
+interface AggregatedContextRow {
+  entityKey: string;
+  city: string;
+  track: string;
+  distanceBand: string;
+
+  sampleSize: number;
+  wins: number;
+  top3: number;
+
+  finishSum: number;
+  finishCount: number;
 }
 
 
@@ -74,11 +91,92 @@ async function globalRates(
 }
 
 
+function aggregateContextRows(
+  rows: GroupRow[]
+): AggregatedContextRow[] {
+  const grouped =
+    new Map<string, AggregatedContextRow>();
+
+  for (const row of rows) {
+    const band =
+      distanceBand(
+        Number(row.distance_meters)
+      );
+
+    /*
+     * learning_context_priors'in gercek identity'si
+     * exact distance degil distance_band'dir.
+     *
+     * Dolayisiyla ayni banda dusen 1200/1300 gibi
+     * exact mesafeler DB'ye gitmeden once birlesmelidir.
+     */
+    const key =
+      [
+        row.entity_key,
+        row.city,
+        row.track,
+        band
+      ].join("\u001f");
+
+    const current =
+      grouped.get(key) ?? {
+        entityKey:
+          row.entity_key,
+
+        city:
+          row.city,
+
+        track:
+          row.track,
+
+        distanceBand:
+          band,
+
+        sampleSize: 0,
+        wins: 0,
+        top3: 0,
+
+        finishSum: 0,
+        finishCount: 0
+      };
+
+    current.sampleSize +=
+      Number(row.sample_size ?? 0);
+
+    current.wins +=
+      Number(row.wins ?? 0);
+
+    current.top3 +=
+      Number(row.top3 ?? 0);
+
+    current.finishSum +=
+      Number(row.finish_sum ?? 0);
+
+    current.finishCount +=
+      Number(row.finish_count ?? 0);
+
+    grouped.set(
+      key,
+      current
+    );
+  }
+
+  return Array.from(
+    grouped.values()
+  );
+}
+
+
 async function replaceContext(
   env: Env,
   entityType: string,
-  rows: GroupRow[]
+  rawRows: GroupRow[]
 ): Promise<void> {
+  const rows =
+    aggregateContextRows(
+      rawRows
+    );
+
   await env.DB.prepare(`
     DELETE FROM learning_context_priors
     WHERE entity_type = ?
@@ -99,19 +197,13 @@ async function replaceContext(
     const row of rows
   ) {
     const sampleSize =
-      Number(
-        row.sample_size
-      );
+      row.sampleSize;
 
     const wins =
-      Number(
-        row.wins
-      );
+      row.wins;
 
     const top3 =
-      Number(
-        row.top3
-      );
+      row.top3;
 
     statements.push(
       env.DB.prepare(`
@@ -133,17 +225,42 @@ async function replaceContext(
         VALUES(
           ?,?,?,?,?,?,?,?,?,?,?,?
         )
+
+        ON CONFLICT(
+          entity_type,
+          entity_key,
+          city,
+          track,
+          distance_band
+        )
+        DO UPDATE SET
+          sample_size =
+            excluded.sample_size,
+
+          wins =
+            excluded.wins,
+
+          top3 =
+            excluded.top3,
+
+          win_rate =
+            excluded.win_rate,
+
+          top3_rate =
+            excluded.top3_rate,
+
+          avg_finish =
+            excluded.avg_finish,
+
+          updated_at =
+            excluded.updated_at
       `)
         .bind(
           entityType,
-          row.entity_key,
+          row.entityKey,
           row.city,
           row.track,
-          distanceBand(
-            Number(
-              row.distance_meters
-            )
-          ),
+          row.distanceBand,
 
           sampleSize,
           wins,
@@ -159,7 +276,11 @@ async function replaceContext(
               sampleSize
             : 0,
 
-          row.avg_finish,
+          row.finishCount > 0
+            ? row.finishSum /
+              row.finishCount
+            : null,
+
           now
         )
     );
@@ -227,13 +348,21 @@ export async function rebuildLearningPriors(
           END
         ) AS top3,
 
-        AVG(
+        SUM(
           CASE
             WHEN lrf.finish_position > 0
               THEN lrf.finish_position
-            ELSE NULL
+            ELSE 0
           END
-        ) AS avg_finish
+        ) AS finish_sum,
+
+        SUM(
+          CASE
+            WHEN lrf.finish_position > 0
+              THEN 1
+            ELSE 0
+          END
+        ) AS finish_count
 
       FROM learning_runner_features lrf
 
@@ -294,13 +423,21 @@ export async function rebuildLearningPriors(
           END
         ) AS top3,
 
-        AVG(
+        SUM(
           CASE
             WHEN lrf.finish_position > 0
               THEN lrf.finish_position
-            ELSE NULL
+            ELSE 0
           END
-        ) AS avg_finish
+        ) AS finish_sum,
+
+        SUM(
+          CASE
+            WHEN lrf.finish_position > 0
+              THEN 1
+            ELSE 0
+          END
+        ) AS finish_count
 
       FROM learning_runner_features lrf
 
@@ -374,13 +511,21 @@ export async function rebuildLearningPriors(
           END
         ) AS top3,
 
-        AVG(
+        SUM(
           CASE
             WHEN lrf.finish_position > 0
               THEN lrf.finish_position
-            ELSE NULL
+            ELSE 0
           END
-        ) AS avg_finish
+        ) AS finish_sum,
+
+        SUM(
+          CASE
+            WHEN lrf.finish_position > 0
+              THEN 1
+            ELSE 0
+          END
+        ) AS finish_count
 
       FROM learning_runner_features lrf
 
