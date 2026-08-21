@@ -80,6 +80,172 @@ function findHeaderIndex(
 }
 
 
+function parseRaceNumber(
+  value: unknown
+): number | null {
+  const text =
+    clean(value);
+
+  const patterns = [
+    /(?:^|\s)(\d+)\s*[.]?\s*Koşu\b/iu,
+    /(?:^|\s)Koşu\s*No\s*[:\-]?\s*(\d+)\b/iu,
+    /(?:^|\s)(\d+)\s*[.]?\s*Race\b/iu
+  ];
+
+  for (const pattern of patterns) {
+    const match =
+      text.match(pattern);
+
+    if (!match) {
+      continue;
+    }
+
+    const raceNumber =
+      Number(match[1]);
+
+    if (
+      Number.isInteger(raceNumber) &&
+      raceNumber > 0
+    ) {
+      return raceNumber;
+    }
+  }
+
+  return null;
+}
+
+
+function findRaceNumberNearTable(
+  $: cheerio.CheerioAPI,
+  table: cheerio.Cheerio<cheerio.Element>
+): number | null {
+  /*
+   * TJK markup can change the element used for a race
+   * title. Do not depend exclusively on h1-h4.
+   *
+   * Search the closest visible predecessors before
+   * the table, bounded so an earlier race cannot leak
+   * into a later unrelated table.
+   */
+  let current =
+    table.prev();
+
+  let inspected = 0;
+
+  while (
+    current.length &&
+    inspected < 12
+  ) {
+    const raceNumber =
+      parseRaceNumber(
+        current.text()
+      );
+
+    if (raceNumber != null) {
+      return raceNumber;
+    }
+
+    /*
+     * Inspect one level of descendants because TJK
+     * sometimes wraps the text in span/div elements.
+     */
+    const descendantText =
+      current
+        .find(
+          "h1,h2,h3,h4,h5,h6,div,span,strong,b"
+        )
+        .map(
+          (_, node) =>
+            clean(
+              $(node).text()
+            )
+        )
+        .get()
+        .join(" ");
+
+    const descendantRace =
+      parseRaceNumber(
+        descendantText
+      );
+
+    if (descendantRace != null) {
+      return descendantRace;
+    }
+
+    current =
+      current.prev();
+
+    inspected += 1;
+  }
+
+  /*
+   * Last conservative fallback: inspect the nearest
+   * containing section/card text.
+   */
+  const container =
+    table.closest(
+      "section,article,.card,.panel,.race,.kosu,.koşu"
+    );
+
+  if (container.length) {
+    return parseRaceNumber(
+      container
+        .first()
+        .text()
+    );
+  }
+
+  return null;
+}
+
+
+function findFinishColumn(
+  headers: string[]
+): number {
+  return findHeaderIndex(
+    headers,
+    value =>
+      value === "s" ||
+      value === "sıra" ||
+      value === "sira" ||
+      value === "sonuç" ||
+      value === "sonuc" ||
+      value === "derece sırası" ||
+      value === "derece sirasi"
+  );
+}
+
+
+function findHorseColumn(
+  headers: string[]
+): number {
+  return findHeaderIndex(
+    headers,
+    value =>
+      value.includes("at ismi") ||
+      value.includes("at adı") ||
+      value.includes("at adi") ||
+      value === "at" ||
+      value === "at ismi / no" ||
+      value === "at adı / no"
+  );
+}
+
+
+function findTimeColumn(
+  headers: string[]
+): number {
+  return findHeaderIndex(
+    headers,
+    value =>
+      value === "derece" ||
+      value === "zaman"
+  );
+}
+
+
+
+
 export function parseOfficialResultsHtml(
   html: string,
   city: string,
@@ -100,7 +266,7 @@ export function parseOfficialResultsHtml(
    * A race heading establishes the context for the
    * following result table.
    */
-  $("h1,h2,h3,h4,table").each(
+  $("h1,h2,h3,h4,h5,h6,table").each(
     (_, element) => {
       const node =
         $(element);
@@ -109,32 +275,41 @@ export function parseOfficialResultsHtml(
         element.tagName !==
         "table"
       ) {
-        const heading =
-          clean(
+        const parsedRaceNumber =
+          parseRaceNumber(
             node.text()
           );
 
-        const match =
-          heading.match(
-            /(\d+)\s*[.]?\s*Koşu\b/iu
-          );
-
-        if (match) {
+        if (
+          parsedRaceNumber != null
+        ) {
           currentRaceNumber =
-            Number(match[1]);
+            parsedRaceNumber;
         }
 
         return;
       }
 
+      const table =
+        node;
+
+      /*
+       * Prefer explicit heading state, but recover
+       * race context from nearby markup when the TJK
+       * document no longer uses h1-h6 headings.
+       */
+      const tableRaceNumber =
+        findRaceNumberNearTable(
+          $,
+          table
+        ) ??
+        currentRaceNumber;
+
       if (
-        currentRaceNumber == null
+        tableRaceNumber == null
       ) {
         return;
       }
-
-      const table =
-        node;
 
       let headers =
         table
@@ -168,32 +343,18 @@ export function parseOfficialResultsHtml(
        * S | At İsmi | ... | Derece | ...
        */
       const finishIndex =
-        findHeaderIndex(
-          headers,
-          value =>
-            value === "s"
+        findFinishColumn(
+          headers
         );
 
       const horseIndex =
-        findHeaderIndex(
-          headers,
-          value =>
-            value.includes(
-              "at ismi"
-            ) ||
-            value.includes(
-              "at adı"
-            ) ||
-            value.includes(
-              "at adi"
-            )
+        findHorseColumn(
+          headers
         );
 
       const timeIndex =
-        findHeaderIndex(
-          headers,
-          value =>
-            value === "derece"
+        findTimeColumn(
+          headers
         );
 
       if (
@@ -206,8 +367,18 @@ export function parseOfficialResultsHtml(
       const runners:
         OfficialRunnerResult[] = [];
 
-      table
-        .find("tbody tr")
+      const bodyRows =
+        table
+          .find("tbody tr");
+
+      const resultRows =
+        bodyRows.length
+          ? bodyRows
+          : table
+              .find("tr")
+              .slice(1);
+
+      resultRows
         .each(
           (_, row) => {
             const cells =
@@ -310,7 +481,7 @@ export function parseOfficialResultsHtml(
         races.some(
           race =>
             race.raceNumber ===
-            currentRaceNumber
+            tableRaceNumber
         )
       ) {
         return;
@@ -318,7 +489,7 @@ export function parseOfficialResultsHtml(
 
       races.push({
         raceNumber:
-          currentRaceNumber,
+          tableRaceNumber,
 
         runners
       });
