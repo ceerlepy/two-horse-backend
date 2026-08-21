@@ -61,7 +61,14 @@ DiagnosticRoute[] = [
   },
   {
     path: "/api/debug/pipeline",
-    purpose: "Refresh/result/learning/coupon pipeline durumu"
+    purpose: "Refresh/result/learning/coupon pipeline durumu",
+    drillDown: [
+      "/api/debug/results"
+    ]
+  },
+  {
+    path: "/api/debug/results",
+    purpose: "Official result run ve stage bazli hata/uyari diagnostigi"
   },
   {
     path: "/api/debug/scoring-config",

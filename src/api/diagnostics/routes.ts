@@ -45,6 +45,36 @@ function integerParam(
     : null;
 }
 
+
+function parseJsonObject(
+  value: unknown
+): Record<string, any> | null {
+  if (
+    typeof value !==
+    "string"
+  ) {
+    return null;
+  }
+
+  try {
+    const parsed =
+      JSON.parse(value);
+
+    return (
+      parsed &&
+      typeof parsed ===
+        "object" &&
+      !Array.isArray(parsed)
+    )
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+
+
 export async function routeDiagnostics(
   request: Request,
   env: Env
@@ -704,6 +734,275 @@ export async function routeDiagnostics(
 
   if (
     path ===
+    "/api/debug/results"
+  ) {
+    const limit =
+      boundedLimit(
+        url.searchParams.get(
+          "limit"
+        )
+      );
+
+    const rows =
+      await env.DB.prepare(`
+        SELECT
+          race_date,
+          city,
+          last_attempt_at,
+          last_success_at,
+          method,
+          status,
+          detail
+
+        FROM official_result_runs
+
+        ORDER BY
+          last_attempt_at DESC
+
+        LIMIT ?
+      `)
+        .bind(limit)
+        .all<any>();
+
+    const stageNames = [
+      "acquisition",
+      "learningLabel",
+      "priorRebuild",
+      "learningEvaluation",
+      "expertPriorRebuild",
+      "advancedEvaluation",
+      "couponEvaluation"
+    ] as const;
+
+    const stageSummary:
+      Record<
+        string,
+        {
+          ok: number;
+          error: number;
+          skipped: number;
+          unknown: number;
+        }
+      > = {};
+
+    for (
+      const stageName of
+      stageNames
+    ) {
+      stageSummary[
+        stageName
+      ] = {
+        ok: 0,
+        error: 0,
+        skipped: 0,
+        unknown: 0
+      };
+    }
+
+    let ok = 0;
+    let okWithWarnings = 0;
+    let error = 0;
+    let unknownStatus = 0;
+
+    const runs =
+      (rows.results ?? [])
+        .map(
+          row => {
+            const detail =
+              parseJsonObject(
+                row.detail
+              );
+
+            const stages =
+              detail &&
+              typeof detail.stages ===
+                "object" &&
+              detail.stages != null
+                ? detail.stages
+                : null;
+
+            if (
+              row.status ===
+              "ok"
+            ) {
+              ok += 1;
+            } else if (
+              row.status ===
+              "ok_with_warnings"
+            ) {
+              okWithWarnings += 1;
+            } else if (
+              row.status ===
+              "error"
+            ) {
+              error += 1;
+            } else {
+              unknownStatus += 1;
+            }
+
+            const stageView:
+              Record<
+                string,
+                {
+                  status: string;
+                  error: string | null;
+                }
+              > = {};
+
+            for (
+              const stageName of
+              stageNames
+            ) {
+              const stage =
+                stages?.[
+                  stageName
+                ];
+
+              const status =
+                typeof stage?.status ===
+                  "string"
+                  ? stage.status
+                  : "unknown";
+
+              const stageError =
+                typeof stage?.error ===
+                  "string"
+                  ? stage.error
+                  : null;
+
+              stageView[
+                stageName
+              ] = {
+                status,
+                error:
+                  stageError
+              };
+
+              const summary =
+                stageSummary[
+                  stageName
+                ];
+
+              if (
+                status ===
+                "ok"
+              ) {
+                summary.ok += 1;
+              } else if (
+                status ===
+                "error"
+              ) {
+                summary.error += 1;
+              } else if (
+                status ===
+                "skipped"
+              ) {
+                summary.skipped += 1;
+              } else {
+                summary.unknown += 1;
+              }
+            }
+
+            return {
+              raceDate:
+                row.race_date,
+
+              city:
+                row.city,
+
+              lastAttemptAt:
+                row.last_attempt_at,
+
+              lastSuccessAt:
+                row.last_success_at,
+
+              method:
+                row.method,
+
+              status:
+                row.status,
+
+              raceCount:
+                detail?.raceCount ??
+                null,
+
+              labelledRaces:
+                detail?.labelledRaces ??
+                null,
+
+              labelledRunners:
+                detail?.labelledRunners ??
+                null,
+
+              skippedRaces:
+                detail?.skippedRaces ??
+                null,
+
+              error:
+                typeof detail?.error ===
+                  "string"
+                  ? detail.error
+                  : (
+                      row.status ===
+                        "error" &&
+                      typeof row.detail ===
+                        "string" &&
+                      !detail
+                        ? row.detail
+                        : null
+                    ),
+
+              stages:
+                stageView
+            };
+          }
+        );
+
+    const failingStages =
+      Object.entries(
+        stageSummary
+      )
+        .filter(
+          ([, summary]) =>
+            summary.error > 0
+        )
+        .map(
+          ([stage, summary]) => ({
+            stage,
+            errors:
+              summary.error
+          })
+        );
+
+    return json({
+      ok:
+        error === 0 &&
+        failingStages.length === 0,
+
+      summary: {
+        total:
+          runs.length,
+
+        ok,
+
+        okWithWarnings,
+
+        error,
+
+        unknownStatus
+      },
+
+      failingStages,
+
+      stageSummary,
+
+      runs
+    });
+  }
+
+
+  if (
+    path ===
     "/api/debug/pipeline"
   ) {
     const refresh =
@@ -756,6 +1055,134 @@ export async function routeDiagnostics(
         FROM sixfold_coupon_snapshots
       `).first<any>();
 
+    const officialResults =
+      await env.DB.prepare(`
+        SELECT
+          COUNT(*) total,
+
+          SUM(
+            CASE
+              WHEN status = 'ok'
+              THEN 1 ELSE 0
+            END
+          ) ok,
+
+          SUM(
+            CASE
+              WHEN status = 'ok_with_warnings'
+              THEN 1 ELSE 0
+            END
+          ) warnings,
+
+          SUM(
+            CASE
+              WHEN status = 'error'
+              THEN 1 ELSE 0
+            END
+          ) errors,
+
+          MAX(last_attempt_at)
+            latest_attempt,
+
+          MAX(last_success_at)
+            latest_success
+
+        FROM official_result_runs
+      `).first<any>();
+
+    const recentResultRuns =
+      await env.DB.prepare(`
+        SELECT
+          race_date,
+          city,
+          status,
+          detail,
+          last_attempt_at
+
+        FROM official_result_runs
+
+        ORDER BY
+          last_attempt_at DESC
+
+        LIMIT 20
+      `).all<any>();
+
+    const stageErrors:
+      {
+        raceDate: string;
+        city: string;
+        stage: string;
+        error: string;
+        lastAttemptAt: string | null;
+      }[] = [];
+
+    for (
+      const row of
+      recentResultRuns.results ?? []
+    ) {
+      const detail =
+        parseJsonObject(
+          row.detail
+        );
+
+      const stages =
+        detail &&
+        typeof detail.stages ===
+          "object" &&
+        detail.stages != null
+          ? detail.stages
+          : null;
+
+      if (!stages) {
+        continue;
+      }
+
+      for (
+        const [
+          stageName,
+          stageValue
+        ] of Object.entries(
+          stages
+        )
+      ) {
+        const stage =
+          stageValue as
+            Record<string, any>;
+
+        if (
+          stage?.status !==
+          "error"
+        ) {
+          continue;
+        }
+
+        stageErrors.push({
+          raceDate:
+            String(
+              row.race_date
+            ),
+
+          city:
+            String(
+              row.city
+            ),
+
+          stage:
+            stageName,
+
+          error:
+            typeof stage.error ===
+              "string"
+              ? stage.error
+              : "UNKNOWN_STAGE_ERROR",
+
+          lastAttemptAt:
+            row.last_attempt_at ??
+            null
+        });
+      }
+    }
+
     return json({
       ok: true,
       serverNow:
@@ -766,7 +1193,12 @@ export async function routeDiagnostics(
       sourceSummary:
         sources.results,
       learning,
-      coupons
+      coupons,
+
+      officialResults,
+
+      officialResultStageErrors:
+        stageErrors
     });
   }
 
