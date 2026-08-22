@@ -11,6 +11,8 @@ import { adminAuthFailure } from "./auth";
 import { logger } from "../observability/logger";
 import { systemDiagnosticResponse } from "./system-diagnostics";
 import { ingestOfficialResultsDue } from "../results/runtime";
+import { ingestOfficialResults } from "../results/service";
+import { buildOfficialResultsUrl } from "../results/url";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -146,14 +148,43 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  if(url.pathname==="/api/history") return json({history:await getHistory(env)});
  if(url.pathname==="/api/admin/refresh-results" && request.method==="POST") {
   try {
-   /*
-    * Force an immediate official-results retry.
-    *
-    * Legacy official_result_runs rows may predate
-    * stage-level diagnostics. This endpoint executes
-    * the current result pipeline now so those rows are
-    * rewritten using the current stage-aware format.
-    */
+   const date =
+    url.searchParams.get("date");
+
+   const city =
+    url.searchParams.get("city");
+
+   if(date || city) {
+    if(!date || !city) {
+     return json({
+      ok:false,
+      error:"DATE_AND_CITY_REQUIRED"
+     },400);
+    }
+
+    const result =
+     await ingestOfficialResults(
+      env,
+      {
+       raceDate:date,
+       city,
+       url:
+        buildOfficialResultsUrl(
+         date,
+         city
+        )
+      }
+     );
+
+    return json({
+     ok:true,
+     forced:true,
+     date,
+     city,
+     result
+    });
+   }
+
    const results =
     await ingestOfficialResultsDue(
      env
@@ -161,6 +192,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
 
    return json({
     ok:true,
+    forced:false,
     results
    });
   } catch(e) {
