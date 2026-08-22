@@ -42,7 +42,15 @@ import {
 } from "../coupon/strategy";
 
 export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHash: string): Promise<void> {
-  const date = turkeyDate();
+  const date =
+    (
+      typeof program.raceDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(
+        program.raceDate
+      )
+    )
+      ? program.raceDate
+      : turkeyDate();
   const statements: D1PreparedStatement[] = [];
 
   /*

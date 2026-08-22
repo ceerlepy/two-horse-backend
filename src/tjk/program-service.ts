@@ -243,15 +243,25 @@ export async function refreshProgramIfDue(
       JSON.stringify(program)
     );
 
+    /*
+     * Hash comparison must use the authoritative card
+     * date returned by extraction, not Worker wall-clock
+     * date arithmetic.
+     */
     const existing =
       await env.DB
         .prepare(`
           SELECT source_hash
+
           FROM meetings
-          WHERE race_date =
-            date('now','+3 hours')
+
+          WHERE race_date = ?
+
           LIMIT 1
         `)
+        .bind(
+          program.raceDate
+        )
         .first<any>();
 
     /*

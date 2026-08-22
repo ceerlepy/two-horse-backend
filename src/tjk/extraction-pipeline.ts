@@ -129,6 +129,64 @@ function turkeyDateParts(): {
   };
 }
 
+function buildMasterUrl(): string {
+  const {
+    ddMMyyyy
+  } = turkeyDateParts();
+
+  const url =
+    new URL(
+      TJK_MASTER_URL
+    );
+
+  url.searchParams.set(
+    "QueryParameter_Tarih",
+    ddMMyyyy
+  );
+
+  url.searchParams.set(
+    "Era",
+    "today"
+  );
+
+  return url.toString();
+}
+
+
+function canonicalizeMeetingUrl(
+  rawUrl: string
+): string {
+  const {
+    ddMMyyyy
+  } = turkeyDateParts();
+
+  const url =
+    new URL(
+      rawUrl,
+      TJK_MASTER_URL
+    );
+
+  /*
+   * A city href discovered from TJK may contain a
+   * server-owned SehirId, which we WANT to preserve.
+   *
+   * But its date must never be allowed to drift away
+   * from the card we requested.
+   */
+  url.searchParams.set(
+    "QueryParameter_Tarih",
+    ddMMyyyy
+  );
+
+  url.searchParams.set(
+    "Era",
+    "today"
+  );
+
+  return url.toString();
+}
+
+
 function buildCityUrl(city: string): string {
   const { ddMMyyyy } = turkeyDateParts();
 
@@ -891,7 +949,20 @@ function meetingsFromMasterHtml(
    */
   if (links.length) {
     return filterCanonicalTjkMeetings(
-      links
+      links.map(
+        item => ({
+          ...item,
+
+          /*
+           * Preserve TJK city identity / SehirId while
+           * forcing the authoritative card date.
+           */
+          url:
+            canonicalizeMeetingUrl(
+              item.url
+            )
+        })
+      )
     );
   }
 
@@ -910,7 +981,17 @@ async function discoverMeetings(
   env: Env,
   diagnostics: TjkDiagnostic[]
 ): Promise<Array<{ city: string; url: string }>> {
-  const scope = "master";
+  const scope =
+    "master";
+
+  /*
+   * NEVER ask TJK for an ambiguous undated daily card.
+   *
+   * Every HTTP/browser acquisition stage below uses
+   * this same explicit Turkey-local card date.
+   */
+  const masterUrl =
+    buildMasterUrl();
 
   /*
    * Stage 1
@@ -920,7 +1001,7 @@ async function discoverMeetings(
       scope,
       "HTTP_FETCH",
       diagnostics,
-      () => httpHtml(TJK_MASTER_URL)
+      () => httpHtml(masterUrl)
     );
 
     annotateDiagnostic(
@@ -973,7 +1054,7 @@ async function discoverMeetings(
       scope,
       "CF_SCRAPE",
       diagnostics,
-      () => scrapeHtml(env, TJK_MASTER_URL)
+      () => scrapeHtml(env, masterUrl)
     );
 
     const meetings =
@@ -1013,7 +1094,7 @@ async function discoverMeetings(
       scope,
       "CF_CONTENT",
       diagnostics,
-      () => contentHtml(env, TJK_MASTER_URL)
+      () => contentHtml(env, masterUrl)
     );
 
     const meetings =
@@ -1058,7 +1139,7 @@ async function discoverMeetings(
       env.BROWSER.quickAction(
         "json",
         {
-          url: TJK_MASTER_URL,
+          url: masterUrl,
 
           prompt: `
 Read the official Turkish Jockey Club daily race-program page.
@@ -1186,7 +1267,13 @@ export async function extractTjkProgramWithFallbacks(
         )
     );
 
+    const {
+      yyyyMMdd: raceDate
+    } =
+      turkeyDateParts();
+
     const program: TjkProgramInput = {
+      raceDate,
       meetings
     };
 

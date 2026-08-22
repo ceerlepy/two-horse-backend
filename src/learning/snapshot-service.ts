@@ -3,10 +3,6 @@ import type {
 } from "../env";
 
 import {
-  turkeyDate
-} from "../shared";
-
-import {
   getToday
 } from "../storage/program-repository";
 
@@ -81,9 +77,6 @@ export async function capturePreRaceCandidates(
   const nowIso =
     now.toISOString();
 
-  const raceDate =
-    turkeyDate();
-
   /*
    * Single canonical assembly.
    *
@@ -102,6 +95,22 @@ export async function capturePreRaceCandidates(
       const race of
       meeting.races ?? []
     ) {
+      const raceDate =
+        String(
+          race.race_date ??
+          ""
+        );
+
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(
+          raceDate
+        )
+      ) {
+        throw new Error(
+          `INVALID_CANONICAL_RACE_DATE:${meeting.city}:R${race.race_number}`
+        );
+      }
+
       const startsAt =
         String(
           race.starts_at ??

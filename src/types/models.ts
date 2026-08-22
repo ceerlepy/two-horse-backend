@@ -60,7 +60,15 @@ export interface MeetingInput {
   races: RaceInput[];
 }
 
-export interface TjkProgramInput { meetings: MeetingInput[] }
+export interface TjkProgramInput {
+  /*
+   * Authoritative date belonging to the extracted
+   * TJK race card.
+   */
+  raceDate?: string;
+
+  meetings: MeetingInput[];
+}
 
 export interface ExpertPickInput {
   city: string;
