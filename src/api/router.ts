@@ -294,19 +294,43 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  ) {
   try {
    const source =
-    url.searchParams.get("source") ?? "";
+    (
+     url.searchParams.get("source") ??
+     ""
+    ).trim();
 
-   const expert =
-    await refreshExpertSource(
+   if(!source) {
+    return json({
+     ok:false,
+     error:"EXPERT_SOURCE_REQUIRED"
+    },400);
+   }
+
+   /*
+    * Do NOT keep the HTTP connection open while
+    * Browser Run discovery/extraction executes.
+    *
+    * The source job continues under waitUntil and
+    * this endpoint returns immediately.
+    */
+   ctx.waitUntil(
+    refreshExpertSource(
      env,
      source
-    );
+    ).catch(error => {
+     console.error(
+      "expert-source-refresh",
+      source,
+      error
+     );
+    })
+   );
 
    return json({
-    ok:
-     expert.ok,
-    expert
-   },expert.ok ? 200 : 502);
+    ok:true,
+    accepted:true,
+    source
+   },202);
 
   } catch(e) {
    return json({
@@ -447,6 +471,151 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
      windows.results,
     coupons:
      coupons.results
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },500);
+  }
+ }
+
+ if(url.pathname==="/api/debug/expert-source") {
+  try {
+   const source =
+    (
+     url.searchParams.get("source") ??
+     ""
+    ).trim();
+
+   if(!source) {
+    return json({
+     ok:false,
+     error:"EXPERT_SOURCE_REQUIRED"
+    },400);
+   }
+
+   const state =
+    await env.DB.prepare(`
+     SELECT
+      source_key,
+      source_name,
+      homepage_url,
+      last_working_url,
+      health_status,
+      last_checked_at,
+      last_success_at,
+      last_failure_at,
+      consecutive_failures,
+      content_hash
+     FROM source_registry
+     WHERE source_key = ?
+     LIMIT 1
+    `)
+     .bind(source)
+     .first<any>();
+
+   if(!state) {
+    return json({
+     ok:false,
+     error:"EXPERT_SOURCE_NOT_FOUND"
+    },404);
+   }
+
+   const today =
+    turkeyDate();
+
+   const totals =
+    await env.DB.prepare(`
+     SELECT
+      COUNT(*) AS predictions,
+      COUNT(DISTINCT city) AS cities,
+      COUNT(
+       DISTINCT city || '|' || race_number
+      ) AS races
+     FROM expert_predictions
+     WHERE race_date = ?
+       AND source_key = ?
+    `)
+     .bind(
+      today,
+      source
+     )
+     .first<any>();
+
+   const coverage =
+    await env.DB.prepare(`
+     SELECT
+      city,
+      COUNT(DISTINCT race_number) AS races,
+      COUNT(*) AS predictions
+     FROM expert_predictions
+     WHERE race_date = ?
+       AND source_key = ?
+     GROUP BY city
+     ORDER BY city
+    `)
+     .bind(
+      today,
+      source
+     )
+     .all<any>();
+
+   const samples =
+    await env.DB.prepare(`
+     SELECT
+      city,
+      race_number,
+      horse_number,
+      horse_name,
+      comment,
+      is_favorite,
+      is_banko,
+      is_strong,
+      is_star,
+      is_rival,
+      is_surprise,
+      is_avoid,
+      confidence,
+      updated_at
+     FROM expert_predictions
+     WHERE race_date = ?
+       AND source_key = ?
+     ORDER BY
+      city,
+      race_number,
+      horse_number
+     LIMIT 30
+    `)
+     .bind(
+      today,
+      source
+     )
+     .all<any>();
+
+   return json({
+    ok:true,
+    date:today,
+    source:state,
+    totals:{
+     predictions:
+      Number(
+       totals?.predictions ?? 0
+      ),
+     cities:
+      Number(
+       totals?.cities ?? 0
+      ),
+     races:
+      Number(
+       totals?.races ?? 0
+      )
+    },
+    coverage:
+     coverage.results ?? [],
+    samples:
+     samples.results ?? []
    });
 
   } catch(e) {
