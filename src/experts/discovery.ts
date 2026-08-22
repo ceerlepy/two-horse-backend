@@ -7,8 +7,7 @@ import {
 } from "../acquisition/semantic-json";
 
 import {
-  acquireCfContentHtml,
-  acquireCfScrapeHtml
+  acquireCfContentHtml
 } from "../acquisition/cloudflare-html";
 
 import {
@@ -35,20 +34,10 @@ const discoverySchema = {
 } as const;
 
 
-/*
- * Discovery is intentionally HYBRID:
- *
- * 1. deterministic rendered HTML link discovery
- *    SCRAPE -> href parser
- *
- * 2. deterministic rendered HTML fallback
- *    CONTENT -> href parser
- *
- * 3. semantic AI fallback
- *    extractSemanticJson()
- *
- * Extraction of picks is NOT handled here.
- */
+interface CandidateLink {
+  url: string;
+  text: string;
+}
 
 
 function sameHost(
@@ -58,9 +47,12 @@ function sameHost(
   try {
     return (
       new URL(a).hostname
-        .replace(/^www\./,"") ===
+        .replace(/^www\./,"")
+        .toLowerCase() ===
+
       new URL(b).hostname
         .replace(/^www\./,"")
+        .toLowerCase()
     );
   } catch {
     return false;
@@ -95,409 +87,112 @@ function normalizeUrl(
 }
 
 
-/*
- * Turkish-safe-ish comparison representation.
- *
- * We do NOT use this value as identity.
- * It is only discovery ranking.
- */
-function fold(
-  value: string
-): string {
-  return String(value ?? "")
-    .toLocaleLowerCase("tr-TR")
-    .replace(/ı/g,"i")
-    .replace(/ğ/g,"g")
-    .replace(/ü/g,"u")
-    .replace(/ş/g,"s")
-    .replace(/ö/g,"o")
-    .replace(/ç/g,"c")
-    .replace(/[^a-z0-9]+/g," ")
-    .trim();
-}
-
-
-function stripTags(
-  value: string
-): string {
-  return String(value ?? "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ")
-    .replace(/<[^>]+>/g," ")
-    .replace(/&nbsp;/gi," ")
-    .replace(/&amp;/gi,"&")
-    .replace(/&quot;/gi,'"')
-    .replace(/&#39;/gi,"'")
-    .replace(/\s+/g," ")
-    .trim();
-}
-
-
-interface HtmlLink {
-  url: string;
-  text: string;
-}
-
-
-function extractLinks(
-  baseUrl: string,
-  html: string
-): HtmlLink[] {
-  const output:
-    HtmlLink[] = [];
-
-  const seen =
-    new Set<string>();
-
-  /*
-   * We only need anchors, not a full DOM implementation.
-   * The Browser Run HTML is already rendered.
-   */
-  const anchorRegex =
-    /<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
-
-  let match:
-    RegExpExecArray | null;
-
-  while (
-    (
-      match =
-        anchorRegex.exec(html)
-    ) !== null
-  ) {
-    const url =
-      normalizeUrl(
-        baseUrl,
-        match[2]
-      );
-
-    if (
-      !url ||
-      !sameHost(
-        baseUrl,
-        url
-      ) ||
-      seen.has(url)
-    ) {
-      continue;
-    }
-
-    seen.add(url);
-
-    output.push({
-      url,
-      text:
-        stripTags(
-          match[3]
-        )
-    });
-  }
-
-  return output;
-}
-
-
-function dateSignals(
-  date: string
-): string[] {
-  const [
-    year,
-    month,
-    day
-  ] =
-    date.split("-");
-
-  return [
-    date,
-    `${day}-${month}-${year}`,
-    `${day}.${month}.${year}`,
-    `${day}/${month}/${year}`,
-    `${day}${month}${year}`,
-    `${year}${month}${day}`,
-
-    /*
-     * Common compact slugs:
-     * 22-8-2026 / 22.8.2026 etc.
-     */
-    `${Number(day)}-${Number(month)}-${year}`,
-    `${Number(day)}.${Number(month)}.${year}`,
-    `${Number(day)}/${Number(month)}/${year}`
-  ]
-    .map(fold);
-}
-
-
-const ARTICLE_WORDS = [
-  "tahmin",
-  "tahminler",
-  "analiz",
-  "yorum",
-  "yorumlar",
-  "altili",
-  "ganyan",
-  "kosu",
-  "kosular",
-  "yaris",
-  "banko",
-  "favori",
-  "surpriz",
-  "haber"
-];
-
-
-const BAD_PATH_WORDS = [
-  "/tag/",
-  "/kategori/",
-  "/category/",
-  "/author/",
-  "/yazarlar/",
-  "/uzman-listesi",
-  "/experts",
-  "/login",
-  "/register",
-  "/iletisim",
-  "/contact",
-  "/hakkimizda",
-  "/about",
-  "/privacy",
-  "/gizlilik"
-];
-
-
 const ASSET_EXTENSIONS =
-  /\.(?:jpg|jpeg|png|gif|webp|svg|pdf|zip|mp4|mp3|css|js)(?:\?|$)/i;
+  /\.(?:jpg|jpeg|png|gif|webp|svg|ico|pdf|zip|rar|mp4|mp3|css|js|xml)(?:\?|$)/i;
 
 
-function rankCandidate(
+/*
+ * Only things that are unambiguously NOT prediction
+ * articles belong here.
+ *
+ * Do NOT put semantic racing words here.
+ */
+const OBVIOUS_NON_CONTENT_PATHS = [
+  "/login",
+  "/logout",
+  "/register",
+  "/uye-girisi",
+  "/uyelik",
+  "/account",
+  "/hesabim",
+  "/cart",
+  "/sepet",
+  "/privacy",
+  "/gizlilik",
+  "/kvkk",
+  "/terms",
+  "/kullanim-sartlari",
+  "/contact",
+  "/iletisim",
+  "/about",
+  "/hakkimizda"
+];
+
+
+function cleanText(
+  value: unknown
+): string {
+  return String(
+    value ?? ""
+  )
+    .replace(/\s+/g," ")
+    .trim()
+    .slice(0,500);
+}
+
+
+function isUsableCandidate(
   landingUrl: string,
-  link: HtmlLink,
-  date: string,
-  cities: string[]
-): number {
-  let score = 0;
-
-  const urlFolded =
-    fold(link.url);
-
-  const textFolded =
-    fold(link.text);
-
-  const combined =
-    `${urlFolded} ${textFolded}`;
-
-  const landingNormalized =
-    normalizeUrl(
+  url: string
+): boolean {
+  if (
+    !sameHost(
       landingUrl,
-      landingUrl
-    );
-
-  if (
-    landingNormalized &&
-    link.url === landingNormalized
-  ) {
-    return -100;
-  }
-
-  if (
-    ASSET_EXTENSIONS.test(
-      link.url
+      url
     )
   ) {
-    return -100;
+    return false;
   }
-
-  const pathname =
-    (() => {
-      try {
-        return new URL(
-          link.url
-        ).pathname.toLowerCase();
-      } catch {
-        return "";
-      }
-    })();
 
   if (
-    BAD_PATH_WORDS.some(
-      word =>
-        pathname.includes(word)
-    )
+    ASSET_EXTENSIONS.test(url)
   ) {
-    score -= 4;
+    return false;
   }
 
+  try {
+    const parsed =
+      new URL(url);
 
-  /*
-   * City is the strongest generic current-card signal.
-   * One article may contain multiple cities.
-   */
-  let cityMatches = 0;
-
-  for (const city of cities) {
-    const cityFolded =
-      fold(city);
+    const path =
+      parsed.pathname.toLowerCase();
 
     if (
-      cityFolded &&
-      combined.includes(
-        cityFolded
-      )
-    ) {
-      cityMatches += 1;
-    }
-  }
-
-  if (cityMatches > 0) {
-    score += 4;
-    score += Math.min(
-      cityMatches - 1,
-      2
-    );
-  }
-
-
-  /*
-   * Prediction/article vocabulary.
-   */
-  const wordMatches =
-    ARTICLE_WORDS.filter(
-      word =>
-        combined.includes(word)
-    ).length;
-
-  if (wordMatches > 0) {
-    score += 3;
-    score += Math.min(
-      wordMatches - 1,
-      2
-    );
-  }
-
-
-  /*
-   * Exact/recognisable date is useful, but NOT required.
-   * Some publishers use opaque or malformed slugs.
-   */
-  if (
-    dateSignals(date)
-      .some(
-        signal =>
-          signal &&
-          combined.includes(
-            signal
+      OBVIOUS_NON_CONTENT_PATHS.some(
+        item =>
+          path === item ||
+          path.startsWith(
+            `${item}/`
           )
       )
-  ) {
-    score += 4;
+    ) {
+      return false;
+    }
+
+    /*
+     * Homepage itself is not an article candidate.
+     */
+    if (
+      path === "/" &&
+      !parsed.search
+    ) {
+      return false;
+    }
+
+    return true;
+
+  } catch {
+    return false;
   }
-
-
-  /*
-   * Generic article-like path signals.
-   */
-  if (
-    /\/(?:haber|haberler|article|post|yazi|yazilar|tahmin|ai-tahmin)\b/i
-      .test(pathname)
-  ) {
-    score += 2;
-  }
-
-
-  /*
-   * Real article links normally have a meaningful slug.
-   */
-  const segments =
-    pathname
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    segments.length >= 2 &&
-    pathname.length >= 20
-  ) {
-    score += 1;
-  }
-
-
-  return score;
 }
 
 
-function deterministicCandidates(
+function dedupeCandidates(
   landingUrl: string,
-  html: string,
-  date: string,
-  cities: string[]
-): string[] {
-  const ranked =
-    extractLinks(
-      landingUrl,
-      html
-    )
-      .map(
-        link => ({
-          ...link,
-
-          score:
-            rankCandidate(
-              landingUrl,
-              link,
-              date,
-              cities
-            )
-        })
-      )
-
-      /*
-       * Require multiple independent article signals.
-       *
-       * We intentionally do NOT require a date in the URL.
-       * Final TJK canonical validation remains authoritative.
-       */
-      .filter(
-        item =>
-          item.score >= 5
-      )
-
-      .sort(
-        (a,b) =>
-          b.score - a.score
-      );
-
-
-  const output:
-    string[] = [];
-
-  const seen =
-    new Set<string>();
-
-  for (const item of ranked) {
-    if (
-      seen.has(item.url)
-    ) {
-      continue;
-    }
-
-    seen.add(item.url);
-    output.push(item.url);
-
-    if (
-      output.length >= 12
-    ) {
-      break;
-    }
-  }
-
-  return output;
-}
-
-
-function normalizeSemanticUrls(
-  landingUrl: string,
-  values: unknown[]
-): string[] {
-  const output:
-    string[] = [];
+  values: CandidateLink[]
+): CandidateLink[] {
+  const result:
+    CandidateLink[] = [];
 
   const seen =
     new Set<string>();
@@ -506,7 +201,362 @@ function normalizeSemanticUrls(
     const url =
       normalizeUrl(
         landingUrl,
-        String(item)
+        item.url
+      );
+
+    if (
+      !url ||
+      seen.has(url) ||
+      !isUsableCandidate(
+        landingUrl,
+        url
+      )
+    ) {
+      continue;
+    }
+
+    seen.add(url);
+
+    result.push({
+      url,
+      text:
+        cleanText(
+          item.text
+        )
+    });
+  }
+
+  /*
+   * Keep the AI input bounded, but deliberately generous.
+   * This is NOT semantic filtering.
+   */
+  return result.slice(0,250);
+}
+
+
+function unwrapQuickAction(
+  value: any
+): any {
+  if (
+    value &&
+    typeof value === "object" &&
+    "result" in value
+  ) {
+    return value.result;
+  }
+
+  return value;
+}
+
+
+function findAttribute(
+  attributes: unknown,
+  name: string
+): string | null {
+  if (
+    !Array.isArray(attributes)
+  ) {
+    return null;
+  }
+
+  for (const item of attributes) {
+    if (
+      item &&
+      typeof item === "object" &&
+      String(
+        (item as any).name ?? ""
+      ).toLowerCase() ===
+        name.toLowerCase()
+    ) {
+      const value =
+        (item as any).value;
+
+      return value === undefined ||
+        value === null
+        ? null
+        : String(value);
+    }
+  }
+
+  return null;
+}
+
+
+/*
+ * Cloudflare /scrape returns:
+ *
+ * [
+ *   {
+ *     selector:"a",
+ *     results:[
+ *       {
+ *         text:"...",
+ *         html:"...",
+ *         attributes:[
+ *           {name:"href", value:"..."}
+ *         ]
+ *       }
+ *     ]
+ *   }
+ * ]
+ */
+async function scrapeAnchorCandidates(
+  env: Env,
+  landingUrl: string
+): Promise<{
+  candidates: CandidateLink[];
+  browserMs: string | null;
+}> {
+  const response =
+    await env.BROWSER.quickAction(
+      "scrape",
+      {
+        url:
+          landingUrl,
+
+        elements: [
+          {
+            selector:
+              "a"
+          }
+        ],
+
+        /*
+         * JS-heavy source pages may add article links
+         * after the initial DOM event.
+         */
+        gotoOptions: {
+          waitUntil:
+            "networkidle2",
+
+          timeout:
+            30_000
+        },
+
+        rejectResourceTypes: [
+          "image",
+          "media",
+          "font"
+        ]
+      } as any
+    );
+
+
+  if (!response.ok) {
+    throw new Error(
+      `DISCOVERY_SCRAPE_HTTP_${response.status}`
+    );
+  }
+
+
+  const browserMs =
+    response.headers.get(
+      "X-Browser-Ms-Used"
+    );
+
+
+  const raw =
+    unwrapQuickAction(
+      await response.json()
+    );
+
+
+  const groups =
+    Array.isArray(raw)
+      ? raw
+      : [];
+
+
+  const found:
+    CandidateLink[] = [];
+
+
+  for (const group of groups) {
+    if (
+      !group ||
+      typeof group !== "object"
+    ) {
+      continue;
+    }
+
+    const rows =
+      Array.isArray(
+        (group as any).results
+      )
+        ? (group as any).results
+        : [];
+
+    for (const row of rows) {
+      const href =
+        findAttribute(
+          row?.attributes,
+          "href"
+        );
+
+      if (!href) {
+        continue;
+      }
+
+      found.push({
+        url:
+          href,
+
+        text:
+          cleanText(
+            row?.text ??
+            row?.html ??
+            ""
+          )
+      });
+    }
+  }
+
+
+  return {
+    candidates:
+      dedupeCandidates(
+        landingUrl,
+        found
+      ),
+
+    browserMs
+  };
+}
+
+
+function decodeEntities(
+  value: string
+): string {
+  return value
+    .replace(/&amp;/gi,"&")
+    .replace(/&quot;/gi,'"')
+    .replace(/&#39;/gi,"'")
+    .replace(/&lt;/gi,"<")
+    .replace(/&gt;/gi,">")
+    .replace(/&nbsp;/gi," ");
+}
+
+
+function stripTags(
+  value: string
+): string {
+  return cleanText(
+    decodeEntities(
+      value.replace(
+        /<[^>]+>/g,
+        " "
+      )
+    )
+  );
+}
+
+
+/*
+ * CONTENT fallback:
+ * fully rendered HTML -> anchors.
+ */
+function anchorsFromHtml(
+  landingUrl: string,
+  html: string
+): CandidateLink[] {
+  const found:
+    CandidateLink[] = [];
+
+  const regex =
+    /<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+
+  let match:
+    RegExpExecArray | null;
+
+
+  while (
+    (
+      match =
+        regex.exec(html)
+    ) !== null
+  ) {
+    found.push({
+      url:
+        match[2],
+
+      text:
+        stripTags(
+          match[3]
+        )
+    });
+  }
+
+
+  return dedupeCandidates(
+    landingUrl,
+    found
+  );
+}
+
+
+function candidateHtml(
+  candidates: CandidateLink[]
+): string {
+  const escape =
+    (value: string) =>
+      value
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;");
+
+
+  const rows =
+    candidates
+      .map(
+        (
+          item,
+          index
+        ) =>
+          `<li data-index="${index}">
+             <a href="${escape(item.url)}">
+               ${escape(item.text)}
+             </a>
+           </li>`
+      )
+      .join("\n");
+
+
+  return `
+<html>
+  <body>
+    <h1>Candidate article links</h1>
+    <ul>
+      ${rows}
+    </ul>
+  </body>
+</html>
+`.trim();
+}
+
+
+function normalizeSelectedUrls(
+  landingUrl: string,
+  raw: unknown
+): string[] {
+  if (
+    !Array.isArray(raw)
+  ) {
+    return [];
+  }
+
+  const output:
+    string[] = [];
+
+  const seen =
+    new Set<string>();
+
+
+  for (const value of raw) {
+    const url =
+      normalizeUrl(
+        landingUrl,
+        String(value)
       );
 
     if (
@@ -524,169 +574,183 @@ function normalizeSemanticUrls(
     output.push(url);
   }
 
+
   return output.slice(0,12);
 }
 
 
-export async function discoverExpertArticleUrls(
+/*
+ * AI does NOT enumerate the web page here.
+ *
+ * It receives only the deterministic candidates that
+ * Cloudflare scrape/content already proved exist.
+ */
+async function selectCurrentArticlesWithAi(
   env: Env,
   landingUrl: string,
   sourceName: string,
+  date: string,
+  cities: string[],
+  candidates: CandidateLink[],
+  stage:
+    "scrape" |
+    "content"
+): Promise<{
+  urls: string[];
+  method: string;
+  diagnostics: unknown;
+}> {
+  if (!candidates.length) {
+    return {
+      urls: [],
+      method:
+        `cf-${stage}-candidate-ai`,
+      diagnostics: {
+        candidates:0,
+        selected:0
+      }
+    };
+  }
+
+
+  const prompt = `
+Aşağıdaki linkler ${sourceName} sitesinin gerçek DOM'undan alınmış candidate linklerdir.
+
+BUGÜN:
+${date}
+
+BUGÜNKÜ TJK TÜRKİYE YARIŞ ŞEHİRLERİ:
+${cities.join(", ")}
+
+Görevin yalnızca bu candidate linkler arasından BUGÜNÜN Türkiye at yarışı tahmin, analiz veya uzman yorum içeriğine götüren GERÇEK ARTICLE URL'lerini seçmektir.
+
+Kurallar:
+- Sana verilen listede olmayan URL üretme.
+- Eski tarihli içerikleri seçme.
+- Yurt dışı yarışlarını seçme.
+- Genel haber, camia haberi, kategori, tag, uzman listesi, ana sayfa, reklam veya navigasyon linkini seçme.
+- Bir article birden fazla bugünkü TJK şehrini kapsayabilir.
+- URL slug'ı bozuk veya tarih formatı alışılmadık olabilir; anchor text ve URL'yi birlikte değerlendir.
+- Emin olmadığın linki seçme.
+- Hiçbiri uygun değilse urls=[] döndür.
+
+Yalnızca gerçek current-card article URL'lerini döndür.
+`.trim();
+
+
+  const result =
+    await extractSemanticJson<any>(
+      env,
+
+      /*
+       * Important:
+       * AI sees only this compact candidate document,
+       * NOT the original noisy landing page.
+       */
+      `data:text/html,${encodeURIComponent(
+        candidateHtml(
+          candidates
+        )
+      )}`,
+
+      prompt,
+
+      {
+        type:
+          "json_schema",
+
+        json_schema:
+          discoverySchema
+      }
+    );
+
+
+  const urls =
+    normalizeSelectedUrls(
+      landingUrl,
+      result.value?.urls
+    );
+
+
+  /*
+   * Defense against model hallucination:
+   * selected URL must literally exist in candidate set.
+   */
+  const candidateSet =
+    new Set(
+      candidates.map(
+        item =>
+          normalizeUrl(
+            landingUrl,
+            item.url
+          )
+      )
+    );
+
+
+  const verified =
+    urls.filter(
+      url =>
+        candidateSet.has(url)
+    );
+
+
+  return {
+    urls:
+      verified,
+
+    method:
+      `cf-${stage}-candidate-ai:${result.method}`,
+
+    diagnostics: {
+      candidates:
+        candidates.length,
+
+      selected:
+        verified.length,
+
+      selectedUrls:
+        verified,
+
+      semantic:
+        result.diagnostics
+    }
+  };
+}
+
+
+/*
+ * Last-resort legacy semantic discovery.
+ *
+ * This is intentionally LAST now.
+ */
+async function fullPageSemanticFallback(
+  env: Env,
+  landingUrl: string,
+  sourceName: string,
+  date: string,
   cities: string[]
 ): Promise<{
   urls: string[];
   method: string;
   diagnostics: unknown;
 }> {
-  const date =
-    turkeyDate();
-
-  const diagnostics:
-    any = {
-      deterministic: [],
-      semantic:
-        null
-    };
-
-
-  /*
-   * ------------------------------------------------------
-   * STAGE 1 — SCRAPE + deterministic href parsing
-   * ------------------------------------------------------
-   */
-  try {
-    const scraped =
-      await acquireCfScrapeHtml(
-        env,
-        landingUrl
-      );
-
-    const urls =
-      deterministicCandidates(
-        landingUrl,
-        scraped.html,
-        date,
-        cities
-      );
-
-    diagnostics.deterministic.push({
-      stage:
-        "cf-scrape-href",
-
-      bodyLength:
-        scraped.bodyLength,
-
-      discovered:
-        urls.length,
-
-      urls
-    });
-
-    if (urls.length > 0) {
-      return {
-        urls,
-        method:
-          "cf-scrape-href",
-        diagnostics
-      };
-    }
-
-  } catch (error) {
-    diagnostics.deterministic.push({
-      stage:
-        "cf-scrape-href",
-
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    });
-  }
-
-
-  /*
-   * ------------------------------------------------------
-   * STAGE 2 — CONTENT + deterministic href parsing
-   * ------------------------------------------------------
-   */
-  try {
-    const content =
-      await acquireCfContentHtml(
-        env,
-        landingUrl
-      );
-
-    const urls =
-      deterministicCandidates(
-        landingUrl,
-        content.html,
-        date,
-        cities
-      );
-
-    diagnostics.deterministic.push({
-      stage:
-        "cf-content-href",
-
-      bodyLength:
-        content.bodyLength,
-
-      discovered:
-        urls.length,
-
-      urls
-    });
-
-    if (urls.length > 0) {
-      return {
-        urls,
-        method:
-          "cf-content-href",
-        diagnostics
-      };
-    }
-
-  } catch (error) {
-    diagnostics.deterministic.push({
-      stage:
-        "cf-content-href",
-
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    });
-  }
-
-
-  /*
-   * ------------------------------------------------------
-   * STAGE 3 — existing semantic JSON discovery fallback
-   * ------------------------------------------------------
-   *
-   * AI remains useful when the publisher does not expose
-   * conventional anchors or uses unusual rendered markup.
-   */
   const prompt = `
 ${sourceName} sitesinde ${date} tarihine ait Türkiye at yarışı tahmin yazılarının URL adreslerini bul.
 
-HEDEF ŞEHİRLER:
+BUGÜNKÜ TJK ŞEHİRLERİ:
 ${cities.join(", ")}
 
-Bu sayfa bir ana sayfa, kategori, etiket, uzman listesi veya arşiv sayfası olabilir.
-
 Yalnızca:
-- ${date} tarihli,
-- Türkiye yarışlarına ait,
-- hedef şehirlerden en az birine ait,
-- gerçek tahmin/yorum makalesine götüren
-URL'leri urls listesine koy.
+- bugünkü Türkiye yarışlarına,
+- bu şehirlerden en az birine,
+- gerçek tahmin / analiz / uzman yorum article'ına
 
-Makale olmayan kategori, ana sayfa, reklam, sosyal medya, yurt dışı yarış ve eski tarih linklerini alma.
+götüren URL'leri seç.
 
-Göreli link varsa tam URL olarak çöz.
+Kategori, tag, ana sayfa, genel haber, reklam, sosyal medya, yurt dışı yarış veya eski tarihli içerik seçme.
 
-Hiç uygun makale yoksa urls boş array olsun.
+Hiç uygun article yoksa urls=[] döndür.
 `.trim();
 
 
@@ -705,41 +769,250 @@ Hiç uygun makale yoksa urls boş array olsun.
     );
 
 
-  const raw =
-    Array.isArray(
-      result.value?.urls
-    )
-      ? result.value.urls
-      : [];
+  return {
+    urls:
+      normalizeSelectedUrls(
+        landingUrl,
+        result.value?.urls
+      ),
 
-
-  const urls =
-    normalizeSemanticUrls(
-      landingUrl,
-      raw
-    );
-
-
-  diagnostics.semantic = {
     method:
-      result.method,
+      `full-page-semantic:${result.method}`,
 
-    discovered:
-      urls.length,
-
-    urls,
-
-    acquisition:
+    diagnostics:
       result.diagnostics
   };
+}
 
 
-  return {
-    urls,
+export async function discoverExpertArticleUrls(
+  env: Env,
+  landingUrl: string,
+  sourceName: string,
+  cities: string[]
+): Promise<{
+  urls: string[];
+  method: string;
+  diagnostics: unknown;
+}> {
+  const date =
+    turkeyDate();
 
-    method:
-      result.method,
 
-    diagnostics
-  };
+  const diagnostics:
+    any = {
+      scrape:
+        null,
+
+      content:
+        null,
+
+      fullPageSemantic:
+        null
+    };
+
+
+  /*
+   * =====================================================
+   * STAGE 1
+   * Cloudflare SCRAPE -> real anchors -> AI selector
+   * =====================================================
+   */
+  try {
+    const scraped =
+      await scrapeAnchorCandidates(
+        env,
+        landingUrl
+      );
+
+
+    const selected =
+      await selectCurrentArticlesWithAi(
+        env,
+        landingUrl,
+        sourceName,
+        date,
+        cities,
+        scraped.candidates,
+        "scrape"
+      );
+
+
+    diagnostics.scrape = {
+      browserMs:
+        scraped.browserMs,
+
+      candidateCount:
+        scraped.candidates.length,
+
+      candidateSample:
+        scraped.candidates.slice(
+          0,
+          20
+        ),
+
+      selection:
+        selected.diagnostics
+    };
+
+
+    if (
+      selected.urls.length > 0
+    ) {
+      return {
+        urls:
+          selected.urls,
+
+        method:
+          selected.method,
+
+        diagnostics
+      };
+    }
+
+  } catch (error) {
+    diagnostics.scrape = {
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error)
+    };
+  }
+
+
+  /*
+   * =====================================================
+   * STAGE 2
+   * Cloudflare CONTENT -> anchors -> AI selector
+   * =====================================================
+   */
+  try {
+    const content =
+      await acquireCfContentHtml(
+        env,
+        landingUrl
+      );
+
+
+    const candidates =
+      anchorsFromHtml(
+        landingUrl,
+        content.html
+      );
+
+
+    const selected =
+      await selectCurrentArticlesWithAi(
+        env,
+        landingUrl,
+        sourceName,
+        date,
+        cities,
+        candidates,
+        "content"
+      );
+
+
+    diagnostics.content = {
+      bodyLength:
+        content.bodyLength,
+
+      candidateCount:
+        candidates.length,
+
+      candidateSample:
+        candidates.slice(
+          0,
+          20
+        ),
+
+      selection:
+        selected.diagnostics
+    };
+
+
+    if (
+      selected.urls.length > 0
+    ) {
+      return {
+        urls:
+          selected.urls,
+
+        method:
+          selected.method,
+
+        diagnostics
+      };
+    }
+
+  } catch (error) {
+    diagnostics.content = {
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error)
+    };
+  }
+
+
+  /*
+   * =====================================================
+   * STAGE 3
+   * Legacy full-page AI discovery as final fallback.
+   * =====================================================
+   */
+  try {
+    const fallback =
+      await fullPageSemanticFallback(
+        env,
+        landingUrl,
+        sourceName,
+        date,
+        cities
+      );
+
+
+    diagnostics.fullPageSemantic = {
+      method:
+        fallback.method,
+
+      selected:
+        fallback.urls.length,
+
+      urls:
+        fallback.urls,
+
+      acquisition:
+        fallback.diagnostics
+    };
+
+
+    return {
+      urls:
+        fallback.urls,
+
+      method:
+        fallback.method,
+
+      diagnostics
+    };
+
+  } catch (error) {
+    diagnostics.fullPageSemantic = {
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error)
+    };
+
+
+    return {
+      urls: [],
+
+      method:
+        "discovery-exhausted",
+
+      diagnostics
+    };
+  }
 }
