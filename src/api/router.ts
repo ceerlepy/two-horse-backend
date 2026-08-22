@@ -2,7 +2,10 @@ import type { Env } from "../env";
 import { json, errorMessage, turkeyDate } from "../shared";
 import { getToday } from "../storage/program-repository";
 import { refreshProgramIfDue } from "../tjk/program-service";
-import { refreshExpertsIfDue } from "../experts/service";
+import {
+  refreshExpertsIfDue,
+  refreshExpertSource
+} from "../experts/service";
 import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
@@ -282,6 +285,35 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
       ok:false,
       error:errorMessage(e)
     },502);
+  }
+ }
+
+ if(
+  url.pathname==="/api/admin/refresh-expert-source" &&
+  request.method==="POST"
+ ) {
+  try {
+   const source =
+    url.searchParams.get("source") ?? "";
+
+   const expert =
+    await refreshExpertSource(
+     env,
+     source
+    );
+
+   return json({
+    ok:
+     expert.ok,
+    expert
+   },expert.ok ? 200 : 502);
+
+  } catch(e) {
+   return json({
+    ok:false,
+    error:
+     errorMessage(e)
+   },400);
   }
  }
 

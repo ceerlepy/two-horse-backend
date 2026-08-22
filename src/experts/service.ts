@@ -554,3 +554,88 @@ export async function refreshExpertsIfDue(
     results
   };
 }
+
+
+/*
+ * Admin/diagnostic source-isolated refresh.
+ *
+ * This intentionally runs exactly ONE enabled source,
+ * so discovery + CF semantic acquisition + canonical
+ * validation can be diagnosed without an 8-source
+ * long-running HTTP request.
+ */
+export async function refreshExpertSource(
+  env: Env,
+  sourceKey: string
+): Promise<any> {
+  const key =
+    String(sourceKey ?? "")
+      .trim();
+
+  if (!key) {
+    throw new Error(
+      "EXPERT_SOURCE_REQUIRED"
+    );
+  }
+
+  const sources =
+    await activeExpertSources(
+      env
+    );
+
+  const source =
+    sources.find(
+      item =>
+        item.source_key === key
+    );
+
+  if (!source) {
+    throw new Error(
+      `EXPERT_SOURCE_NOT_FOUND:${key}`
+    );
+  }
+
+  try {
+    const result =
+      await processSource(
+        env,
+        source,
+        true
+      );
+
+    return {
+      source:
+        key,
+
+      ok:
+        result.status !==
+          "failed",
+
+      result
+    };
+
+  } catch (error) {
+    await markExpertFailure(
+      env,
+      key
+    );
+
+    return {
+      source:
+        key,
+
+      ok:false,
+
+      result:{
+        source:
+          key,
+
+        status:
+          "failed",
+
+        error:
+          errorMessage(error)
+      }
+    };
+  }
+}
