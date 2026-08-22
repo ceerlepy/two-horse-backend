@@ -126,11 +126,32 @@ async function processSource(
   source:ExpertSource,
   force:boolean
 ):Promise<ExpertRefreshResult> {
-  const landingUrls =
+  const candidates =
     expertUrlCandidates(source);
 
+  /*
+   * A previously validated article is NOT a landing page.
+   *
+   * Try it directly first. Only fall back to discovery
+   * when that cached article no longer represents today's
+   * canonical card.
+   */
+  const cachedWorkingUrl =
+    source.last_working_url &&
+    candidates.includes(
+      source.last_working_url
+    )
+      ? source.last_working_url
+      : null;
 
-  if (!landingUrls.length) {
+  const landingUrls =
+    candidates.filter(
+      url =>
+        url !== cachedWorkingUrl
+    );
+
+
+  if (!candidates.length) {
     return {
       source:
         source.source_key,
@@ -158,6 +179,176 @@ async function processSource(
 
   let hadSemanticSuccess = false;
   let lastError:unknown = null;
+
+
+  /*
+   * FAST PATH
+   * =========
+   *
+   * last_working_url already produced canonical picks in
+   * a previous successful run. Do not waste Browser Run
+   * calls trying to "discover" from an article page.
+   *
+   * Read it directly first.
+   */
+  if (cachedWorkingUrl) {
+    try {
+      const fingerprint =
+        await expertHttpFingerprint(
+          cachedWorkingUrl
+        );
+
+      const extracted =
+        await extractExperts(
+          env,
+          cachedWorkingUrl,
+          source.source_name
+        );
+
+      hadSemanticSuccess = true;
+
+      /*
+       * Extraction itself succeeded, so provenance is
+       * already useful even if today's canonical card no
+       * longer matches this article.
+       */
+      await markExpertProvenance(
+        env,
+        source.source_key,
+        {
+          workingUrl:
+            cachedWorkingUrl,
+
+          discoveredFromUrl:
+            cachedWorkingUrl,
+
+          discoveryMethod:
+            "cached-working-url",
+
+          extractionMethod:
+            extracted.method
+        }
+      );
+
+      const rawPicks =
+        extracted.extraction.picks;
+
+      if (!rawPicks.length) {
+        attempts.push({
+          url:
+            cachedWorkingUrl,
+
+          acquisition:
+            extracted.method,
+
+          extracted:0,
+          validated:0,
+
+          outcome:
+            "CACHED_NO_CURRENT_CARD"
+        });
+      } else {
+        const validPicks =
+          await validateExpertPicks(
+            env,
+            rawPicks
+          );
+
+        attempts.push({
+          url:
+            cachedWorkingUrl,
+
+          acquisition:
+            extracted.method,
+
+          extracted:
+            rawPicks.length,
+
+          validated:
+            validPicks.length,
+
+          outcome:
+            validPicks.length
+              ? "CACHED_CANONICAL_MATCH"
+              : "CACHED_NO_CANONICAL_MATCH"
+        });
+
+        /*
+         * STRICT GATE:
+         * only canonical TJK matches may be persisted.
+         */
+        if (validPicks.length) {
+          const contentHash =
+            fingerprint?.hash ??
+            await extractionHash(
+              rawPicks
+            );
+
+          await persistExpertPicks(
+            env,
+            source.source_key,
+            contentHash,
+            validPicks
+          );
+
+          await markExpertHealthy(
+            env,
+            source.source_key,
+            contentHash,
+            cachedWorkingUrl,
+            {
+              discoveredFromUrl:
+                cachedWorkingUrl,
+
+              discoveryMethod:
+                "cached-working-url",
+
+              extractionMethod:
+                extracted.method
+            }
+          );
+
+          return {
+            source:
+              source.source_key,
+
+            status:
+              "updated",
+
+            count:
+              validPicks.length,
+
+            extractionMethod:
+              extracted.method,
+
+            workingUrl:
+              cachedWorkingUrl,
+
+            attempts
+          } as ExpertRefreshResult;
+        }
+      }
+
+    } catch (error) {
+      lastError = error;
+
+      attempts.push({
+        url:
+          cachedWorkingUrl,
+
+        outcome:
+          "CACHED_ACQUISITION_OR_EXTRACTION_FAILED",
+
+        error:
+          errorMessage(error)
+      });
+
+      /*
+       * Cached article failed/stale.
+       * Continue into normal landing discovery.
+       */
+    }
+  }
 
 
   /*
@@ -250,6 +441,17 @@ async function processSource(
             }
           );
         }
+      }
+
+      /*
+       * One semantic landing discovery should return all
+       * today's relevant article URLs (schema allows up
+       * to 12). Once it succeeds, immediately move to
+       * article extraction instead of burning multiple
+       * Browser Run chains on duplicate entry pages.
+       */
+      if (discovery.urls.length > 0) {
+        break;
       }
 
     } catch (error) {
