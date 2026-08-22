@@ -48,6 +48,37 @@ function normalizedCity(
 }
 
 
+/*
+ * Stable domestic TJK race-center identifiers.
+ *
+ * These are part of TJK's public result URL identity.
+ * They should be preferred over scraping a selector
+ * link from the outer page on every request.
+ */
+const KNOWN_TJK_CITY_IDS:
+  Record<string, string> = {
+    "ankara": "5",
+    "bursa": "4",
+    "elazığ": "7",
+    "elazig": "7",
+    "kocaeli": "9"
+  };
+
+
+function knownCityId(
+  city: string
+): string | null {
+  const normalized =
+    normalizedCity(city);
+
+  return (
+    KNOWN_TJK_CITY_IDS[
+      normalized
+    ] ?? null
+  );
+}
+
+
 function extractCityId(
   html: string,
   city: string
@@ -145,6 +176,7 @@ async function discoverCityResultUrl(
   cityUrl: string;
   cityId: string | null;
   discoveryMethod:
+    | "known-city-id"
     | "page-city-id"
     | "city-name-direct";
 }> {
@@ -155,22 +187,44 @@ async function discoverCityResultUrl(
     );
 
   /*
-   * SehirId discovery is best-effort.
+   * PRIMARY PATH
    *
-   * TJK's outer result page can be addressed with
-   * QueryParameter_Tarih + SehirAdi. Therefore failure
-   * to discover SehirId must not abort acquisition.
+   * Use stable TJK city identity when known.
    *
-   * Preferred path:
-   *   page -> discover SehirId -> city endpoint
-   *
-   * Recovery path:
-   *   page addressed directly by SehirAdi
+   * This removes our previous dependence on the outer
+   * result page exposing a city selector link in a
+   * particular HTML shape.
    */
-  let cityId:
-    string | null =
-    null;
+  const canonicalCityId =
+    knownCityId(
+      input.city
+    );
 
+  if (canonicalCityId) {
+    return {
+      pageUrl,
+
+      cityId:
+        canonicalCityId,
+
+      discoveryMethod:
+        "known-city-id",
+
+      cityUrl:
+        buildOfficialResultsCityUrl(
+          input.raceDate,
+          input.city,
+          canonicalCityId
+        )
+    };
+  }
+
+  /*
+   * SECONDARY PATH
+   *
+   * For cities not yet in the canonical registry,
+   * attempt to discover SehirId dynamically.
+   */
   try {
     const response =
       await fetch(
@@ -190,15 +244,34 @@ async function discoverCityResultUrl(
       const html =
         await response.text();
 
-      cityId =
+      const discoveredCityId =
         extractCityId(
           html,
           input.city
         );
+
+      if (discoveredCityId) {
+        return {
+          pageUrl,
+
+          cityId:
+            discoveredCityId,
+
+          discoveryMethod:
+            "page-city-id",
+
+          cityUrl:
+            buildOfficialResultsCityUrl(
+              input.raceDate,
+              input.city,
+              discoveredCityId
+            )
+        };
+      }
     }
   } catch (error) {
     console.warn(
-      "[RESULTS] city id discovery failed",
+      "[RESULTS] dynamic city-id discovery failed",
       {
         raceDate:
           input.raceDate,
@@ -214,34 +287,15 @@ async function discoverCityResultUrl(
     );
   }
 
-  if (cityId) {
-    return {
-      pageUrl,
-
-      cityId,
-
-      discoveryMethod:
-        "page-city-id",
-
-      cityUrl:
-        buildOfficialResultsCityUrl(
-          input.raceDate,
-          input.city,
-          cityId
-        )
-    };
-  }
-
   /*
-   * Root-cause recovery:
+   * LAST RESORT
    *
-   * Do not invent a SehirId.
-   * Do not hard-code city IDs.
+   * Some TJK page variants serve the selected city's
+   * result directly from the Page endpoint.
    *
-   * Use the official TJK page URL already containing
-   * race date + city name and let the normal parser /
-   * validator decide whether it contains valid final
-   * results.
+   * Keep this only as a fallback; parser + validator
+   * still decide whether the response is a valid final
+   * meeting result.
    */
   return {
     pageUrl,
