@@ -80,6 +80,59 @@ async function jsonRequest<T>(
 }
 
 /*
+ * Semantic extraction for HTML that has ALREADY been acquired.
+ *
+ * Cloudflare JSON natively accepts { html }.
+ * Do NOT convert already-acquired HTML into a synthetic data: URL.
+ */
+export async function extractSemanticJsonFromHtml<T>(
+  env: Env,
+  html: string,
+  prompt: string,
+  responseFormat?: unknown
+): Promise<SemanticJsonResult<T>> {
+  const diagnostics:
+    AcquisitionDiagnostics = {
+      failures: []
+    };
+
+  try {
+    return {
+      value:
+        await jsonRequest<T>(
+          env,
+          {
+            html
+          },
+          prompt,
+          responseFormat
+        ),
+
+      method:
+        "cf-json-html",
+
+      diagnostics
+    };
+
+  } catch (error) {
+    diagnostics.failures.push({
+      stage:
+        "cf-json-html",
+
+      error:
+        message(error)
+    });
+
+    throw new Error(
+      `SEMANTIC_HTML_EXTRACTION_FAILED:${JSON.stringify(
+        diagnostics
+      )}`
+    );
+  }
+}
+
+
+/*
  * Semantic extraction strategy:
  *
  * 1. JSON(url) directly.

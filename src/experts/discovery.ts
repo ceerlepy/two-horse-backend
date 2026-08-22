@@ -3,7 +3,8 @@ import type {
 } from "../env";
 
 import {
-  extractSemanticJson
+  extractSemanticJson,
+  extractSemanticJsonFromHtml
 } from "../acquisition/semantic-json";
 
 import {
@@ -638,20 +639,20 @@ Yalnızca gerçek current-card article URL'lerini döndür.
 `.trim();
 
 
+  /*
+   * SCRAPE/CONTENT already acquired the source page.
+   *
+   * candidateHtml() is DATA, not a URL.
+   * Send the compact candidate document directly to
+   * Cloudflare JSON through its native { html } input.
+   */
   const result =
-    await extractSemanticJson<any>(
+    await extractSemanticJsonFromHtml<any>(
       env,
 
-      /*
-       * Important:
-       * AI sees only this compact candidate document,
-       * NOT the original noisy landing page.
-       */
-      `data:text/html,${encodeURIComponent(
-        candidateHtml(
-          candidates
-        )
-      )}`,
+      candidateHtml(
+        candidates
+      ),
 
       prompt,
 
