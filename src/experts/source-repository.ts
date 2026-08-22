@@ -103,6 +103,16 @@ export async function markExpertHealthy(
     .bind(
       contentHash,
       workingUrl ?? null,
+
+      diagnostics?.discoveredFromUrl ??
+        null,
+
+      diagnostics?.discoveryMethod ??
+        null,
+
+      diagnostics?.extractionMethod ??
+        null,
+
       now,
       sourceKey
     )
