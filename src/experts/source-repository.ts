@@ -57,7 +57,12 @@ export async function markExpertHealthy(
   env: Env,
   sourceKey: string,
   contentHash: string,
-  workingUrl?: string | null
+  workingUrl?: string | null,
+  diagnostics?: {
+    discoveredFromUrl?: string | null;
+    discoveryMethod?: string | null;
+    extractionMethod?: string | null;
+  }
 ): Promise<void> {
   const now =
     new Date()
@@ -69,6 +74,25 @@ export async function markExpertHealthy(
       content_hash = ?,
       last_working_url =
         COALESCE(?,last_working_url),
+
+      last_discovered_from_url =
+        COALESCE(
+          ?,
+          last_discovered_from_url
+        ),
+
+      last_discovery_method =
+        COALESCE(
+          ?,
+          last_discovery_method
+        ),
+
+      last_extraction_method =
+        COALESCE(
+          ?,
+          last_extraction_method
+        ),
+
       health_status = 'healthy',
       last_success_at = ?,
       consecutive_failures = 0,

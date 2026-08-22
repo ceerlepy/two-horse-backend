@@ -195,6 +195,19 @@ async function processSource(
   const articleSeen =
     new Set<string>();
 
+  /*
+   * Preserve provenance for every discovered article:
+   * article URL -> landing URL + acquisition method.
+   */
+  const discoveryProvenance =
+    new Map<
+      string,
+      {
+        landingUrl:string;
+        method:string;
+      }
+    >();
+
 
   for (const landingUrl of landingUrls) {
     try {
@@ -226,6 +239,15 @@ async function processSource(
         if (!articleSeen.has(url)) {
           articleSeen.add(url);
           articleUrls.push(url);
+
+          discoveryProvenance.set(
+            url,
+            {
+              landingUrl,
+              method:
+                discovery.method
+            }
+          );
         }
       }
 
@@ -388,11 +410,28 @@ async function processSource(
        * Only a URL that produced CURRENT canonical picks
        * becomes last_working_url.
        */
+      const provenance =
+        discoveryProvenance.get(
+          url
+        );
+
       await markExpertHealthy(
         env,
         source.source_key,
         contentHash,
-        url
+        url,
+        {
+          discoveredFromUrl:
+            provenance?.landingUrl ??
+            null,
+
+          discoveryMethod:
+            provenance?.method ??
+            null,
+
+          extractionMethod:
+            extracted.method
+        }
       );
 
 
