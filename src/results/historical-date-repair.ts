@@ -5,10 +5,6 @@ import {
 } from "./acquisition";
 
 import {
-  ingestOfficialResults
-} from "./service";
-
-import {
   buildOfficialResultsUrl
 } from "./url";
 
@@ -19,332 +15,322 @@ export interface HistoricalDateRepairMapping {
   city: string;
 }
 
-
 export interface HistoricalDateRepairInput {
   mappings: HistoricalDateRepairMapping[];
   apply?: boolean;
 }
 
 
-function validDate(
-  value: string
-): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(
-    value
-  );
+type RunnerIdentity = {
+  raceNumber: number;
+  horseNumber: number;
+  horseName: string;
+  normalizedName: string;
+  finishPosition: number | null;
+};
+
+
+function validDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 
-function normalizeHorseName(
-  value: string
-): string {
+function normalizeHorseName(value: string): string {
   return value
+    .normalize("NFC")
     .trim()
     .toLocaleUpperCase("tr-TR")
-    .replace(
-      /[^0-9A-ZÇĞİÖŞÜ]/g,
-      ""
-    );
+    .replace(/\s+/g, "")
+    .replace(/[’'`´".,()\-_/\\]/g, "");
 }
 
 
-function replaceDatePrefix(
-  value: string | null,
-  targetDate: string
-): string | null {
-  if (!value) {
-    return null;
-  }
-
-  if (value.length < 10) {
-    return value;
-  }
-
-  return (
-    targetDate +
-    value.slice(10)
-  );
-}
-
-
-async function countIdentity(
+async function getLearningRaces(
   env: Env,
-  table: string,
   raceDate: string,
   city: string
-): Promise<number> {
-  /*
-   * Table names are INTERNAL constants only.
-   * Never pass arbitrary HTTP input here.
-   */
-  const allowed =
-    new Set([
-      "learning_races",
-      "learning_runner_features",
-      "learning_expert_picks",
-      "learning_snapshot_candidates",
-      "learning_label_audit",
-      "official_result_runs"
-    ]);
-
-  if (!allowed.has(table)) {
-    throw new Error(
-      "INVALID_INTERNAL_TABLE"
-    );
-  }
-
-  const row =
-    await env.DB.prepare(`
-      SELECT COUNT(*) AS count
-      FROM ${table}
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        raceDate,
-        city
-      )
-      .first<any>();
-
-  return Number(
-    row?.count ?? 0
-  );
-}
-
-
-async function repairOne(
-  env: Env,
-  mapping: HistoricalDateRepairMapping,
-  apply: boolean
-): Promise<any> {
-  const {
-    storedDate,
-    targetDate
-  } = mapping;
-
-  const city =
-    mapping.city.trim();
-
-
-  if (
-    !validDate(storedDate) ||
-    !validDate(targetDate)
-  ) {
-    return {
-      ...mapping,
-      validated: false,
-      repaired: false,
-      action:
-        "REJECT_INVALID_DATE"
-    };
-  }
-
-
-  if (!city) {
-    return {
-      ...mapping,
-      validated: false,
-      repaired: false,
-      action:
-        "REJECT_INVALID_CITY"
-    };
-  }
-
-
-  if (storedDate === targetDate) {
-    return {
-      ...mapping,
-      validated: false,
-      repaired: false,
-      action:
-        "REJECT_SAME_DATE"
-    };
-  }
-
-
-  const storedRaces =
+) {
+  const result =
     await env.DB.prepare(`
       SELECT
         race_number,
         starts_at,
         labelled_at
-
       FROM learning_races
-
-      WHERE
-        race_date = ?
+      WHERE race_date = ?
         AND city = ?
-
       ORDER BY race_number
     `)
-      .bind(
-        storedDate,
-        city
-      )
+      .bind(raceDate, city)
       .all<any>();
 
-
-  const storedRaceRows =
-    storedRaces.results ?? [];
-
-
-  /*
-   * Idempotency:
-   *
-   * If source disappeared but target exists,
-   * treat it as an already repaired identity.
-   */
-  if (storedRaceRows.length === 0) {
-    const targetCount =
-      await countIdentity(
-        env,
-        "learning_races",
-        targetDate,
-        city
-      );
-
-    return {
-      ...mapping,
-      city,
-
-      validated:
-        targetCount > 0,
-
-      repaired: false,
-
-      action:
-        targetCount > 0
-          ? "ALREADY_REPAIRED"
-          : "SOURCE_NOT_FOUND",
-
-      targetRaceCount:
-        targetCount
-    };
-  }
+  return result.results ?? [];
+}
 
 
-  /*
-   * Collision guard.
-   *
-   * Any existing target learning identity means
-   * we refuse to merge/overwrite.
-   */
-  const targetCounts = {
-    learningRaces:
-      await countIdentity(
-        env,
-        "learning_races",
-        targetDate,
-        city
-      ),
-
-    runnerFeatures:
-      await countIdentity(
-        env,
-        "learning_runner_features",
-        targetDate,
-        city
-      ),
-
-    expertPicks:
-      await countIdentity(
-        env,
-        "learning_expert_picks",
-        targetDate,
-        city
-      ),
-
-    candidates:
-      await countIdentity(
-        env,
-        "learning_snapshot_candidates",
-        targetDate,
-        city
-      )
-  };
-
-
-  if (
-    targetCounts.learningRaces > 0 ||
-    targetCounts.runnerFeatures > 0 ||
-    targetCounts.expertPicks > 0 ||
-    targetCounts.candidates > 0
-  ) {
-    return {
-      ...mapping,
-      city,
-
-      validated: false,
-      repaired: false,
-
-      collision: true,
-      targetCounts,
-
-      action:
-        "ABORT_TARGET_COLLISION"
-    };
-  }
-
-
-  const frozen =
+async function getLearningRunners(
+  env: Env,
+  raceDate: string,
+  city: string
+): Promise<RunnerIdentity[]> {
+  const result =
     await env.DB.prepare(`
       SELECT
         race_number,
         horse_number,
         horse_name,
         finish_position
-
       FROM learning_runner_features
-
-      WHERE
-        race_date = ?
+      WHERE race_date = ?
         AND city = ?
-
-      ORDER BY
-        race_number,
-        horse_number
+      ORDER BY race_number, horse_number
     `)
-      .bind(
-        storedDate,
-        city
-      )
+      .bind(raceDate, city)
       .all<any>();
 
+  return (result.results ?? []).map(row => ({
+    raceNumber: Number(row.race_number),
+    horseNumber: Number(row.horse_number),
+    horseName: String(row.horse_name ?? ""),
+    normalizedName:
+      normalizeHorseName(
+        String(row.horse_name ?? "")
+      ),
+    finishPosition:
+      row.finish_position == null
+        ? null
+        : Number(row.finish_position)
+  }));
+}
 
-  const frozenRows =
-    frozen.results ?? [];
+
+function officialRunners(official: any): RunnerIdentity[] {
+  return official.races.flatMap((race: any) =>
+    race.runners.map((runner: any) => ({
+      raceNumber:
+        Number(race.raceNumber),
+
+      horseNumber:
+        Number(runner.horseNumber),
+
+      horseName:
+        String(runner.horseName ?? ""),
+
+      normalizedName:
+        normalizeHorseName(
+          String(runner.horseName ?? "")
+        ),
+
+      finishPosition:
+        runner.finishPosition == null
+          ? null
+          : Number(runner.finishPosition)
+    }))
+  );
+}
 
 
-  if (frozenRows.length === 0) {
+function key(runner: RunnerIdentity): string {
+  return `${runner.raceNumber}|${runner.horseNumber}`;
+}
+
+
+function compare(
+  left: RunnerIdentity[],
+  right: RunnerIdentity[],
+  leftLabel: string,
+  rightLabel: string
+) {
+  const leftMap =
+    new Map(
+      left.map(r => [key(r), r])
+    );
+
+  const rightMap =
+    new Map(
+      right.map(r => [key(r), r])
+    );
+
+  const keys =
+    [...new Set([
+      ...leftMap.keys(),
+      ...rightMap.keys()
+    ])].sort();
+
+  const mismatches: any[] = [];
+
+  for (const id of keys) {
+    const a = leftMap.get(id);
+    const b = rightMap.get(id);
+
+    if (!a) {
+      mismatches.push({
+        mismatchType:
+          `${rightLabel.toUpperCase()}_ONLY_RUNNER`,
+
+        raceNumber:
+          b?.raceNumber,
+
+        horseNumber:
+          b?.horseNumber,
+
+        [rightLabel + "Name"]:
+          b?.horseName,
+
+        ["normalized" +
+          rightLabel[0].toUpperCase() +
+          rightLabel.slice(1) +
+          "Name"]:
+          b?.normalizedName
+      });
+
+      continue;
+    }
+
+    if (!b) {
+      mismatches.push({
+        mismatchType:
+          `${leftLabel.toUpperCase()}_ONLY_RUNNER`,
+
+        raceNumber:
+          a.raceNumber,
+
+        horseNumber:
+          a.horseNumber,
+
+        [leftLabel + "Name"]:
+          a.horseName,
+
+        ["normalized" +
+          leftLabel[0].toUpperCase() +
+          leftLabel.slice(1) +
+          "Name"]:
+          a.normalizedName
+      });
+
+      continue;
+    }
+
+    if (
+      a.normalizedName !==
+      b.normalizedName
+    ) {
+      mismatches.push({
+        mismatchType:
+          "HORSE_NAME_MISMATCH",
+
+        raceNumber:
+          a.raceNumber,
+
+        horseNumber:
+          a.horseNumber,
+
+        [leftLabel + "Name"]:
+          a.horseName,
+
+        [rightLabel + "Name"]:
+          b.horseName,
+
+        ["normalized" +
+          leftLabel[0].toUpperCase() +
+          leftLabel.slice(1) +
+          "Name"]:
+          a.normalizedName,
+
+        ["normalized" +
+          rightLabel[0].toUpperCase() +
+          rightLabel.slice(1) +
+          "Name"]:
+          b.normalizedName
+      });
+    }
+  }
+
+  return {
+    match:
+      mismatches.length === 0 &&
+      left.length === right.length,
+
+    leftCount:
+      left.length,
+
+    rightCount:
+      right.length,
+
+    mismatchCount:
+      mismatches.length,
+
+    mismatches
+  };
+}
+
+
+async function diagnoseOne(
+  env: Env,
+  mapping: HistoricalDateRepairMapping
+) {
+  const storedDate =
+    String(mapping.storedDate ?? "");
+
+  const targetDate =
+    String(mapping.targetDate ?? "");
+
+  const city =
+    String(mapping.city ?? "").trim();
+
+
+  if (
+    !validDate(storedDate) ||
+    !validDate(targetDate) ||
+    !city
+  ) {
     return {
-      ...mapping,
+      storedDate,
+      targetDate,
       city,
-
-      validated: false,
-      repaired: false,
-
       action:
-        "NO_FROZEN_RUNNERS"
+        "INVALID_MAPPING"
     };
   }
 
 
-  /*
-   * EXTERNAL TRUTH
-   *
-   * Fetch official results from TARGET date.
-   */
-  let officialAcquisition;
+  const sourceRaces =
+    await getLearningRaces(
+      env,
+      storedDate,
+      city
+    );
+
+  const targetRaces =
+    await getLearningRaces(
+      env,
+      targetDate,
+      city
+    );
+
+  const source =
+    await getLearningRunners(
+      env,
+      storedDate,
+      city
+    );
+
+  const target =
+    await getLearningRunners(
+      env,
+      targetDate,
+      city
+    );
+
+
+  let acquisition;
 
   try {
-    officialAcquisition =
+    acquisition =
       await acquireOfficialResults(
         env,
         {
-          raceDate:
-            targetDate,
-
+          raceDate: targetDate,
           city,
 
           url:
@@ -356,14 +342,24 @@ async function repairOne(
       );
   } catch (error) {
     return {
-      ...mapping,
+      storedDate,
+      targetDate,
       city,
 
-      validated: false,
-      repaired: false,
+      sourceRaceCount:
+        sourceRaces.length,
+
+      targetRaceCount:
+        targetRaces.length,
+
+      sourceRunnerCount:
+        source.length,
+
+      targetRunnerCount:
+        target.length,
 
       action:
-        "OFFICIAL_RESULT_ACQUISITION_FAILED",
+        "OFFICIAL_ACQUISITION_FAILED",
 
       error:
         error instanceof Error
@@ -374,490 +370,109 @@ async function repairOne(
 
 
   const official =
-    officialAcquisition.value;
-
-
-  const storedRaceNumbers =
-    storedRaceRows
-      .map(
-        row =>
-          Number(
-            row.race_number
-          )
-      )
-      .sort(
-        (a, b) =>
-          a - b
-      );
-
-
-  const officialRaceNumbers =
-    official.races
-      .map(
-        race =>
-          Number(
-            race.raceNumber
-          )
-      )
-      .sort(
-        (a, b) =>
-          a - b
-      );
-
-
-  const raceIdentityMatch =
-    JSON.stringify(
-      storedRaceNumbers
-    ) ===
-    JSON.stringify(
-      officialRaceNumbers
+    officialRunners(
+      acquisition.value
     );
 
 
-  const frozenIdentity =
-    frozenRows
-      .map(
-        row => ({
-          raceNumber:
-            Number(
-              row.race_number
-            ),
+  const sourceVsOfficial =
+    compare(
+      source,
+      official,
+      "source",
+      "official"
+    );
 
-          horseNumber:
-            Number(
-              row.horse_number
-            ),
+  const targetVsOfficial =
+    compare(
+      target,
+      official,
+      "target",
+      "official"
+    );
 
-          horseName:
-            normalizeHorseName(
-              String(
-                row.horse_name ??
-                ""
-              )
-            ),
-
-          finishPosition:
-            row.finish_position == null
-              ? null
-              : Number(
-                  row.finish_position
-                )
-        })
-      )
-      .sort(
-        (a, b) =>
-          a.raceNumber -
-            b.raceNumber ||
-          a.horseNumber -
-            b.horseNumber
-      );
-
-
-  const officialIdentity =
-    official.races
-      .flatMap(
-        race =>
-          race.runners.map(
-            runner => ({
-              raceNumber:
-                Number(
-                  race.raceNumber
-                ),
-
-              horseNumber:
-                Number(
-                  runner.horseNumber
-                ),
-
-              horseName:
-                normalizeHorseName(
-                  runner.horseName
-                ),
-
-              finishPosition:
-                Number(
-                  runner.finishPosition
-                )
-            })
-          )
-      )
-      .sort(
-        (a, b) =>
-          a.raceNumber -
-            b.raceNumber ||
-          a.horseNumber -
-            b.horseNumber
-      );
-
-
-  const runnerIdentityMatch =
-    frozenIdentity.length ===
-      officialIdentity.length &&
-
-    frozenIdentity.every(
-      (frozenRunner, index) => {
-        const officialRunner =
-          officialIdentity[index];
-
-        return (
-          frozenRunner.raceNumber ===
-            officialRunner.raceNumber &&
-
-          frozenRunner.horseNumber ===
-            officialRunner.horseNumber &&
-
-          frozenRunner.horseName ===
-            officialRunner.horseName
-        );
-      }
+  const sourceVsTarget =
+    compare(
+      source,
+      target,
+      "source",
+      "target"
     );
 
 
-  /*
-   * Important for already-labelled historical data.
-   *
-   * If an existing label is present, it must agree
-   * with the official target-date result.
-   */
-  const existingLabelsMatch =
-    frozenIdentity.every(
-      (frozenRunner, index) => {
-        if (
-          frozenRunner.finishPosition ==
-          null
-        ) {
-          return true;
-        }
-
-        const officialRunner =
-          officialIdentity[index];
-
-        return (
-          officialRunner != null &&
-          frozenRunner.finishPosition ===
-            officialRunner.finishPosition
-        );
-      }
-    );
+  const collision =
+    targetRaces.length > 0 ||
+    target.length > 0;
 
 
-  const identityMatch =
-    raceIdentityMatch &&
-    runnerIdentityMatch &&
-    existingLabelsMatch;
+  let classification: string;
 
 
-  const common = {
+  if (!collision) {
+    classification =
+      sourceVsOfficial.match
+        ? "SOURCE_MATCHES_OFFICIAL"
+        : "SOURCE_MISMATCH";
+  } else if (
+    sourceVsOfficial.match &&
+    targetVsOfficial.match
+  ) {
+    classification =
+      "SOURCE_AND_TARGET_SAME_OFFICIAL_MEETING";
+  } else if (
+    !sourceVsOfficial.match &&
+    targetVsOfficial.match
+  ) {
+    classification =
+      "TARGET_CORRECT_SOURCE_CONFLICT";
+  } else if (
+    sourceVsOfficial.match &&
+    !targetVsOfficial.match
+  ) {
+    classification =
+      "SOURCE_CORRECT_TARGET_CONFLICT";
+  } else {
+    classification =
+      "NEITHER_MATCHES_OFFICIAL";
+  }
+
+
+  return {
     storedDate,
     targetDate,
     city,
 
     acquisitionMethod:
-      officialAcquisition.method,
+      acquisition.method,
 
-    storedRaceCount:
-      storedRaceNumbers.length,
+    collision,
+
+    sourceRaceCount:
+      sourceRaces.length,
+
+    targetRaceCount:
+      targetRaces.length,
 
     officialRaceCount:
-      officialRaceNumbers.length,
+      acquisition.value.races.length,
 
-    storedRunnerCount:
-      frozenIdentity.length,
+    sourceRunnerCount:
+      source.length,
+
+    targetRunnerCount:
+      target.length,
 
     officialRunnerCount:
-      officialIdentity.length,
+      official.length,
 
-    raceIdentityMatch,
-    runnerIdentityMatch,
-    existingLabelsMatch,
+    classification,
 
-    identityMatch,
-    collision: false
-  };
-
-
-  if (!identityMatch) {
-    return {
-      ...common,
-
-      validated: false,
-      repaired: false,
-
-      action:
-        "NEEDS_MANUAL_REVIEW"
-    };
-  }
-
-
-  /*
-   * Dry-run is DEFAULT.
-   */
-  if (!apply) {
-    return {
-      ...common,
-
-      validated: true,
-      repaired: false,
-
-      action:
-        "WOULD_REPAIR"
-    };
-  }
-
-
-  /*
-   * Copy new parent identities first.
-   *
-   * Frozen prediction values remain exactly unchanged.
-   */
-  const statements: D1PreparedStatement[] =
-    [];
-
-
-  for (
-    const race of
-    storedRaceRows
-  ) {
-    statements.push(
-      env.DB.prepare(`
-        INSERT INTO learning_races(
-          race_date,
-          city,
-          race_number,
-
-          starts_at,
-          distance_meters,
-          track,
-
-          snapshot_at,
-          labelled_at,
-
-          model_version,
-          learning_policy_version,
-          coupon_policy_version,
-
-          coupon_mode,
-          coupon_horse_numbers_json,
-          coupon_confidence,
-          coupon_expansion_pressure,
-          coupon_reason
-        )
-
-        SELECT
-          ?,
-          city,
-          race_number,
-
-          ?,
-          distance_meters,
-          track,
-
-          snapshot_at,
-          labelled_at,
-
-          model_version,
-          learning_policy_version,
-          coupon_policy_version,
-
-          coupon_mode,
-          coupon_horse_numbers_json,
-          coupon_confidence,
-          coupon_expansion_pressure,
-          coupon_reason
-
-        FROM learning_races
-
-        WHERE
-          race_date = ?
-          AND city = ?
-          AND race_number = ?
-      `)
-        .bind(
-          targetDate,
-
-          replaceDatePrefix(
-            race.starts_at,
-            targetDate
-          ),
-
-          storedDate,
-          city,
-          race.race_number
-        )
-    );
-  }
-
-
-  /*
-   * Move every known learning identity.
-   */
-  statements.push(
-    env.DB.prepare(`
-      UPDATE learning_runner_features
-      SET race_date = ?
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        targetDate,
-        storedDate,
-        city
-      )
-  );
-
-
-  statements.push(
-    env.DB.prepare(`
-      UPDATE learning_expert_picks
-      SET race_date = ?
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        targetDate,
-        storedDate,
-        city
-      )
-  );
-
-
-  statements.push(
-    env.DB.prepare(`
-      UPDATE learning_snapshot_candidates
-
-      SET
-        race_date = ?,
-
-        starts_at =
-          CASE
-            WHEN starts_at IS NULL
-            THEN NULL
-
-            ELSE
-              ? ||
-              substr(
-                starts_at,
-                11
-              )
-          END
-
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        targetDate,
-        targetDate,
-        storedDate,
-        city
-      )
-  );
-
-
-  statements.push(
-    env.DB.prepare(`
-      UPDATE learning_label_audit
-      SET race_date = ?
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        targetDate,
-        storedDate,
-        city
-      )
-  );
-
-
-  /*
-   * Delete old parent only AFTER children moved.
-   */
-  statements.push(
-    env.DB.prepare(`
-      DELETE FROM learning_races
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        storedDate,
-        city
-      )
-  );
-
-
-  /*
-   * Old result acquisition state belongs to the
-   * wrong identity. Remove only source identity.
-   */
-  statements.push(
-    env.DB.prepare(`
-      DELETE FROM official_result_runs
-      WHERE
-        race_date = ?
-        AND city = ?
-    `)
-      .bind(
-        storedDate,
-        city
-      )
-  );
-
-
-  /*
-   * D1 batch executes these as one transactional batch.
-   */
-  const mutationResults =
-    await env.DB.batch(
-      statements
-    );
-
-
-  /*
-   * After identity repair, use the EXISTING normal
-   * official result pipeline. Never manufacture labels.
-   */
-  const labelled =
-    await ingestOfficialResults(
-      env,
-      {
-        raceDate:
-          targetDate,
-
-        city,
-
-        url:
-          buildOfficialResultsUrl(
-            targetDate,
-            city
-          )
-      }
-    );
-
-
-  return {
-    ...common,
-
-    validated: true,
-    repaired: true,
+    sourceVsOfficial,
+    targetVsOfficial,
+    sourceVsTarget,
 
     action:
-      "REPAIRED",
-
-    mutationStatements:
-      mutationResults.length,
-
-    labelledRaces:
-      labelled.labelledRaces,
-
-    labelledRunners:
-      labelled.labelledRunners,
-
-    skippedRaces:
-      labelled.skippedRaces
+      "DIAGNOSTIC_ONLY_NO_MUTATION"
   };
 }
 
@@ -865,18 +480,14 @@ async function repairOne(
 export async function repairHistoricalDates(
   env: Env,
   input: HistoricalDateRepairInput
-): Promise<any> {
+) {
   const mappings =
-    Array.isArray(
-      input.mappings
-    )
+    Array.isArray(input?.mappings)
       ? input.mappings
       : [];
 
 
-  if (
-    mappings.length === 0
-  ) {
+  if (mappings.length === 0) {
     throw new Error(
       "REPAIR_MAPPINGS_REQUIRED"
     );
@@ -891,163 +502,54 @@ export async function repairHistoricalDates(
 
 
   /*
-   * Prevent duplicate source identities in one request.
+   * IMPORTANT:
+   * This version is intentionally diagnostic-only.
+   * Even apply:true CANNOT mutate production.
    */
-  const seen =
-    new Set<string>();
+  const meetings = [];
 
-
-  for (
-    const mapping of
-    mappings
-  ) {
-    const key =
-      `${mapping.storedDate}|${mapping.city}`;
-
-    if (seen.has(key)) {
-      throw new Error(
-        `DUPLICATE_REPAIR_SOURCE:${key}`
-      );
-    }
-
-    seen.add(key);
-  }
-
-
-  const apply =
-    input.apply === true;
-
-
-  const meetings: any[] =
-    [];
-
-
-  for (
-    const mapping of
-    mappings
-  ) {
-    const result =
-      await repairOne(
-        env,
-        mapping,
-        apply
-      );
-
+  for (const mapping of mappings) {
     meetings.push(
-      result
+      await diagnoseOne(
+        env,
+        mapping
+      )
     );
   }
-
-
-  const validatedMeetings =
-    meetings.filter(
-      item =>
-        item.validated === true
-    ).length;
-
-
-  const repairedMeetings =
-    meetings.filter(
-      item =>
-        item.repaired === true
-    ).length;
-
-
-  const rejectedMeetings =
-    meetings.filter(
-      item =>
-        item.validated !== true &&
-        item.action !==
-          "ALREADY_REPAIRED"
-    ).length;
-
-
-  const alreadyRepairedMeetings =
-    meetings.filter(
-      item =>
-        item.action ===
-          "ALREADY_REPAIRED"
-    ).length;
-
-
-  const labelledRaces =
-    meetings.reduce(
-      (
-        total,
-        item
-      ) =>
-        total +
-        Number(
-          item.labelledRaces ??
-          0
-        ),
-      0
-    );
-
-
-  const labelledRunners =
-    meetings.reduce(
-      (
-        total,
-        item
-      ) =>
-        total +
-        Number(
-          item.labelledRunners ??
-          0
-        ),
-      0
-    );
-
-
-  const pendingRaces =
-    await env.DB.prepare(`
-      SELECT COUNT(*) AS count
-      FROM learning_races
-      WHERE labelled_at IS NULL
-    `)
-      .first<any>();
-
-
-  const pendingRunners =
-    await env.DB.prepare(`
-      SELECT COUNT(*) AS count
-      FROM learning_runner_features
-      WHERE finish_position IS NULL
-    `)
-      .first<any>();
 
 
   return {
-    ok:
-      rejectedMeetings === 0,
+    ok: true,
 
-    dryRun:
-      !apply,
+    dryRun: true,
+
+    diagnosticOnly: true,
+
+    mutationAllowed: false,
 
     summary: {
       attemptedMeetings:
-        mappings.length,
+        meetings.length,
 
-      validatedMeetings,
-      repairedMeetings,
-      rejectedMeetings,
-      alreadyRepairedMeetings,
+      collisions:
+        meetings.filter(
+          (m: any) =>
+            m.collision === true
+        ).length,
 
-      labelledRaces,
-      labelledRunners,
+      sourceMatchesOfficial:
+        meetings.filter(
+          (m: any) =>
+            m.sourceVsOfficial?.match ===
+            true
+        ).length,
 
-      remainingPendingRaces:
-        Number(
-          pendingRaces?.count ??
-          0
-        ),
-
-      remainingPendingRunners:
-        Number(
-          pendingRunners?.count ??
-          0
-        )
+      targetMatchesOfficial:
+        meetings.filter(
+          (m: any) =>
+            m.targetVsOfficial?.match ===
+            true
+        ).length
     },
 
     meetings
