@@ -143,7 +143,10 @@ async function discoverCityResultUrl(
 ): Promise<{
   pageUrl: string;
   cityUrl: string;
-  cityId: string;
+  cityId: string | null;
+  discoveryMethod:
+    | "page-city-id"
+    | "city-name-direct";
 }> {
   const pageUrl =
     buildOfficialResultsPageUrl(
@@ -151,52 +154,106 @@ async function discoverCityResultUrl(
       input.city
     );
 
-  const response =
-    await fetch(
-      pageUrl,
-      {
-        headers: {
-          "user-agent":
-            "Mozilla/5.0 TwoHorse/1.0",
+  /*
+   * SehirId discovery is best-effort.
+   *
+   * TJK's outer result page can be addressed with
+   * QueryParameter_Tarih + SehirAdi. Therefore failure
+   * to discover SehirId must not abort acquisition.
+   *
+   * Preferred path:
+   *   page -> discover SehirId -> city endpoint
+   *
+   * Recovery path:
+   *   page addressed directly by SehirAdi
+   */
+  let cityId:
+    string | null =
+    null;
 
-          accept:
-            "text/html,application/xhtml+xml"
+  try {
+    const response =
+      await fetch(
+        pageUrl,
+        {
+          headers: {
+            "user-agent":
+              "Mozilla/5.0 TwoHorse/1.0",
+
+            accept:
+              "text/html,application/xhtml+xml"
+          }
         }
+      );
+
+    if (response.ok) {
+      const html =
+        await response.text();
+
+      cityId =
+        extractCityId(
+          html,
+          input.city
+        );
+    }
+  } catch (error) {
+    console.warn(
+      "[RESULTS] city id discovery failed",
+      {
+        raceDate:
+          input.raceDate,
+
+        city:
+          input.city,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error)
       }
     );
-
-  if (!response.ok) {
-    throw new Error(
-      `RESULT_PAGE_HTTP_${response.status}`
-    );
   }
 
-  const html =
-    await response.text();
+  if (cityId) {
+    return {
+      pageUrl,
 
-  const cityId =
-    extractCityId(
-      html,
-      input.city
-    );
+      cityId,
 
-  if (!cityId) {
-    throw new Error(
-      `RESULT_CITY_ID_NOT_FOUND:${input.city}`
-    );
+      discoveryMethod:
+        "page-city-id",
+
+      cityUrl:
+        buildOfficialResultsCityUrl(
+          input.raceDate,
+          input.city,
+          cityId
+        )
+    };
   }
 
+  /*
+   * Root-cause recovery:
+   *
+   * Do not invent a SehirId.
+   * Do not hard-code city IDs.
+   *
+   * Use the official TJK page URL already containing
+   * race date + city name and let the normal parser /
+   * validator decide whether it contains valid final
+   * results.
+   */
   return {
     pageUrl,
 
-    cityId,
-
     cityUrl:
-      buildOfficialResultsCityUrl(
-        input.raceDate,
-        input.city,
-        cityId
-      )
+      pageUrl,
+
+    cityId:
+      null,
+
+    discoveryMethod:
+      "city-name-direct"
   };
 }
 
@@ -268,6 +325,9 @@ export async function acquireOfficialResults(
         cityId:
           discovered.cityId,
 
+        discoveryMethod:
+          discovered.discoveryMethod,
+
         pageUrl:
           discovered.pageUrl,
 
@@ -305,6 +365,9 @@ export async function acquireOfficialResults(
       diagnostics: {
         cityId:
           discovered.cityId,
+
+        discoveryMethod:
+          discovered.discoveryMethod,
 
         pageUrl:
           discovered.pageUrl,
