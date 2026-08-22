@@ -32,6 +32,54 @@ export async function activeExpertSources(
   );
 }
 
+export async function recordExpertRefreshTrace(
+  env: Env,
+  sourceKey: string,
+  phase: string,
+  currentUrl: string | null = null,
+  details: unknown = null,
+  startedAt: string | null = null
+): Promise<void> {
+  const now =
+    new Date().toISOString();
+
+  await env.DB.prepare(`
+    INSERT INTO expert_source_refresh_trace (
+      source_key,
+      phase,
+      current_url,
+      details_json,
+      started_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+
+    ON CONFLICT(source_key)
+    DO UPDATE SET
+      phase = excluded.phase,
+      current_url = excluded.current_url,
+      details_json = excluded.details_json,
+      started_at =
+        COALESCE(
+          expert_source_refresh_trace.started_at,
+          excluded.started_at
+        ),
+      updated_at = excluded.updated_at
+  `)
+    .bind(
+      sourceKey,
+      phase,
+      currentUrl,
+      details === null
+        ? null
+        : JSON.stringify(details),
+      startedAt,
+      now
+    )
+    .run();
+}
+
+
 export async function markExpertChecked(
   env: Env,
   sourceKey: string

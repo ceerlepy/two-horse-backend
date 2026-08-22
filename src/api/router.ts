@@ -526,6 +526,22 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     },404);
    }
 
+   const trace =
+    await env.DB.prepare(`
+     SELECT
+      source_key,
+      phase,
+      current_url,
+      details_json,
+      started_at,
+      updated_at
+     FROM expert_source_refresh_trace
+     WHERE source_key = ?
+     LIMIT 1
+    `)
+     .bind(source)
+     .first<any>();
+
    const today =
     turkeyDate();
 
@@ -601,6 +617,36 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     ok:true,
     date:today,
     source:state,
+    refreshTrace:
+     trace
+      ? {
+         source_key:
+          trace.source_key,
+         phase:
+          trace.phase,
+         current_url:
+          trace.current_url,
+         details:
+          trace.details_json
+           ? (() => {
+              try {
+               return JSON.parse(
+                trace.details_json
+               );
+              } catch {
+               return {
+                raw:
+                 trace.details_json
+               };
+              }
+             })()
+           : null,
+         started_at:
+          trace.started_at,
+         updated_at:
+          trace.updated_at
+        }
+      : null,
     totals:{
      predictions:
       Number(

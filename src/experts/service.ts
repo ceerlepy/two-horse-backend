@@ -33,7 +33,8 @@ import {
   markExpertChecked,
   markExpertFailure,
   markExpertHealthy,
-  markExpertProvenance
+  markExpertProvenance,
+  recordExpertRefreshTrace
 } from "./source-repository";
 
 import {
@@ -150,6 +151,17 @@ async function processSource(
         url !== cachedWorkingUrl
     );
 
+  await recordExpertRefreshTrace(
+    env,
+    source.source_key,
+    "PROCESS_START",
+    cachedWorkingUrl,
+    {
+      cachedWorkingUrl,
+      landingUrls
+    }
+  );
+
 
   if (!candidates.length) {
     return {
@@ -193,6 +205,13 @@ async function processSource(
    */
   if (cachedWorkingUrl) {
     try {
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "CACHED_EXTRACTION_START",
+        cachedWorkingUrl
+      );
+
       const fingerprint =
         await expertHttpFingerprint(
           cachedWorkingUrl
@@ -233,6 +252,19 @@ async function processSource(
       const rawPicks =
         extracted.extraction.picks;
 
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "CACHED_EXTRACTION_RESULT",
+        cachedWorkingUrl,
+        {
+          extractionMethod:
+            extracted.method,
+          extracted:
+            rawPicks.length
+        }
+      );
+
       if (!rawPicks.length) {
         attempts.push({
           url:
@@ -253,6 +285,21 @@ async function processSource(
             env,
             rawPicks
           );
+
+        await recordExpertRefreshTrace(
+          env,
+          source.source_key,
+          "CACHED_VALIDATION_RESULT",
+          cachedWorkingUrl,
+          {
+            extracted:
+              rawPicks.length,
+            validated:
+              validPicks.length,
+            extractionMethod:
+              extracted.method
+          }
+        );
 
         attempts.push({
           url:
@@ -403,6 +450,13 @@ async function processSource(
 
   for (const landingUrl of landingUrls) {
     try {
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "DISCOVERY_START",
+        landingUrl
+      );
+
       const discovery =
         await discoverExpertArticleUrls(
           env,
@@ -411,6 +465,21 @@ async function processSource(
           cities
         );
 
+
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "DISCOVERY_RESULT",
+        landingUrl,
+        {
+          method:
+            discovery.method,
+          discovered:
+            discovery.urls.length,
+          urls:
+            discovery.urls
+        }
+      );
 
       attempts.push({
         url:
@@ -455,6 +524,17 @@ async function processSource(
       }
 
     } catch (error) {
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "DISCOVERY_FAILED",
+        landingUrl,
+        {
+          error:
+            errorMessage(error)
+        }
+      );
+
       attempts.push({
         url:
           landingUrl,
@@ -489,6 +569,20 @@ async function processSource(
    */
   for (const url of urls) {
     try {
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "EXTRACTION_START",
+        url,
+        {
+          provenance:
+            discoveryProvenance.get(url) ??
+            null,
+          isLandingUrl:
+            landingUrls.includes(url)
+        }
+      );
+
       const fingerprint =
         await expertHttpFingerprint(
           url
@@ -591,6 +685,21 @@ async function processSource(
       const rawPicks =
         extracted.extraction.picks;
 
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "EXTRACTION_RESULT",
+        url,
+        {
+          method:
+            extracted.method,
+          extracted:
+            rawPicks.length,
+          provenance:
+            provenance ?? null
+        }
+      );
+
 
       if (!rawPicks.length) {
         attempts.push({
@@ -618,6 +727,21 @@ async function processSource(
           env,
           rawPicks
         );
+
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "VALIDATION_RESULT",
+        url,
+        {
+          extracted:
+            rawPicks.length,
+          validated:
+            validPicks.length,
+          method:
+            extracted.method
+        }
+      );
 
 
       attempts.push({
@@ -708,6 +832,17 @@ async function processSource(
     } catch (error) {
       lastError = error;
 
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "EXTRACTION_FAILED",
+        url,
+        {
+          error:
+            errorMessage(error)
+        }
+      );
+
       attempts.push({
         url,
         outcome:
@@ -726,6 +861,16 @@ async function processSource(
 
 
   if (hadSemanticSuccess) {
+    await recordExpertRefreshTrace(
+      env,
+      source.source_key,
+      "NO_CURRENT_CARD",
+      null,
+      {
+        attempts
+      }
+    );
+
     return {
       source:
         source.source_key,
@@ -885,6 +1030,18 @@ export async function refreshExpertSource(
     );
   }
 
+  const startedAt =
+    new Date().toISOString();
+
+  await recordExpertRefreshTrace(
+    env,
+    key,
+    "REFRESH_START",
+    null,
+    null,
+    startedAt
+  );
+
   try {
     const result =
       await processSource(
@@ -892,6 +1049,17 @@ export async function refreshExpertSource(
         source,
         true
       );
+
+    await recordExpertRefreshTrace(
+      env,
+      key,
+      "REFRESH_COMPLETE",
+      (result as any).workingUrl ?? null,
+      {
+        result
+      },
+      startedAt
+    );
 
     return {
       source:
@@ -908,6 +1076,18 @@ export async function refreshExpertSource(
     await markExpertFailure(
       env,
       key
+    );
+
+    await recordExpertRefreshTrace(
+      env,
+      key,
+      "REFRESH_FAILED",
+      null,
+      {
+        error:
+          errorMessage(error)
+      },
+      startedAt
     );
 
     return {
