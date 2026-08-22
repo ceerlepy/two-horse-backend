@@ -16,6 +16,7 @@ import {
 } from "../results/runtime";
 import { ingestOfficialResults } from "../results/service";
 import { buildOfficialResultsUrl } from "../results/url";
+import { repairHistoricalDates } from "../results/historical-date-repair";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -149,6 +150,19 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  }
 
  if(url.pathname==="/api/history") return json({history:await getHistory(env)});
+ if(url.pathname==="/api/admin/repair-historical-dates" && request.method==="POST") {
+  try {
+   const body = await request.json<any>();
+   const repair = await repairHistoricalDates(env,{
+    mappings:Array.isArray(body?.mappings) ? body.mappings : [],
+    apply:body?.apply === true
+   });
+   return json(repair,repair.ok ? 200 : 409);
+  } catch(e) {
+   return json({ok:false,error:errorMessage(e)},400);
+  }
+ }
+
  if(url.pathname==="/api/admin/backfill-learning-labels" && request.method==="POST") {
   try {
    const requestedLimit =
