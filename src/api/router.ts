@@ -10,7 +10,10 @@ import { generateSixFoldCoupons } from "../coupons/service";
 import { adminAuthFailure } from "./auth";
 import { logger } from "../observability/logger";
 import { systemDiagnosticResponse } from "./system-diagnostics";
-import { ingestOfficialResultsDue } from "../results/runtime";
+import {
+  ingestOfficialResultsDue,
+  backfillLearningLabels
+} from "../results/runtime";
 import { ingestOfficialResults } from "../results/service";
 import { buildOfficialResultsUrl } from "../results/url";
 
@@ -146,6 +149,39 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  }
 
  if(url.pathname==="/api/history") return json({history:await getHistory(env)});
+ if(url.pathname==="/api/admin/backfill-learning-labels" && request.method==="POST") {
+  try {
+   const requestedLimit =
+    Number(
+     url.searchParams.get(
+      "limit"
+     ) ?? "5"
+    );
+
+   const backfill =
+    await backfillLearningLabels(
+     env,
+     {
+      limit:
+       requestedLimit
+     }
+    );
+
+   return json({
+    ok:
+     backfill.failedMeetings === 0,
+
+    backfill
+   });
+  } catch(e) {
+   return json({
+    ok:false,
+    error:
+     errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/admin/refresh-results" && request.method==="POST") {
   try {
    const date =
@@ -395,6 +431,142 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
 `).all();
   return json({ok:true,count:sources.results.length,sources:sources.results});
  }
+ if(url.pathname==="/api/debug/learning-labels") {
+  try {
+   const races =
+    await env.DB.prepare(`
+     SELECT
+      COUNT(*) AS total,
+
+      SUM(
+       CASE
+        WHEN labelled_at IS NOT NULL
+        THEN 1 ELSE 0
+       END
+      ) AS labelled,
+
+      SUM(
+       CASE
+        WHEN labelled_at IS NULL
+        THEN 1 ELSE 0
+       END
+      ) AS pending
+
+     FROM learning_races
+    `).first<any>();
+
+   const runners =
+    await env.DB.prepare(`
+     SELECT
+      COUNT(*) AS total,
+
+      SUM(
+       CASE
+        WHEN finish_position IS NOT NULL
+        THEN 1 ELSE 0
+       END
+      ) AS labelled,
+
+      SUM(
+       CASE
+        WHEN finish_position IS NULL
+        THEN 1 ELSE 0
+       END
+      ) AS pending
+
+     FROM learning_runner_features
+    `).first<any>();
+
+   const audits =
+    await env.DB.prepare(`
+     SELECT
+      reason,
+      COUNT(*) AS count,
+      MAX(attempted_at) AS latest_attempt
+
+     FROM learning_label_audit
+
+     GROUP BY reason
+
+     ORDER BY count DESC
+    `).all<any>();
+
+   const pendingMeetings =
+    await env.DB.prepare(`
+     SELECT
+      race_date,
+      city,
+      COUNT(*) AS pending_races,
+      MIN(starts_at) AS first_start,
+      MAX(starts_at) AS last_start
+
+     FROM learning_races
+
+     WHERE labelled_at IS NULL
+
+     GROUP BY
+      race_date,
+      city
+
+     ORDER BY
+      race_date ASC,
+      city ASC
+
+     LIMIT 50
+    `).all<any>();
+
+   return json({
+    ok:true,
+
+    races:{
+     total:
+      Number(
+       races?.total ?? 0
+      ),
+
+     labelled:
+      Number(
+       races?.labelled ?? 0
+      ),
+
+     pending:
+      Number(
+       races?.pending ?? 0
+      )
+    },
+
+    runners:{
+     total:
+      Number(
+       runners?.total ?? 0
+      ),
+
+     labelled:
+      Number(
+       runners?.labelled ?? 0
+      ),
+
+     pending:
+      Number(
+       runners?.pending ?? 0
+      )
+    },
+
+    skipReasons:
+     audits.results ?? [],
+
+    pendingMeetings:
+     pendingMeetings.results ?? []
+   });
+  } catch(e) {
+   return json({
+    ok:false,
+    error:
+     errorMessage(e)
+   },500);
+  }
+ }
+
  if(url.pathname==="/api/debug/learning") {
   try {
    const state=await env.DB.prepare(`
