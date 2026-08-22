@@ -338,46 +338,52 @@ async function processSource(
           url
         );
 
+      const isLandingUrl =
+        landingUrls.includes(url);
 
       /*
-       * Provenance is operational metadata, not a
-       * prediction correctness decision.
+       * Always persist HOW the successfully-read URL
+       * reached extraction.
        *
-       * If we can semantically read the known working
-       * article again, remember HOW it was discovered
-       * and HOW it was extracted even if the article
-       * no longer emits a current-card pick later in
-       * the day.
+       * discovered article:
+       *   landingUrl + actual discovery method
        *
-       * This must NOT bypass canonical validation.
+       * direct/fallback landing URL:
+       *   the URL itself + explicit direct-fallback marker
+       *
+       * This is operational provenance only.
+       * Canonical validation below is still mandatory
+       * before prediction persistence.
        */
-      if (
-        provenance &&
-        (
-          url === source.last_working_url ||
-          currentRowsExist
-        )
-      ) {
-        await markExpertProvenance(
-          env,
-          source.source_key,
-          {
-            workingUrl:
-              url === source.last_working_url
+      await markExpertProvenance(
+        env,
+        source.source_key,
+        {
+          workingUrl:
+            url === source.last_working_url
+              ? url
+              : null,
+
+          discoveredFromUrl:
+            provenance?.landingUrl ??
+            (
+              isLandingUrl
                 ? url
-                : null,
+                : source.homepage_url
+            ),
 
-            discoveredFromUrl:
-              provenance.landingUrl,
+          discoveryMethod:
+            provenance?.method ??
+            (
+              isLandingUrl
+                ? "direct-landing-fallback"
+                : "direct-article-fallback"
+            ),
 
-            discoveryMethod:
-              provenance.method,
-
-            extractionMethod:
-              extracted.method
-          }
-        );
-      }
+          extractionMethod:
+            extracted.method
+        }
+      );
 
 
       const rawPicks =
