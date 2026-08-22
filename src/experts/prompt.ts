@@ -54,6 +54,12 @@ Bir etiket açıkça yoksa false kullan.
 
 Tahmin edilmeyen bilgiyi uydurma.
 
-Yorum varsa kısa fakat anlamını koruyacak şekilde aktar.
+Yorum varsa yalnızca aynı şehir, aynı koşu ve aynı ata ait sayfada açıkça görülen yorumdan çıkar.
+
+Başka bir atın veya başka bir koşunun yorumunu taşıma.
+
+Yorum görünmüyorsa comment=null kullan.
+
+Tahmin veya yorum uydurma.
 `.trim();
 }

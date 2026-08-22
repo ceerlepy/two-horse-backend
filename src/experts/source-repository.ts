@@ -56,7 +56,8 @@ export async function markExpertChecked(
 export async function markExpertHealthy(
   env: Env,
   sourceKey: string,
-  contentHash: string
+  contentHash: string,
+  workingUrl?: string | null
 ): Promise<void> {
   const now =
     new Date()
@@ -66,6 +67,8 @@ export async function markExpertHealthy(
     UPDATE source_registry
     SET
       content_hash = ?,
+      last_working_url =
+        COALESCE(?,last_working_url),
       health_status = 'healthy',
       last_success_at = ?,
       consecutive_failures = 0,
@@ -75,6 +78,7 @@ export async function markExpertHealthy(
   `)
     .bind(
       contentHash,
+      workingUrl ?? null,
       now,
       sourceKey
     )

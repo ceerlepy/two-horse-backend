@@ -36,6 +36,10 @@ import {
 } from "./source-repository";
 
 import {
+  expertUrlCandidates
+} from "./source-urls";
+
+import {
   mapLimit
 } from "./concurrency";
 
@@ -44,9 +48,10 @@ import type {
   ExpertSource
 } from "./source-types";
 
+
 async function nextRaceMinutes(
-  env: Env
-): Promise<number | null> {
+  env:Env
+):Promise<number | null> {
   const row =
     await env.DB.prepare(`
       SELECT starts_at
@@ -58,8 +63,7 @@ async function nextRaceMinutes(
     `)
       .bind(
         turkeyDate(),
-        new Date()
-          .toISOString()
+        new Date().toISOString()
       )
       .first<any>();
 
@@ -70,41 +74,57 @@ async function nextRaceMinutes(
   return Math.max(
     0,
     (
-      Date.parse(
-        row.starts_at
-      ) -
+      Date.parse(row.starts_at) -
       Date.now()
-    ) /
-    60_000
+    ) / 60000
   );
 }
+
 
 async function extractionHash(
-  picks: unknown
-): Promise<string> {
-  /*
-   * Stable semantic fallback when HTTP
-   * fingerprinting is unavailable.
-   *
-   * This prevents Browser acquisition failure from
-   * disabling persistence entirely.
-   */
+  picks:unknown
+):Promise<string> {
   return sha256(
-    JSON.stringify(
-      picks
-    )
+    JSON.stringify(picks)
   );
 }
 
-async function processSource(
-  env: Env,
-  source: ExpertSource
-): Promise<ExpertRefreshResult> {
-  const url =
-    source.last_working_url ??
-    source.homepage_url;
 
-  if (!url) {
+async function todayRowsExist(
+  env:Env,
+  sourceKey:string
+):Promise<boolean> {
+  const row =
+    await env.DB.prepare(`
+      SELECT 1 AS found
+
+      FROM expert_predictions
+
+      WHERE
+        race_date = ?
+        AND source_key = ?
+
+      LIMIT 1
+    `)
+      .bind(
+        turkeyDate(),
+        sourceKey
+      )
+      .first<any>();
+
+  return Boolean(row);
+}
+
+
+async function processSource(
+  env:Env,
+  source:ExpertSource
+):Promise<ExpertRefreshResult> {
+  const urls =
+    expertUrlCandidates(source);
+
+
+  if (!urls.length) {
     return {
       source:
         source.source_key,
@@ -114,90 +134,211 @@ async function processSource(
     };
   }
 
-  /*
-   * Cheap change detection only.
-   *
-   * This must never become a prerequisite for
-   * semantic extraction.
-   */
-  const fingerprint =
-    await expertHttpFingerprint(
-      url
-    );
 
   await markExpertChecked(
     env,
     source.source_key
   );
 
-  if (
-    fingerprint &&
-    source.content_hash ===
-      fingerprint.hash
-  ) {
-    /*
-     * expert_predictions is partitioned by race_date.
-     *
-     * A fingerprint carried over from yesterday must
-     * NOT prevent today's rows from being persisted.
-     */
-    const todayExists =
-      await env.DB.prepare(`
-        SELECT 1 AS found
-        FROM expert_predictions
-        WHERE
-          race_date = ?
-          AND source_key = ?
-        LIMIT 1
-      `)
-        .bind(
-          turkeyDate(),
-          source.source_key
-        )
-        .first<any>();
 
-    if (todayExists) {
+  const currentRowsExist =
+    await todayRowsExist(
+      env,
+      source.source_key
+    );
+
+
+  const attempts:any[] = [];
+
+  let hadSemanticSuccess = false;
+  let lastError:unknown = null;
+
+
+  /*
+   * IMPORTANT:
+   *
+   * Each URL candidate is passed into the EXISTING
+   * acquisition fallback:
+   *
+   * CF_JSON(url)
+   * -> CF_SCRAPE(url) -> CF_JSON(html)
+   * -> CF_CONTENT(url) -> CF_JSON(html)
+   *
+   * We are NOT replacing that logic here.
+   */
+  for (const url of urls) {
+    try {
+      const fingerprint =
+        await expertHttpFingerprint(
+          url
+        );
+
+
+      /*
+       * Fingerprint is optimization only.
+       * HTTP failure does not block Browser extraction.
+       */
+      if (
+        currentRowsExist &&
+        source.last_working_url === url &&
+        fingerprint &&
+        source.content_hash ===
+          fingerprint.hash
+      ) {
+        return {
+          source:
+            source.source_key,
+
+          status:
+            "unchanged",
+
+          count:0,
+
+          workingUrl:
+            url,
+
+          attempts
+        } as ExpertRefreshResult;
+      }
+
+
+      const extracted =
+        await extractExperts(
+          env,
+          url,
+          source.source_name
+        );
+
+
+      hadSemanticSuccess = true;
+
+
+      const rawPicks =
+        extracted.extraction.picks;
+
+
+      if (!rawPicks.length) {
+        attempts.push({
+          url,
+          acquisition:
+            extracted.method,
+
+          extracted:0,
+          validated:0,
+
+          outcome:
+            "NO_CURRENT_CARD"
+        });
+
+        /*
+         * This URL may be homepage/archive with no
+         * useful current picks. Try next candidate.
+         */
+        continue;
+      }
+
+
+      const validPicks =
+        await validateExpertPicks(
+          env,
+          rawPicks
+        );
+
+
+      attempts.push({
+        url,
+        acquisition:
+          extracted.method,
+
+        extracted:
+          rawPicks.length,
+
+        validated:
+          validPicks.length,
+
+        outcome:
+          validPicks.length
+            ? "CANONICAL_MATCH"
+            : "NO_CANONICAL_MATCH"
+      });
+
+
+      /*
+       * Non-empty extraction but zero canonical matches:
+       * wrong date/city/card/runner -> never persist.
+       */
+      if (!validPicks.length) {
+        continue;
+      }
+
+
+      const contentHash =
+        fingerprint?.hash ??
+        await extractionHash(
+          rawPicks
+        );
+
+
+      await persistExpertPicks(
+        env,
+        source.source_key,
+        contentHash,
+        validPicks
+      );
+
+
+      /*
+       * Only a URL that produced CURRENT canonical picks
+       * becomes last_working_url.
+       */
+      await markExpertHealthy(
+        env,
+        source.source_key,
+        contentHash,
+        url
+      );
+
+
       return {
         source:
           source.source_key,
 
         status:
-          "unchanged"
-      };
-    }
+          "updated",
 
-    /*
-     * Same page fingerprint, but no rows for today:
-     * continue semantic extraction and persistence.
-     */
+        count:
+          validPicks.length,
+
+        extractionMethod:
+          extracted.method,
+
+        workingUrl:
+          url,
+
+        attempts
+      } as ExpertRefreshResult;
+
+    } catch (error) {
+      lastError = error;
+
+      attempts.push({
+        url,
+        outcome:
+          "ACQUISITION_OR_EXTRACTION_FAILED",
+
+        error:
+          errorMessage(error)
+      });
+
+      /*
+       * Try next semantic URL candidate.
+       */
+      continue;
+    }
   }
 
-  /*
-   * Semantic acquisition:
-   *
-   * 1 CF_JSON(url)
-   * 2 scrape -> JSON(html)
-   * 3 content -> JSON(html)
-   */
-  const extracted =
-    await extractExperts(
-      env,
-      url,
-      source.source_name
-    );
 
-  const extractedPicks =
-    extracted
-      .extraction
-      .picks;
-
-  /*
-   * A source may simply not have published today's
-   * card yet. That is not the same as parser failure.
-   */
-  if (
-    extractedPicks.length === 0
-  ) {
+  if (hadSemanticSuccess) {
     return {
       source:
         source.source_key,
@@ -205,144 +346,75 @@ async function processSource(
       status:
         "no-current-card",
 
-      count: 0,
+      count:0,
 
-      extractionMethod:
-        extracted.method
-    };
+      attempts
+    } as ExpertRefreshResult;
   }
 
-  const picks =
-    await validateExpertPicks(
-      env,
-      extractedPicks
-    );
 
-  /*
-   * Non-empty extraction where ZERO picks match
-   * canonical TJK runners is a wrong/stale-card error.
-   */
-  if (
-    picks.length === 0
-  ) {
-    throw new Error(
-      `EXPERT_WRONG_CARD:` +
-      `${source.source_key}:` +
-      `extracted=${extractedPicks.length}`
-    );
-  }
-
-  /*
-   * Prefer raw-page HTTP fingerprint when available.
-   *
-   * If direct HTTP was unavailable, hash the extracted
-   * semantic payload so we still have deterministic
-   * source state.
-   */
-  const contentHash =
-    fingerprint?.hash ??
-    await extractionHash(
-      extracted
-        .extraction
-        .picks
-    );
-
-  await persistExpertPicks(
-    env,
-    source.source_key,
-    contentHash,
-    picks
+  throw new Error(
+    `EXPERT_ALL_URLS_FAILED:` +
+    `${source.source_key}:` +
+    errorMessage(lastError)
   );
-
-  await markExpertHealthy(
-    env,
-    source.source_key,
-    contentHash
-  );
-
-  return {
-    source:
-      source.source_key,
-
-    status:
-      "updated",
-
-    count:
-      picks.length,
-
-    extractionMethod:
-      extracted.method
-  };
 }
 
+
 export async function refreshExpertsIfDue(
-  env: Env,
-  force = false
-): Promise<any> {
+  env:Env,
+  force=false
+):Promise<any> {
   const minutes =
-    await nextRaceMinutes(
-      env
-    );
+    await nextRaceMinutes(env);
 
   const interval =
-    expertCheckIntervalMs(
-      minutes
-    );
+    expertCheckIntervalMs(minutes);
 
-  if (
-    interval === null
-  ) {
+
+  if (interval === null) {
     return {
-      refreshed:
-        false,
-
+      refreshed:false,
       reason:
         "no-upcoming-race"
     };
   }
+
 
   const state =
     await env.DB.prepare(`
       SELECT
         MAX(last_checked_at)
           AS checked
+
       FROM source_registry
+
       WHERE enabled = 1
     `)
       .first<any>();
+
 
   if (
     !force &&
     state?.checked &&
     (
       Date.now() -
-      Date.parse(
-        state.checked
-      )
-    ) <
-      interval
+      Date.parse(state.checked)
+    ) < interval
   ) {
     return {
-      refreshed:
-        false,
-
-      reason:
-        "fresh",
-
+      refreshed:false,
+      reason:"fresh",
       nextRaceMinutes:
         minutes
     };
   }
 
-  const sources =
-    await activeExpertSources(
-      env
-    );
 
-  /*
-   * Browser semantic extraction is expensive.
-   * Keep concurrency deliberately bounded.
-   */
+  const sources =
+    await activeExpertSources(env);
+
+
   const results =
     await mapLimit(
       sources,
@@ -354,6 +426,7 @@ export async function refreshExpertsIfDue(
             env,
             source
           );
+
         } catch (error) {
           await markExpertFailure(
             env,
@@ -368,22 +441,18 @@ export async function refreshExpertsIfDue(
               "failed",
 
             error:
-              errorMessage(
-                error
-              )
+              errorMessage(error)
           } satisfies
             ExpertRefreshResult;
         }
       }
     );
 
-  return {
-    refreshed:
-      true,
 
+  return {
+    refreshed:true,
     nextRaceMinutes:
       minutes,
-
     results
   };
 }
