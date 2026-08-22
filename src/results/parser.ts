@@ -117,7 +117,7 @@ function parseRaceNumber(
 
 function findRaceNumberNearTable(
   $: cheerio.CheerioAPI,
-  table: cheerio.Cheerio<cheerio.Element>
+  table: cheerio.Cheerio<any>
 ): number | null {
   /*
    * TJK markup can change the element used for a race
