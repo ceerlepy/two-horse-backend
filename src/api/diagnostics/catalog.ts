@@ -56,6 +56,10 @@ DiagnosticRoute[] = [
     purpose: "Eksik AGF/form/HP/weight ve source coverage"
   },
   {
+    path: "/api/debug/date-contract",
+    purpose: "Cross-layer canonical race date diagnostics"
+  },
+  {
     path: "/api/debug/invariants",
     purpose: "Sistemin bozulmamasi gereken kurallari"
   },

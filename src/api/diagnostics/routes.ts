@@ -653,6 +653,338 @@ export async function routeDiagnostics(
 
   if (
     path ===
+    "/api/debug/date-contract"
+  ) {
+    try {
+      const meetings =
+        await env.DB.prepare(`
+          SELECT
+            race_date,
+            city,
+            COUNT(*) AS row_count,
+            MAX(updated_at) AS latest_update
+          FROM meetings
+          GROUP BY
+            race_date,
+            city
+          ORDER BY
+            race_date DESC,
+            city
+        `)
+          .all<any>();
+
+      const races =
+        await env.DB.prepare(`
+          SELECT
+            race_date,
+            city,
+            COUNT(*) AS race_count,
+            MIN(race_number) AS first_race,
+            MAX(race_number) AS last_race,
+            MIN(starts_at) AS first_start,
+            MAX(starts_at) AS last_start,
+            SUM(
+              CASE
+                WHEN substr(starts_at, 1, 10) != race_date
+                THEN 1
+                ELSE 0
+              END
+            ) AS starts_at_date_mismatch
+          FROM races
+          GROUP BY
+            race_date,
+            city
+          ORDER BY
+            race_date DESC,
+            city
+        `)
+          .all<any>();
+
+      const candidates =
+        await env.DB.prepare(`
+          SELECT
+            race_date,
+            city,
+            COUNT(*) AS candidate_count,
+            MIN(starts_at) AS first_start,
+            MAX(starts_at) AS last_start,
+            MIN(captured_at) AS first_capture,
+            MAX(captured_at) AS last_capture,
+            SUM(
+              CASE
+                WHEN substr(starts_at, 1, 10) != race_date
+                THEN 1
+                ELSE 0
+              END
+            ) AS starts_at_date_mismatch,
+            SUM(
+              CASE
+                WHEN captured_at >= starts_at
+                THEN 1
+                ELSE 0
+              END
+            ) AS invalid_capture_timing
+          FROM learning_snapshot_candidates
+          GROUP BY
+            race_date,
+            city
+          ORDER BY
+            race_date DESC,
+            city
+        `)
+          .all<any>();
+
+      const learning =
+        await env.DB.prepare(`
+          SELECT
+            race_date,
+            city,
+            COUNT(*) AS race_count,
+            SUM(
+              CASE
+                WHEN labelled_at IS NOT NULL
+                THEN 1
+                ELSE 0
+              END
+            ) AS labelled_races,
+            SUM(
+              CASE
+                WHEN labelled_at IS NULL
+                THEN 1
+                ELSE 0
+              END
+            ) AS pending_races,
+            MIN(starts_at) AS first_start,
+            MAX(starts_at) AS last_start,
+            MIN(snapshot_at) AS first_snapshot,
+            MAX(snapshot_at) AS last_snapshot,
+            SUM(
+              CASE
+                WHEN substr(starts_at, 1, 10) != race_date
+                THEN 1
+                ELSE 0
+              END
+            ) AS starts_at_date_mismatch
+          FROM learning_races
+          GROUP BY
+            race_date,
+            city
+          ORDER BY
+            race_date DESC,
+            city
+        `)
+          .all<any>();
+
+      const identities =
+        await env.DB.prepare(`
+          SELECT race_date, city
+          FROM meetings
+
+          UNION
+
+          SELECT race_date, city
+          FROM races
+
+          UNION
+
+          SELECT race_date, city
+          FROM learning_snapshot_candidates
+
+          UNION
+
+          SELECT race_date, city
+          FROM learning_races
+
+          ORDER BY
+            race_date DESC,
+            city
+        `)
+          .all<any>();
+
+      const meetingMap =
+        new Map(
+          (meetings.results ?? [])
+            .map(
+              row => [
+                `${row.race_date}|${row.city}`,
+                row
+              ]
+            )
+        );
+
+      const raceMap =
+        new Map(
+          (races.results ?? [])
+            .map(
+              row => [
+                `${row.race_date}|${row.city}`,
+                row
+              ]
+            )
+        );
+
+      const candidateMap =
+        new Map(
+          (candidates.results ?? [])
+            .map(
+              row => [
+                `${row.race_date}|${row.city}`,
+                row
+              ]
+            )
+        );
+
+      const learningMap =
+        new Map(
+          (learning.results ?? [])
+            .map(
+              row => [
+                `${row.race_date}|${row.city}`,
+                row
+              ]
+            )
+        );
+
+      const chain =
+        (identities.results ?? [])
+          .map(
+            identity => {
+              const key =
+                `${identity.race_date}|${identity.city}`;
+
+              const meeting =
+                meetingMap.get(key);
+
+              const race =
+                raceMap.get(key);
+
+              const candidate =
+                candidateMap.get(key);
+
+              const learningRow =
+                learningMap.get(key);
+
+              const anomalies:
+                string[] = [];
+
+              if (
+                race &&
+                Number(
+                  race.starts_at_date_mismatch ?? 0
+                ) > 0
+              ) {
+                anomalies.push(
+                  "RACE_DATE_STARTS_AT_MISMATCH"
+                );
+              }
+
+              if (
+                candidate &&
+                Number(
+                  candidate.starts_at_date_mismatch ?? 0
+                ) > 0
+              ) {
+                anomalies.push(
+                  "CANDIDATE_DATE_STARTS_AT_MISMATCH"
+                );
+              }
+
+              if (
+                candidate &&
+                Number(
+                  candidate.invalid_capture_timing ?? 0
+                ) > 0
+              ) {
+                anomalies.push(
+                  "CANDIDATE_CAPTURE_AFTER_START"
+                );
+              }
+
+              if (
+                learningRow &&
+                Number(
+                  learningRow.starts_at_date_mismatch ?? 0
+                ) > 0
+              ) {
+                anomalies.push(
+                  "LEARNING_DATE_STARTS_AT_MISMATCH"
+                );
+              }
+
+              return {
+                raceDate:
+                  identity.race_date,
+
+                city:
+                  identity.city,
+
+                layers: {
+                  meeting:
+                    meeting ?? null,
+
+                  races:
+                    race ?? null,
+
+                  candidates:
+                    candidate ?? null,
+
+                  learning:
+                    learningRow ?? null
+                },
+
+                anomalies
+              };
+            }
+          );
+
+      const anomalous =
+        chain.filter(
+          item =>
+            item.anomalies.length > 0
+        );
+
+      return json({
+        ok:
+          anomalous.length === 0,
+
+        summary: {
+          identities:
+            chain.length,
+
+          anomalousIdentities:
+            anomalous.length,
+
+          meetingGroups:
+            meetings.results?.length ?? 0,
+
+          raceGroups:
+            races.results?.length ?? 0,
+
+          candidateGroups:
+            candidates.results?.length ?? 0,
+
+          learningGroups:
+            learning.results?.length ?? 0
+        },
+
+        anomalous,
+        chain
+      });
+    } catch (error) {
+      return json(
+        {
+          ok: false,
+          error:
+            errorMessage(error)
+        },
+        500
+      );
+    }
+  }
+
+
+  if (
+    path ===
     "/api/debug/invariants"
   ) {
     const invalidCaptureTiming =
