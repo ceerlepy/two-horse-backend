@@ -28,96 +28,160 @@ const MIN_SAMPLES:
   };
 
 
+interface RawExpertPickRow {
+  source_key: string;
+  finish_position: number;
+
+  is_banko: number;
+  is_favorite: number;
+  is_strong: number;
+  is_star: number;
+  is_rival: number;
+  is_surprise: number;
+}
+
+
+function categoriesForPick(
+  row: RawExpertPickRow
+): string[] {
+  const categories:
+    string[] = [];
+
+  if (row.is_banko === 1) {
+    categories.push(
+      "banko"
+    );
+  }
+
+  if (row.is_favorite === 1) {
+    categories.push(
+      "favorite"
+    );
+  }
+
+  if (row.is_strong === 1) {
+    categories.push(
+      "strong"
+    );
+  }
+
+  if (row.is_star === 1) {
+    categories.push(
+      "star"
+    );
+  }
+
+  if (row.is_rival === 1) {
+    categories.push(
+      "rival"
+    );
+  }
+
+  if (row.is_surprise === 1) {
+    categories.push(
+      "surprise"
+    );
+  }
+
+  return categories;
+}
+
+
 export async function rebuildExpertCategoryPriors(
   env: Env
 ): Promise<void> {
-  const rows =
+  /*
+   * Read learning_expert_picks exactly once.
+   *
+   * Category expansion is performed in TypeScript
+   * instead of using a compound SQL query.
+   */
+  const raw =
     await env.DB.prepare(`
-      WITH category_picks AS (
-        SELECT
-          source_key,
-          finish_position,
-          'banko' category
-        FROM learning_expert_picks
-        WHERE is_banko = 1
-          AND finish_position > 0
-
-        UNION ALL
-
-        SELECT
-          source_key,
-          finish_position,
-          'favorite'
-        FROM learning_expert_picks
-        WHERE is_favorite = 1
-          AND finish_position > 0
-
-        UNION ALL
-
-        SELECT
-          source_key,
-          finish_position,
-          'strong'
-        FROM learning_expert_picks
-        WHERE is_strong = 1
-          AND finish_position > 0
-
-        UNION ALL
-
-        SELECT
-          source_key,
-          finish_position,
-          'star'
-        FROM learning_expert_picks
-        WHERE is_star = 1
-          AND finish_position > 0
-
-        UNION ALL
-
-        SELECT
-          source_key,
-          finish_position,
-          'rival'
-        FROM learning_expert_picks
-        WHERE is_rival = 1
-          AND finish_position > 0
-
-        UNION ALL
-
-        SELECT
-          source_key,
-          finish_position,
-          'surprise'
-        FROM learning_expert_picks
-        WHERE is_surprise = 1
-          AND finish_position > 0
-      )
-
       SELECT
         source_key,
-        category,
-        COUNT(*) sample_size,
+        finish_position,
 
-        SUM(
-          CASE WHEN finish_position = 1
-          THEN 1 ELSE 0 END
-        ) wins,
+        is_banko,
+        is_favorite,
+        is_strong,
+        is_star,
+        is_rival,
+        is_surprise
 
-        SUM(
-          CASE WHEN finish_position <= 3
-          THEN 1 ELSE 0 END
-        ) top3
+      FROM learning_expert_picks
 
-      FROM category_picks
-
-      GROUP BY
-        source_key,
-        category
+      WHERE finish_position > 0
     `)
-      .all<CategoryRow>();
+      .all<RawExpertPickRow>();
+
+  const grouped =
+    new Map<
+      string,
+      CategoryRow
+    >();
+
+  for (
+    const pick of
+    raw.results ?? []
+  ) {
+    const categories =
+      categoriesForPick(
+        pick
+      );
+
+    for (
+      const category of
+      categories
+    ) {
+      const key =
+        [
+          pick.source_key,
+          category
+        ].join("\u001f");
+
+      const current =
+        grouped.get(key) ?? {
+          source_key:
+            pick.source_key,
+
+          category,
+
+          sample_size: 0,
+          wins: 0,
+          top3: 0
+        };
+
+      current.sample_size += 1;
+
+      const finishPosition =
+        Number(
+          pick.finish_position
+        );
+
+      if (
+        finishPosition === 1
+      ) {
+        current.wins += 1;
+      }
+
+      if (
+        finishPosition <= 3
+      ) {
+        current.top3 += 1;
+      }
+
+      grouped.set(
+        key,
+        current
+      );
+    }
+  }
 
   const all =
-    rows.results ?? [];
+    Array.from(
+      grouped.values()
+    );
 
   const categoryTotals =
     new Map<
@@ -129,7 +193,10 @@ export async function rebuildExpertCategoryPriors(
       }
     >();
 
-  for (const row of all) {
+  for (
+    const row of
+    all
+  ) {
     const current =
       categoryTotals.get(
         row.category
@@ -140,13 +207,19 @@ export async function rebuildExpertCategoryPriors(
       };
 
     current.samples +=
-      Number(row.sample_size);
+      Number(
+        row.sample_size
+      );
 
     current.wins +=
-      Number(row.wins);
+      Number(
+        row.wins
+      );
 
     current.top3 +=
-      Number(row.top3);
+      Number(
+        row.top3
+      );
 
     categoryTotals.set(
       row.category,
@@ -154,31 +227,48 @@ export async function rebuildExpertCategoryPriors(
     );
   }
 
+  const now =
+    new Date()
+      .toISOString();
+
+  /*
+   * Calculation is complete before persistence.
+   * Replacement can now happen deterministically.
+   */
   await env.DB.prepare(`
     DELETE FROM expert_category_priors
-  `).run();
+  `)
+    .run();
 
-  const now =
-    new Date().toISOString();
-
-  for (const row of all) {
+  for (
+    const row of
+    all
+  ) {
     const samples =
-      Number(row.sample_size);
+      Number(
+        row.sample_size
+      );
 
     const wins =
-      Number(row.wins);
+      Number(
+        row.wins
+      );
 
     const top3 =
-      Number(row.top3);
+      Number(
+        row.top3
+      );
 
     const winRate =
       samples > 0
-        ? wins / samples
+        ? wins /
+          samples
         : 0;
 
     const top3Rate =
       samples > 0
-        ? top3 / samples
+        ? top3 /
+          samples
         : 0;
 
     const total =
@@ -187,13 +277,15 @@ export async function rebuildExpertCategoryPriors(
       );
 
     const baselineWin =
-      total && total.samples > 0
+      total &&
+      total.samples > 0
         ? total.wins /
           total.samples
         : winRate;
 
     const baselineTop3 =
-      total && total.samples > 0
+      total &&
+      total.samples > 0
         ? total.top3 /
           total.samples
         : top3Rate;
@@ -206,7 +298,8 @@ export async function rebuildExpertCategoryPriors(
     let multiplier = 1;
 
     if (
-      samples >= minSamples
+      samples >=
+      minSamples
     ) {
       const winRatio =
         baselineWin > 0
@@ -221,8 +314,10 @@ export async function rebuildExpertCategoryPriors(
           : 1;
 
       const quality =
-        0.65 * winRatio +
-        0.35 * top3Ratio;
+        0.65 *
+        winRatio +
+        0.35 *
+        top3Ratio;
 
       const reliability =
         clamp(
@@ -230,7 +325,8 @@ export async function rebuildExpertCategoryPriors(
             samples -
             minSamples +
             1
-          ) / 100,
+          ) /
+          100,
           0,
           1
         );
@@ -262,7 +358,29 @@ export async function rebuildExpertCategoryPriors(
         multiplier,
         updated_at
       )
-      VALUES(?,?,?,?,?,?,?)
+      VALUES(
+        ?,?,?,?,?,?,?
+      )
+
+      ON CONFLICT(
+        source_key,
+        category
+      )
+      DO UPDATE SET
+        sample_size =
+          excluded.sample_size,
+
+        winner_hit_rate =
+          excluded.winner_hit_rate,
+
+        top3_hit_rate =
+          excluded.top3_hit_rate,
+
+        multiplier =
+          excluded.multiplier,
+
+        updated_at =
+          excluded.updated_at
     `)
       .bind(
         row.source_key,
