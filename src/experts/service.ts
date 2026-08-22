@@ -32,7 +32,8 @@ import {
   activeExpertSources,
   markExpertChecked,
   markExpertFailure,
-  markExpertHealthy
+  markExpertHealthy,
+  markExpertProvenance
 } from "./source-repository";
 
 import {
@@ -332,6 +333,53 @@ async function processSource(
       hadSemanticSuccess = true;
 
 
+      const provenance =
+        discoveryProvenance.get(
+          url
+        );
+
+
+      /*
+       * Provenance is operational metadata, not a
+       * prediction correctness decision.
+       *
+       * If we can semantically read the known working
+       * article again, remember HOW it was discovered
+       * and HOW it was extracted even if the article
+       * no longer emits a current-card pick later in
+       * the day.
+       *
+       * This must NOT bypass canonical validation.
+       */
+      if (
+        provenance &&
+        (
+          url === source.last_working_url ||
+          currentRowsExist
+        )
+      ) {
+        await markExpertProvenance(
+          env,
+          source.source_key,
+          {
+            workingUrl:
+              url === source.last_working_url
+                ? url
+                : null,
+
+            discoveredFromUrl:
+              provenance.landingUrl,
+
+            discoveryMethod:
+              provenance.method,
+
+            extractionMethod:
+              extracted.method
+          }
+        );
+      }
+
+
       const rawPicks =
         extracted.extraction.picks;
 
@@ -410,11 +458,6 @@ async function processSource(
        * Only a URL that produced CURRENT canonical picks
        * becomes last_working_url.
        */
-      const provenance =
-        discoveryProvenance.get(
-          url
-        );
-
       await markExpertHealthy(
         env,
         source.source_key,

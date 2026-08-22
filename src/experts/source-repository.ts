@@ -119,6 +119,67 @@ export async function markExpertHealthy(
     .run();
 }
 
+export async function markExpertProvenance(
+  env: Env,
+  sourceKey: string,
+  diagnostics: {
+    workingUrl?: string | null;
+    discoveredFromUrl?: string | null;
+    discoveryMethod?: string | null;
+    extractionMethod?: string | null;
+  }
+): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE source_registry
+    SET
+      last_working_url =
+        COALESCE(
+          ?,
+          last_working_url
+        ),
+
+      last_discovered_from_url =
+        COALESCE(
+          ?,
+          last_discovered_from_url
+        ),
+
+      last_discovery_method =
+        COALESCE(
+          ?,
+          last_discovery_method
+        ),
+
+      last_extraction_method =
+        COALESCE(
+          ?,
+          last_extraction_method
+        ),
+
+      updated_at =
+        CURRENT_TIMESTAMP
+
+    WHERE source_key = ?
+  `)
+    .bind(
+      diagnostics.workingUrl ??
+        null,
+
+      diagnostics.discoveredFromUrl ??
+        null,
+
+      diagnostics.discoveryMethod ??
+        null,
+
+      diagnostics.extractionMethod ??
+        null,
+
+      sourceKey
+    )
+    .run();
+}
+
+
 export async function markExpertFailure(
   env: Env,
   sourceKey: string
