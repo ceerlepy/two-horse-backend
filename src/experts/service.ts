@@ -40,6 +40,10 @@ import {
 } from "./source-urls";
 
 import {
+  discoverExpertArticleUrls
+} from "./discovery";
+
+import {
   mapLimit
 } from "./concurrency";
 
@@ -118,13 +122,14 @@ async function todayRowsExist(
 
 async function processSource(
   env:Env,
-  source:ExpertSource
+  source:ExpertSource,
+  force:boolean
 ):Promise<ExpertRefreshResult> {
-  const urls =
+  const landingUrls =
     expertUrlCandidates(source);
 
 
-  if (!urls.length) {
+  if (!landingUrls.length) {
     return {
       source:
         source.source_key,
@@ -155,16 +160,107 @@ async function processSource(
 
 
   /*
-   * IMPORTANT:
+   * First discover CURRENT article URLs from each
+   * landing/index/category URL.
    *
-   * Each URL candidate is passed into the EXISTING
+   * The discovery itself uses the existing semantic
    * acquisition fallback:
    *
    * CF_JSON(url)
    * -> CF_SCRAPE(url) -> CF_JSON(html)
    * -> CF_CONTENT(url) -> CF_JSON(html)
-   *
-   * We are NOT replacing that logic here.
+   */
+  const today =
+    turkeyDate();
+
+  const meetings =
+    await env.DB.prepare(`
+      SELECT city
+      FROM meetings
+      WHERE race_date = ?
+      ORDER BY city
+    `)
+      .bind(today)
+      .all<any>();
+
+  const cities =
+    (meetings.results ?? [])
+      .map(
+        (row:any) =>
+          String(row.city)
+      );
+
+
+  const articleUrls:string[] = [];
+  const articleSeen =
+    new Set<string>();
+
+
+  for (const landingUrl of landingUrls) {
+    try {
+      const discovery =
+        await discoverExpertArticleUrls(
+          env,
+          landingUrl,
+          source.source_name,
+          cities
+        );
+
+
+      attempts.push({
+        url:
+          landingUrl,
+
+        outcome:
+          "DISCOVERY",
+
+        acquisition:
+          discovery.method,
+
+        discovered:
+          discovery.urls.length
+      });
+
+
+      for (const url of discovery.urls) {
+        if (!articleSeen.has(url)) {
+          articleSeen.add(url);
+          articleUrls.push(url);
+        }
+      }
+
+    } catch (error) {
+      attempts.push({
+        url:
+          landingUrl,
+
+        outcome:
+          "DISCOVERY_FAILED",
+
+        error:
+          errorMessage(error)
+      });
+    }
+  }
+
+
+  /*
+   * Some sources publish directly on the landing URL,
+   * so retain landing URLs as final fallback after
+   * discovered article URLs.
+   */
+  const urls = [
+    ...articleUrls,
+    ...landingUrls.filter(
+      url =>
+        !articleSeen.has(url)
+    )
+  ];
+
+
+  /*
+   * Every discovered article URL is then passed into
+   * the EXISTING extraction fallback.
    */
   for (const url of urls) {
     try {
@@ -179,6 +275,7 @@ async function processSource(
        * HTTP failure does not block Browser extraction.
        */
       if (
+        !force &&
         currentRowsExist &&
         source.last_working_url === url &&
         fingerprint &&
@@ -424,7 +521,8 @@ export async function refreshExpertsIfDue(
         try {
           return await processSource(
             env,
-            source
+            source,
+            force
           );
 
         } catch (error) {
