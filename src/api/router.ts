@@ -10,6 +10,7 @@ import { generateSixFoldCoupons } from "../coupons/service";
 import { adminAuthFailure } from "./auth";
 import { logger } from "../observability/logger";
 import { systemDiagnosticResponse } from "./system-diagnostics";
+import { ingestOfficialResultsDue } from "../results/runtime";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -143,6 +144,33 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  }
 
  if(url.pathname==="/api/history") return json({history:await getHistory(env)});
+ if(url.pathname==="/api/admin/refresh-results" && request.method==="POST") {
+  try {
+   /*
+    * Force an immediate official-results retry.
+    *
+    * Legacy official_result_runs rows may predate
+    * stage-level diagnostics. This endpoint executes
+    * the current result pipeline now so those rows are
+    * rewritten using the current stage-aware format.
+    */
+   const results =
+    await ingestOfficialResultsDue(
+     env
+    );
+
+   return json({
+    ok:true,
+    results
+   });
+  } catch(e) {
+   return json({
+    ok:false,
+    error:errorMessage(e)
+   },502);
+  }
+ }
+
  if(url.pathname==="/api/admin/refresh-tjk" && request.method==="POST") {
         try {
             const program = await refreshProgramIfDue(env, true);
