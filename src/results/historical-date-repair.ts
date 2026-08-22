@@ -40,6 +40,9 @@ function normalizeHorseName(value: string): string {
     .normalize("NFC")
     .trim()
     .toLocaleUpperCase("tr-TR")
+    // Frozen snapshots may contain a trailing draw/order marker,
+    // e.g. "SANCAKALAN (3)". This is not part of the horse identity.
+    .replace(/\s*\(\d+\)\s*$/u, "")
     .replace(/\s+/g, "")
     .replace(/[’'`´".,()\-_/\\]/g, "");
 }
