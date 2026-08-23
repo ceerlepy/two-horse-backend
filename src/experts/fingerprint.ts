@@ -37,55 +37,6 @@ export interface ExpertFingerprintOptions {
 }
 
 
-function normalizedVisibleText(
-  html:
-    string
-): {
-  text:
-    string;
-
-  rootHtml:
-    string;
-} {
-  const $ =
-    load(html);
-
-
-  $(
-    [
-      "script",
-      "style",
-      "noscript",
-      "svg",
-      "canvas",
-      "iframe"
-    ].join(",")
-  ).remove();
-
-
-  const root =
-    $("body").length
-      ? $("body")
-      : $.root();
-
-
-  return {
-    text:
-      root
-        .text()
-        .replace(
-          /\s+/g,
-          " "
-        )
-        .trim(),
-
-    rootHtml:
-      root.html() ??
-      ""
-  };
-}
-
-
 export function normalizeExpertFingerprintMaterial(
   html:
     string,
@@ -112,10 +63,29 @@ export function normalizeExpertFingerprintMaterial(
   ).remove();
 
 
+  const body =
+    $("body");
+
+
+  /*
+   * Keep the selected root consistently typed as
+   * Cheerio<Element>.
+   *
+   * Mixing $("body") with $.root() creates:
+   *
+   * Cheerio<Element> | Cheerio<Document>
+   *
+   * which breaks Cheerio's typed this-context for
+   * text(), find() and related methods.
+   *
+   * cheerio.load() creates html/body wrappers for normal
+   * documents and fragments, so html is the safe element
+   * fallback.
+   */
   const root =
-    $("body").length
-      ? $("body")
-      : $.root();
+    body.length
+      ? body
+      : $("html");
 
 
   const text =
