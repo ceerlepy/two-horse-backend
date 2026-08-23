@@ -4,121 +4,158 @@ export function expertExtractionPrompt(
   cities: string[] = []
 ): string {
   return `
-${sourceName} sayfasındaki Türkiye at yarışı uzman tahminlerini, analizlerini ve yorumlarını çıkar.
+${sourceName} sayfasındaki bugünkü Türkiye at yarışı uzman seçimlerini çıkar.
 
-HEDEF TARİH: ${raceDate}
-HEDEF ŞEHİRLER: ${
+HEDEF TARİH:
+${raceDate}
+
+HEDEF ŞEHİRLER:
+${
   cities.length
     ? cities.join(", ")
-    : "BUGÜNÜN RESMİ PROGRAMINDAKİ ŞEHİRLER"
+    : "bugünkü resmi TJK şehirleri"
 }
 
-Yalnızca HEDEF TARİH ve HEDEF ŞEHİRLER için açıkça görülen içerikleri çıkar.
+Bu çağrı current-card extraction içindir.
 
-Başka tarih, başka şehir, geçmiş yarış veya yurt dışı yarış içeriğini picks içine koyma.
+Türkçe tarih gösterimi, başlık yapısı veya URL slug biçimi farklı olabilir.
+Yalnız tarih formatı farklı görünüyor diye mevcut açık yarış analizlerini yok sayma.
 
-UZMAN SEÇİMİNİ TANIMA:
+Açıkça başka güne veya yabancı yarışa ait bölüm varsa çıkarma.
 
-Bir atın uzman seçimi olması için mutlaka "favori", "banko" veya "tek" kelimesinin yazması gerekmez.
+GÖREV
 
-Aşağıdaki gibi açık pozitif yarış analizi ifadeleri de gerçek uzman seçimidir:
+Kaynak metnindeki gerçek yarış analizlerini structured picks'e dönüştür.
 
-- "birinciliğin en güçlü adayıdır"
-- "birinciliğe çok yakındır"
-- "kazanmasını beklediğimiz isimdir"
-- "kazanmasını bekliyoruz"
-- "kazanmaya yakındır"
-- "fotoyu önde geçmesini bekliyoruz"
-- "rövanşı alacaktır"
-- "ilk şansa sahiptir"
-- "ilk şanslı isimdir"
-- "birinci atımızdır"
-- "öncelikli şans verdiğimiz isimdir"
+Bir seçim yalnız "favori", "banko" veya "tek" kelimesiyle yazılmak zorunda değildir.
 
-Bu tür açık ana seçimleri ASLA atlama.
+Örneğin aşağıdaki doğal yarış dili de ana expert seçimidir:
 
-ETİKETLER:
+- birinciliğin en güçlü adayıdır
+- birinciliğe çok yakındır
+- ilk şansa sahiptir
+- ilk şanslı isimdir
+- kazanmaya yakındır
+- kazanmasını bekliyoruz
+- fotoyu önde geçmesini bekliyoruz
+- rövanşı alacaktır
+- rakiplerinin bir adım önündedir
+- ilk atımızdır
+- öncelikli şans verdiğimiz isimdir
 
-- "tek", "banko", "risk edilir" veya açıkça tek önerilen isim:
-  isBanko=true
-
-- "favori", "en şanslı", "en güçlü aday":
-  isFavorite=true
-
-- "güçlü", "ilk şans", "öncelikli",
-  "birinciliğe çok yakın",
-  "kazanmasını beklediğimiz",
-  "kazanmasını bekliyoruz",
-  "rövanşı alacaktır":
-  isStrong=true
-
-- yıldız veya açık özel ana seçim:
-  isStar=true
-
-- "rakip", "rakip gördüğümüz", "ikinci şans",
-  "daha sonra", "rakip önereceğimiz":
-  isRival=true
-
-- "sürpriz", "bomba", "tatlı kaçak":
-  isSurprise=true
-
-- açıkça olumsuz, önerilmeyen veya elenen:
-  isAvoid=true
-
-RAKİP NUMARALARI:
-
-Örneğin aynı koşunun analizinde:
-
-"Sırasıyla rakip gördüğümüz isimler: 2-3-6"
-
-yazıyorsa 2, 3 ve 6 numaralı atların HER BİRİ ayrı pick olmalıdır.
-
-Her biri için:
-
-isRival=true
-
-olmalıdır.
-
-Kaynak bu rakiplerin at adını açıkça yazmıyorsa tahmini atma ve isim uydurma.
-
-Bu durumda:
-
-horseNumber = kaynakta açıkça görünen at numarası
-horseName = null
-
-Canonical at adı daha sonra resmi TJK programından tamamlanacaktır.
-
-ANA AT ÖRNEĞİ:
+Bir koşu analiz paragrafında:
 
 "(1) PRANDELLO ... birinciliğin en güçlü adayıdır"
 
-şeklindeyse:
+şeklinde ana konu yapılan at bir expert pick'tir.
 
-horseNumber=1
-horseName="PRANDELLO"
+LABELS
 
-ve cümlenin açık anlamına göre ilgili pozitif etiketleri true yap.
+Yalnız şu label değerlerini kullan:
 
-Şehir ve koşu numarasını paragrafın açık bağlamından al.
+favorite
+banko
+strong
+star
+rival
+surprise
+avoid
 
-Program numarası, tarih, AGF, HP, kilo, mesafe,
-oran veya derece değerlerini horseNumber sanma.
+favorite:
+favori, en şanslı, en güçlü aday.
 
-city + raceNumber + horseNumber aynı gerçek tahmine ait olmalıdır.
+banko:
+banko, tek veya açık biçimde tek önerilen.
+
+strong:
+ilk şans, güçlü, birinciliğe yakın, kazanmaya yakın,
+kazanmasını bekliyoruz, rövanşı alacaktır veya açık ana
+pozitif seçim.
+
+star:
+kaynak açıkça yıldız veya özel ana seçim diyorsa.
+
+rival:
+rakip, ikinci şans veya daha sonra değerlendirilmesi gereken.
+
+surprise:
+sürpriz, bomba veya tatlı kaçak.
+
+avoid:
+açıkça önerilmeyen, elenen veya olumsuz görülen.
+
+Bir at birden fazla label alabilir.
+
+RAKİP NUMARALARI
+
+Aynı koşu analizinde:
+
+"Sırasıyla rakip gördüğümüz isimler: 2-3-6"
+
+yazıyorsa:
+
+2
+3
+6
+
+numaralı atların HER BİRİ ayrı pick'tir.
+
+Her biri için:
+
+labels=["rival"]
+
+kullan.
+
+Kaynak rakiplerin at adını açıkça vermiyorsa:
+
+horseName=null
+
+kullan.
+
+At adı uydurma.
+
+KUPON VE ALTILI BLOKLARI TAMAMEN IGNORE ET
+
+Aşağıdaki bölümler expert-runner extraction kaynağı değildir:
+
+ALTILI GANYAN TAHMİNİMİZ
+BİRİNCİ ALTILI GANYAN
+İKİNCİ ALTILI GANYAN
+
+ve:
+
+1.Ayak:
+2.Ayak:
+3.Ayak:
+4.Ayak:
+5.Ayak:
+6.Ayak:
+
+Örneğin:
+
+1.Ayak: 5.6.1.4
+
+bir yarış analiz paragrafı değildir.
+
+Buradaki:
+
+1 = raceNumber değildir.
+
+5,6,1,4 = otomatik expert horse picks değildir.
+
+Yalnız gerçek koşu analiz bağlamını kullan.
+
+IDENTITY
+
+city + raceNumber + horseNumber aynı gerçek analiz bağlamına ait olmalıdır.
 
 horseName kaynakta açıkça görünüyorsa aynı ata ait olmalıdır.
 
 horseName görünmüyorsa null kullan.
 
-At adı uydurma.
+comment yalnız aynı ata ait açık kaynak yorumudur.
 
-Aynı at birden fazla etikete sahip olabilir.
-
-Bir etiket açıkça yoksa false kullan.
-
-Yorum varsa yalnızca aynı şehir, aynı koşu ve aynı ata ait açık yorumdan çıkar.
-
-Ana atın uzun analiz yorumunu rakip numaralarına kopyalama.
+Ana atın yorumunu numara-only rakiplere kopyalama.
 
 Rakip için ayrı yorum görünmüyorsa:
 
@@ -126,15 +163,16 @@ comment=null
 
 kullan.
 
-sourceRank yalnızca kaynak açık bir sıralama veriyorsa kullan.
-Aksi halde null kullan.
+Program numarası, tarih, AGF, HP, kilo, mesafe, oran,
+derece ve kupon ayağı değerlerini horseNumber sanma.
 
-Tahmin, at adı veya yorum uydurma.
+sourceRank üretme.
 
-Sayfada gerçekten HEDEF TARİH ve HEDEF ŞEHİRLER için hiçbir uzman seçimi yoksa ancak o zaman:
+confidence üretme.
 
-picks=[]
+Sayfada HEDEF KARTA ait açık yarış analizleri bulunuyorsa
+picks=[] döndürme.
 
-döndür.
+Gerçekten expert seçimi yoksa ancak o zaman picks=[] döndür.
 `.trim();
 }

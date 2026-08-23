@@ -103,6 +103,73 @@ async function jsonRequest<T>(
 }
 
 /*
+ * Direct semantic URL extraction.
+ *
+ * Contract:
+ *
+ * - NO acquisition fallback happens here.
+ * - A technically valid semantic response is returned as-is,
+ *   including an empty picks array.
+ * - Only Browser Run / JSON transport failure throws.
+ *
+ * This allows callers to distinguish:
+ *
+ * semantic empty
+ *
+ * from:
+ *
+ * technical acquisition failure.
+ */
+export async function extractSemanticJsonFromUrl<T>(
+  env: Env,
+  url: string,
+  prompt: string,
+  responseFormat?: unknown
+): Promise<SemanticJsonResult<T>> {
+  const diagnostics:
+    AcquisitionDiagnostics = {
+      failures: []
+    };
+
+
+  try {
+    return {
+      value:
+        await jsonRequest<T>(
+          env,
+          {
+            url
+          },
+          prompt,
+          responseFormat
+        ),
+
+      method:
+        "cf-json-url",
+
+      diagnostics
+    };
+
+  } catch (error) {
+    diagnostics.failures.push({
+      stage:
+        "cf-json-url",
+
+      error:
+        message(error)
+    });
+
+
+    throw new Error(
+      `SEMANTIC_URL_EXTRACTION_FAILED:${JSON.stringify(
+        diagnostics
+      )}`
+    );
+  }
+}
+
+
+/*
  * Semantic extraction for HTML that has ALREADY been acquired.
  *
  * Cloudflare JSON natively accepts { html }.

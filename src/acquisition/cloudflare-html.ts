@@ -183,8 +183,37 @@ export async function acquireCfContentHtml(
     );
   }
 
+  /*
+   * Browser Run Workers Binding returns a JSON envelope:
+   *
+   * {
+   *   success: true,
+   *   result: "<html>...</html>"
+   * }
+   *
+   * Never feed the JSON envelope itself into downstream
+   * HTML extraction.
+   */
+  const raw:any =
+    await response.json();
+
+
+  const payload =
+    unwrap(raw);
+
+
   const html =
-    await response.text();
+    typeof payload === "string"
+      ? payload
+      : findHtml(payload);
+
+
+  if (!html) {
+    throw new Error(
+      "CF_CONTENT_HTML_NOT_FOUND"
+    );
+  }
+
 
   if (
     html.length < 500
