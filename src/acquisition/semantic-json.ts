@@ -38,6 +38,29 @@ async function jsonRequest<T>(
       {
         ...input,
 
+        /*
+         * URL input owns a browser navigation.
+         *
+         * Wait for dynamic page activity before asking
+         * JSON AI to extract the rendered article.
+         *
+         * HTML input is already acquired/rendered and
+         * therefore does not need gotoOptions.
+         */
+        ...(
+          "url" in input
+            ? {
+                gotoOptions: {
+                  waitUntil:
+                    "networkidle2",
+
+                  timeout:
+                    30_000
+                }
+              }
+            : {}
+        ),
+
         prompt,
 
         ...(responseFormat

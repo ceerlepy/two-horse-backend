@@ -550,17 +550,24 @@ async function processSource(
 
 
   /*
-   * Some sources publish directly on the landing URL,
-   * so retain landing URLs as final fallback after
-   * discovered article URLs.
+   * A successfully discovered article is authoritative
+   * for this refresh attempt.
+   *
+   * Once article discovery succeeded, do NOT feed
+   * landing/index/homepage URLs into article extraction.
+   *
+   * Direct landing extraction remains only when
+   * discovery found no article at all, because some
+   * sources may publish picks directly on an entry page.
    */
-  const urls = [
-    ...articleUrls,
-    ...landingUrls.filter(
-      url =>
-        !articleSeen.has(url)
-    )
-  ];
+  const urls =
+    articleUrls.length > 0
+      ? [
+          ...articleUrls
+        ]
+      : [
+          ...landingUrls
+        ];
 
 
   /*

@@ -188,55 +188,69 @@ export async function validateExpertPicks(
 
 
     /*
-     * Critical:
-     * city + race number + horse number is not enough.
+     * city + race number + horse number identifies the
+     * canonical TJK runner for the current race date.
      *
-     * Extracted horse name must also identify the SAME
-     * canonical runner.
+     * If the source ALSO printed a horse name, require
+     * that name to identify the same canonical runner.
+     *
+     * Some legitimate expert formats list rivals only
+     * by horse number. In that case horseName is null
+     * and the official TJK name is filled below.
      */
-    const extractedName =
-      normalizeHorseName(
-        String(pick.horseName ?? "")
-      );
-
-    const canonicalName =
-      normalizeHorseName(
-        runner.horseName
-      );
+    const sourceHorseName =
+      String(
+        pick.horseName ??
+        ""
+      ).trim();
 
 
-    if (
-      !extractedName ||
-      extractedName !==
-        canonicalName
-    ) {
-      await writeMismatch(
-        env,
-        date,
-        pick,
-        "EXPERT_HORSE_NAME_MISMATCH",
-        {
-          canonicalCity:
-            runner.city,
+    if (sourceHorseName) {
+      const extractedName =
+        normalizeHorseName(
+          sourceHorseName
+        );
 
-          canonicalHorseName:
-            runner.horseName,
+      const canonicalName =
+        normalizeHorseName(
+          runner.horseName
+        );
 
-          normalizedExtracted:
-            extractedName,
 
-          normalizedCanonical:
-            canonicalName
-        }
-      );
+      if (
+        extractedName !==
+          canonicalName
+      ) {
+        await writeMismatch(
+          env,
+          date,
+          pick,
+          "EXPERT_HORSE_NAME_MISMATCH",
+          {
+            canonicalCity:
+              runner.city,
 
-      continue;
+            canonicalHorseName:
+              runner.horseName,
+
+            normalizedExtracted:
+              extractedName,
+
+            normalizedCanonical:
+              canonicalName
+          }
+        );
+
+        continue;
+      }
     }
 
 
     /*
-     * Only after exact identity validation may we
-     * canonicalize spelling from TJK.
+     * Identity is canonical now.
+     *
+     * Always persist official TJK spelling, including
+     * number-only source picks whose horseName was null.
      */
     output.push({
       ...pick,

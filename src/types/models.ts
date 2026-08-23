@@ -74,7 +74,7 @@ export interface ExpertPickInput {
   city: string;
   raceNumber: number;
   horseNumber: number;
-  horseName: string;
+  horseName: string | null;
   comment: string | null;
   isFavorite: boolean;
   isBanko: boolean;

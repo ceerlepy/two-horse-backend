@@ -21,8 +21,8 @@ const VERIFIED_ENTRY_URLS:
   Record<string,string[]> = {
 
   liderform: [
-    "https://liderform.com.tr/uzman-listesi/",
-    "https://liderform.com.tr/"
+    "https://liderform.com.tr/",
+    "https://liderform.com.tr/uzman-listesi/"
   ],
 
   yaris_dergisi: [

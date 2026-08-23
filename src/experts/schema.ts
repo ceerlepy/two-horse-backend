@@ -9,7 +9,7 @@ export const expertSchema={
           city:{type:"string"},
           raceNumber:{type:"integer"},
           horseNumber:{type:"integer"},
-          horseName:{type:"string"},
+          horseName:{anyOf:[{type:"string"},{type:"null"}]},
           comment:{anyOf:[{type:"string"},{type:"null"}]},
           isFavorite:{type:"boolean"},
           isBanko:{type:"boolean"},
