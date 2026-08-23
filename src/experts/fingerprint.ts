@@ -1,4 +1,8 @@
 import {
+  load
+} from "cheerio";
+
+import {
   acquireHttpHtml
 } from "../acquisition/http";
 
@@ -6,46 +10,278 @@ import {
   sha256
 } from "../shared";
 
+
 export interface ExpertFingerprint {
-  hash: string;
-  bodyLength: number;
+  hash:
+    string;
+
+  bodyLength:
+    number;
 }
 
+
+export interface ExpertFingerprintOptions {
+  /*
+   * Daily article:
+   * false
+   *
+   * Stable landing/current page:
+   * true
+   *
+   * Landing href destinations matter because today's
+   * article may be published under a new URL while the
+   * visible anchor text remains similar.
+   */
+  includeLinks?:
+    boolean;
+}
+
+
+function normalizedVisibleText(
+  html:
+    string
+): {
+  text:
+    string;
+
+  rootHtml:
+    string;
+} {
+  const $ =
+    load(html);
+
+
+  $(
+    [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "canvas",
+      "iframe"
+    ].join(",")
+  ).remove();
+
+
+  const root =
+    $("body").length
+      ? $("body")
+      : $.root();
+
+
+  return {
+    text:
+      root
+        .text()
+        .replace(
+          /\s+/g,
+          " "
+        )
+        .trim(),
+
+    rootHtml:
+      root.html() ??
+      ""
+  };
+}
+
+
+export function normalizeExpertFingerprintMaterial(
+  html:
+    string,
+
+  baseUrl:
+    string,
+
+  includeLinks =
+    false
+): string {
+  const $ =
+    load(html);
+
+
+  $(
+    [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "canvas",
+      "iframe"
+    ].join(",")
+  ).remove();
+
+
+  const root =
+    $("body").length
+      ? $("body")
+      : $.root();
+
+
+  const text =
+    root
+      .text()
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
+
+
+  if (!includeLinks) {
+    return text;
+  }
+
+
+  const links =
+    root
+      .find(
+        "a[href]"
+      )
+      .map(
+        (
+          _index,
+          element
+        ) => {
+          const href =
+            $(element)
+              .attr(
+                "href"
+              );
+
+
+          if (!href) {
+            return null;
+          }
+
+
+          try {
+            const url =
+              new URL(
+                href,
+                baseUrl
+              );
+
+
+            if (
+              url.protocol !== "http:" &&
+              url.protocol !== "https:"
+            ) {
+              return null;
+            }
+
+
+            url.hash = "";
+
+
+            const anchorText =
+              $(element)
+                .text()
+                .replace(
+                  /\s+/g,
+                  " "
+                )
+                .trim();
+
+
+            return (
+              anchorText +
+              "=>" +
+              url.toString()
+            );
+
+          } catch {
+            return null;
+          }
+        }
+      )
+      .get()
+      .filter(
+        (
+          value
+        ): value is string =>
+          typeof value === "string"
+          && value.length > 0
+      )
+      .join("\n");
+
+
+  return [
+    text,
+    links
+  ]
+    .filter(
+      value =>
+        value.length > 0
+    )
+    .join(
+      "\n---LINKS---\n"
+    );
+}
+
+
 /*
- * Fingerprinting is intentionally HTTP-only.
+ * Cheap optimization only:
  *
- * It is an optimization, not a correctness requirement.
+ * HTTP
+ * -> normalized material
+ * -> SHA-256
  *
- * We do NOT invoke Browser Run merely to determine
- * whether an expert page changed.
+ * Browser Run = 0
+ * Workers AI = 0
  *
- * If HTTP fingerprinting fails, semantic extraction
- * simply continues normally.
+ * Failure never blocks correctness.
  */
 export async function expertHttpFingerprint(
-  url: string
+  url:
+    string,
+
+  options:
+    ExpertFingerprintOptions = {}
 ): Promise<ExpertFingerprint | null> {
   try {
     const acquired =
       await acquireHttpHtml(
         url,
         {
-          timeoutMs: 12_000,
-          minimumBytes: 1000,
+          timeoutMs:
+            12_000,
+
+          minimumBytes:
+            1000,
+
           userAgent:
             "TwoHorse/1.0 (+expert-change-detection)"
         }
       );
 
+
+    const material =
+      normalizeExpertFingerprintMaterial(
+        acquired.html,
+        url,
+        options.includeLinks === true
+      );
+
+
+    if (
+      material.length <
+      250
+    ) {
+      return null;
+    }
+
+
     return {
       hash:
         await sha256(
-          acquired.html
+          material
         ),
 
       bodyLength:
-        acquired.bodyLength
+        material.length
     };
+
   } catch {
     return null;
   }

@@ -88,33 +88,25 @@ function normalizeUrl(
 }
 
 
-export function expertUrlCandidates(
-  source:ExpertSource
-):string[] {
-  const candidates = [
-    /*
-     * A previously validated current-card URL gets
-     * first priority.
-     */
-    source.last_working_url,
-
-    ...(
-      VERIFIED_ENTRY_URLS[
-        source.source_key
-      ] ?? []
-    ),
-
-    source.homepage_url
-  ];
-
+function dedupeUrls(
+  values:
+    Array<
+      string |
+      null |
+      undefined
+    >
+): string[] {
   const seen =
     new Set<string>();
 
-  const result:string[] = [];
+  const result:
+    string[] = [];
 
-  for (const raw of candidates) {
+
+  for (const raw of values) {
     const url =
       normalizeUrl(raw);
+
 
     if (
       !url ||
@@ -123,9 +115,57 @@ export function expertUrlCandidates(
       continue;
     }
 
+
     seen.add(url);
+
     result.push(url);
   }
 
+
   return result;
+}
+
+
+/*
+ * Durable discovery/current-page entry points.
+ *
+ * A dynamically discovered daily article is intentionally
+ * NOT part of this set.
+ */
+export function expertLandingUrls(
+  source:
+    ExpertSource
+): string[] {
+  return dedupeUrls([
+    ...(
+      VERIFIED_ENTRY_URLS[
+        source.source_key
+      ] ?? []
+    ),
+
+    source.homepage_url
+  ]);
+}
+
+
+/*
+ * Full routing order.
+ *
+ * last_working_url stays first for same-day/stable-page
+ * cache reuse.
+ *
+ * service.ts decides whether that working URL is eligible
+ * for reuse on the current Turkey date.
+ */
+export function expertUrlCandidates(
+  source:
+    ExpertSource
+): string[] {
+  return dedupeUrls([
+    source.last_working_url,
+
+    ...expertLandingUrls(
+      source
+    )
+  ]);
 }

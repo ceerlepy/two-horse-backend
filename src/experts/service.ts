@@ -37,6 +37,7 @@ import {
 } from "./source-repository";
 
 import {
+  expertLandingUrls,
   expertUrlCandidates
 } from "./source-urls";
 
@@ -127,39 +128,9 @@ async function processSource(
   force:boolean
 ):Promise<ExpertRefreshResult> {
   const candidates =
-    expertUrlCandidates(source);
-
-  /*
-   * A previously validated article is NOT a landing page.
-   *
-   * Try it directly first. Only fall back to discovery
-   * when that cached article no longer represents today's
-   * canonical card.
-   */
-  const cachedWorkingUrl =
-    source.last_working_url &&
-    candidates.includes(
-      source.last_working_url
-    )
-      ? source.last_working_url
-      : null;
-
-  const landingUrls =
-    candidates.filter(
-      url =>
-        url !== cachedWorkingUrl
+    expertUrlCandidates(
+      source
     );
-
-  await recordExpertRefreshTrace(
-    env,
-    source.source_key,
-    "PROCESS_START",
-    cachedWorkingUrl,
-    {
-      cachedWorkingUrl,
-      landingUrls
-    }
-  );
 
 
   if (!candidates.length) {
@@ -186,7 +157,133 @@ async function processSource(
     );
 
 
+  /*
+   * Durable semantic entry/current-page URLs.
+   *
+   * Dynamically discovered daily articles are not part
+   * of this list.
+   */
+  let landingUrls =
+    expertLandingUrls(
+      source
+    );
+
+
+  const storedWorkingUrl =
+    source.last_working_url &&
+    candidates.includes(
+      source.last_working_url
+    )
+      ? source.last_working_url
+      : null;
+
+
+  const cachedIsLanding =
+    Boolean(
+      storedWorkingUrl &&
+      landingUrls.includes(
+        storedWorkingUrl
+      )
+    );
+
+
+  const currentTurkeyDate =
+    turkeyDate();
+
+
+  let lastSuccessDate:
+    string | null = null;
+
+
+  if (source.last_success_at) {
+    const parsedSuccess =
+      new Date(
+        source.last_success_at
+      );
+
+
+    if (
+      !Number.isNaN(
+        parsedSuccess.getTime()
+      )
+    ) {
+      lastSuccessDate =
+        turkeyDate(
+          parsedSuccess
+        );
+    }
+  }
+
+
+  const workingSucceededToday =
+    lastSuccessDate ===
+    currentTurkeyDate;
+
+
+  /*
+   * Daily discovered article:
+   *
+   * - current-date rows exist OR it succeeded today:
+   *   same-day cache/recovery is allowed.
+   *
+   * - new Turkey date with no current rows:
+   *   yesterday's article is skipped completely.
+   *
+   * Stable landing/current page:
+   *
+   * - same URL may remain valid across dates.
+   */
+  const cachedWorkingUrl =
+    storedWorkingUrl &&
+    (
+      cachedIsLanding ||
+      currentRowsExist ||
+      workingSucceededToday
+    )
+      ? storedWorkingUrl
+      : null;
+
+
+  const staleArticleSkipped =
+    storedWorkingUrl &&
+    !cachedWorkingUrl
+      ? storedWorkingUrl
+      : null;
+
+
+  await recordExpertRefreshTrace(
+    env,
+    source.source_key,
+    "PROCESS_START",
+    cachedWorkingUrl,
+    {
+      cachedWorkingUrl,
+      cachedIsLanding,
+      staleArticleSkipped,
+      currentRowsExist,
+      lastSuccessDate,
+      currentTurkeyDate,
+      landingUrls
+    }
+  );
+
+
   const attempts:any[] = [];
+
+
+  if (staleArticleSkipped) {
+    attempts.push({
+      url:
+        staleArticleSkipped,
+
+      outcome:
+        "STALE_DAILY_ARTICLE_SKIPPED",
+
+      aiInvoked:
+        false
+    });
+  }
+
 
   let hadSemanticSuccess = false;
   let lastError:unknown = null;
@@ -207,130 +304,223 @@ async function processSource(
       await recordExpertRefreshTrace(
         env,
         source.source_key,
-        "CACHED_EXTRACTION_START",
+        "CACHED_CHECK_START",
         cachedWorkingUrl
       );
 
+
+      /*
+       * COST GATE
+       * =========
+       *
+       * Cheap HTTP fingerprint always happens before
+       * repeat semantic AI when cache reuse is eligible.
+       *
+       * Stable landing/current pages include hrefs in the
+       * fingerprint.
+       *
+       * Daily articles use editorial visible text only.
+       */
       const fingerprint =
         await expertHttpFingerprint(
-          cachedWorkingUrl
-        );
-
-      const extracted =
-        await extractExperts(
-          env,
           cachedWorkingUrl,
-          source.source_name
+          {
+            includeLinks:
+              cachedIsLanding
+          }
         );
 
-      hadSemanticSuccess = true;
 
-      const rawPicks =
-        extracted.extraction.picks;
+      const fingerprintMatches =
+        Boolean(
+          !force &&
+          fingerprint &&
+          source.content_hash &&
+          source.content_hash ===
+            fingerprint.hash
+        );
 
-      await recordExpertRefreshTrace(
-        env,
-        source.source_key,
-        "CACHED_EXTRACTION_RESULT",
-        cachedWorkingUrl,
-        {
-          extractionMethod:
-            extracted.method,
-          extracted:
-            rawPicks.length,
-          diagnostics:
-            extracted.diagnostics
-        }
-      );
 
-      if (!rawPicks.length) {
+      if (
+        fingerprintMatches &&
+        currentRowsExist
+      ) {
+        await recordExpertRefreshTrace(
+          env,
+          source.source_key,
+          "CACHED_UNCHANGED",
+          cachedWorkingUrl,
+          {
+            aiInvoked:
+              false,
+
+            fingerprintMatched:
+              true,
+
+            currentRowsExist:
+              true
+          }
+        );
+
+
+        return {
+          source:
+            source.source_key,
+
+          status:
+            "unchanged",
+
+          count:
+            0,
+
+          workingUrl:
+            cachedWorkingUrl,
+
+          attempts
+        } as ExpertRefreshResult;
+      }
+
+
+      if (
+        fingerprintMatches &&
+        !currentRowsExist &&
+        cachedIsLanding
+      ) {
+        /*
+         * Stable page is unchanged and there are no rows
+         * for today's card.
+         *
+         * Re-running semantic AI over identical content
+         * cannot create a new card.
+         *
+         * Skip this unchanged entry and allow alternative
+         * landing URLs/discovery candidates to continue.
+         */
         attempts.push({
           url:
             cachedWorkingUrl,
 
-          acquisition:
-            extracted.method,
-
-          extracted:0,
-          validated:0,
-
           outcome:
-            "CACHED_NO_CURRENT_CARD"
+            "CACHED_STABLE_UNCHANGED_SKIP_AI",
+
+          aiInvoked:
+            false,
+
+          fingerprintMatched:
+            true
         });
-      } else {
-        const validPicks =
-          await validateExpertPicks(
-            env,
-            rawPicks
-          );
+
 
         await recordExpertRefreshTrace(
           env,
           source.source_key,
-          "CACHED_VALIDATION_RESULT",
+          "CACHED_STABLE_UNCHANGED",
           cachedWorkingUrl,
           {
-            extracted:
-              rawPicks.length,
-            validated:
-              validPicks.length,
-            extractionMethod:
-              extracted.method
+            aiInvoked:
+              false,
+
+            fingerprintMatched:
+              true,
+
+            currentRowsExist:
+              false
           }
         );
 
-        attempts.push({
-          url:
-            cachedWorkingUrl,
 
-          acquisition:
-            extracted.method,
+        landingUrls =
+          landingUrls.filter(
+            url =>
+              url !==
+              cachedWorkingUrl
+          );
 
-          extracted:
-            rawPicks.length,
-
-          validated:
-            validPicks.length,
-
-          outcome:
-            validPicks.length
-              ? "CACHED_CANONICAL_MATCH"
-              : "CACHED_NO_CANONICAL_MATCH"
-        });
-
+      } else {
         /*
-         * STRICT GATE:
-         * only canonical TJK matches may be persisted.
+         * Content changed, force refresh was explicitly
+         * requested, or cheap fingerprinting was not
+         * available.
+         *
+         * Semantic extraction is now justified.
          */
-        if (validPicks.length) {
-          const contentHash =
-            fingerprint?.hash ??
-            await extractionHash(
+        const extracted =
+          await extractExperts(
+            env,
+            cachedWorkingUrl,
+            source.source_name
+          );
+
+
+        hadSemanticSuccess =
+          true;
+
+
+        const rawPicks =
+          extracted.extraction.picks;
+
+
+        await recordExpertRefreshTrace(
+          env,
+          source.source_key,
+          "CACHED_EXTRACTION_RESULT",
+          cachedWorkingUrl,
+          {
+            extractionMethod:
+              extracted.method,
+
+            extractionStatus:
+              extracted.status,
+
+            extracted:
+              rawPicks.length,
+
+            diagnostics:
+              extracted.diagnostics
+          }
+        );
+
+
+        if (!rawPicks.length) {
+          attempts.push({
+            url:
+              cachedWorkingUrl,
+
+            acquisition:
+              extracted.method,
+
+            extractionStatus:
+              extracted.status,
+
+            extracted:
+              0,
+
+            validated:
+              0,
+
+            outcome:
+              "CACHED_NO_CURRENT_CARD"
+          });
+
+        } else {
+          const validPicks =
+            await validateExpertPicks(
+              env,
               rawPicks
             );
 
-          await persistExpertPicks(
-            env,
-            source.source_key,
-            contentHash,
-            validPicks
-          );
 
-          await markExpertHealthy(
+          await recordExpertRefreshTrace(
             env,
             source.source_key,
-            contentHash,
+            "CACHED_VALIDATION_RESULT",
             cachedWorkingUrl,
             {
-              /*
-               * Preserve ORIGINAL discovery provenance.
-               * A cache hit is reuse, not discovery.
-               */
-              discoveredFromUrl:
-                null,
+              extracted:
+                rawPicks.length,
 
-              discoveryMethod:
-                null,
+              validated:
+                validPicks.length,
 
               extractionMethod:
                 extracted.method
@@ -338,53 +528,114 @@ async function processSource(
           );
 
 
-          await recordExpertRefreshTrace(
-            env,
-            source.source_key,
-            "SUCCESS",
-            cachedWorkingUrl,
-            {
-              workingUrl:
-                cachedWorkingUrl,
+          attempts.push({
+            url:
+              cachedWorkingUrl,
 
-              persisted:
+            acquisition:
+              extracted.method,
+
+            extracted:
+              rawPicks.length,
+
+            validated:
+              validPicks.length,
+
+            outcome:
+              validPicks.length
+                ? "CACHED_CANONICAL_MATCH"
+                : "CACHED_NO_CANONICAL_MATCH"
+          });
+
+
+          if (validPicks.length) {
+            const contentHash =
+              fingerprint?.hash ??
+              await extractionHash(
+                rawPicks
+              );
+
+
+            await persistExpertPicks(
+              env,
+              source.source_key,
+              contentHash,
+              validPicks
+            );
+
+
+            await markExpertHealthy(
+              env,
+              source.source_key,
+              contentHash,
+              cachedWorkingUrl,
+              {
+                /*
+                 * Cache reuse is not discovery.
+                 * Preserve original successful provenance.
+                 */
+                discoveredFromUrl:
+                  null,
+
+                discoveryMethod:
+                  null,
+
+                extractionMethod:
+                  extracted.method
+              }
+            );
+
+
+            await recordExpertRefreshTrace(
+              env,
+              source.source_key,
+              "SUCCESS",
+              cachedWorkingUrl,
+              {
+                workingUrl:
+                  cachedWorkingUrl,
+
+                persisted:
+                  validPicks.length,
+
+                discoveryMethod:
+                  "preserved-from-original-discovery",
+
+                extractionMethod:
+                  extracted.method,
+
+                cached:
+                  true
+              }
+            );
+
+
+            return {
+              source:
+                source.source_key,
+
+              status:
+                "updated",
+
+              count:
                 validPicks.length,
-
-              discoveryMethod:
-                "preserved-from-original-discovery",
 
               extractionMethod:
                 extracted.method,
 
-              cached:
-                true
-            }
-          );
+              workingUrl:
+                cachedWorkingUrl,
 
-
-          return {
-            source:
-              source.source_key,
-
-            status:
-              "updated",
-
-            count:
-              validPicks.length,
-
-            extractionMethod:
-              extracted.method,
-
-            workingUrl:
-              cachedWorkingUrl,
-
-            attempts
-          } as ExpertRefreshResult;
+              attempts
+            } as ExpertRefreshResult;
+          }
         }
       }
 
     } catch (error) {
-      lastError = error;
+      lastError =
+        error;
+
 
       attempts.push({
         url:
@@ -394,12 +645,15 @@ async function processSource(
           "CACHED_ACQUISITION_OR_EXTRACTION_FAILED",
 
         error:
-          errorMessage(error)
+          errorMessage(
+            error
+          )
       });
 
+
       /*
-       * Cached article failed/stale.
-       * Continue into normal landing discovery.
+       * Cache is only an optimization.
+       * Normal discovery remains authoritative fallback.
        */
     }
   }

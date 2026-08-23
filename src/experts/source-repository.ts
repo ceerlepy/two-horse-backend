@@ -18,6 +18,7 @@ export async function activeExpertSources(
         last_working_url,
         content_hash,
         last_checked_at,
+        last_success_at,
         source_type,
         base_weight
       FROM source_registry

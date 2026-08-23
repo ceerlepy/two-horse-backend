@@ -8,6 +8,12 @@ export interface ExpertSource {
   content_hash: string | null;
   last_checked_at: string | null;
 
+  /*
+   * Optional for backwards-compatible mocks/tests.
+   * Repository reads this field in production.
+   */
+  last_success_at?: string | null;
+
   source_type: string;
   base_weight: number;
 }
