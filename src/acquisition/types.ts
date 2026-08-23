@@ -36,6 +36,7 @@ export interface SemanticJsonResult<T> {
 
   method:
     | "cf-json-url"
+    | "cf-json-html"
     | "cf-json-scrape-html"
     | "cf-json-content-html";
 
