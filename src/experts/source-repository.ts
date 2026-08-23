@@ -43,6 +43,19 @@ export async function recordExpertRefreshTrace(
   const now =
     new Date().toISOString();
 
+
+  /*
+   * PROCESS_START opens a NEW refresh execution.
+   *
+   * Every later phase keeps that execution's original
+   * start timestamp.
+   */
+  const effectiveStartedAt =
+    phase === "PROCESS_START"
+      ? now
+      : startedAt;
+
+
   await env.DB.prepare(`
     INSERT INTO expert_source_refresh_trace (
       source_key,
@@ -59,21 +72,32 @@ export async function recordExpertRefreshTrace(
       phase = excluded.phase,
       current_url = excluded.current_url,
       details_json = excluded.details_json,
+
       started_at =
-        COALESCE(
-          expert_source_refresh_trace.started_at,
-          excluded.started_at
-        ),
-      updated_at = excluded.updated_at
+        CASE
+          WHEN excluded.phase = 'PROCESS_START'
+            THEN excluded.started_at
+
+          ELSE
+            COALESCE(
+              expert_source_refresh_trace.started_at,
+              excluded.started_at
+            )
+        END,
+
+      updated_at =
+        excluded.updated_at
   `)
     .bind(
       sourceKey,
       phase,
       currentUrl,
+
       details === null
         ? null
         : JSON.stringify(details),
-      startedAt,
+
+      effectiveStartedAt,
       now
     )
     .run();

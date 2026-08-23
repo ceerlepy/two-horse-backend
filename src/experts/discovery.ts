@@ -231,7 +231,7 @@ function dedupeCandidates(
    * Keep the AI input bounded, but deliberately generous.
    * This is NOT semantic filtering.
    */
-  return result.slice(0,250);
+  return result.slice(0,480);
 }
 
 
@@ -604,11 +604,14 @@ async function selectCurrentArticlesWithAi(
   if (!candidates.length) {
     return {
       urls: [],
+
       method:
         `cf-${stage}-candidate-ai`,
+
       diagnostics: {
         candidates:0,
-        selected:0
+        selected:0,
+        batches:[]
       }
     };
   }
@@ -626,12 +629,14 @@ ${cities.join(", ")}
 Görevin yalnızca bu candidate linkler arasından BUGÜNÜN Türkiye at yarışı tahmin, analiz veya uzman yorum içeriğine götüren GERÇEK ARTICLE URL'lerini seçmektir.
 
 Kurallar:
-- Sana verilen listede olmayan URL üretme.
+- Sana verilen candidate listesinde olmayan URL üretme.
 - Eski tarihli içerikleri seçme.
 - Yurt dışı yarışlarını seçme.
 - Genel haber, camia haberi, kategori, tag, uzman listesi, ana sayfa, reklam veya navigasyon linkini seçme.
 - Bir article birden fazla bugünkü TJK şehrini kapsayabilir.
-- URL slug'ı bozuk veya tarih formatı alışılmadık olabilir; anchor text ve URL'yi birlikte değerlendir.
+- Başlıkta açık tarih bulunmaması tek başına eleme sebebi değildir.
+- URL slug'ı bozuk veya tarih formatı alışılmadık olabilir.
+- Anchor text ile URL'yi birlikte değerlendir.
 - Emin olmadığın linki seçme.
 - Hiçbiri uygun değilse urls=[] döndür.
 
@@ -640,81 +645,165 @@ Yalnızca gerçek current-card article URL'lerini döndür.
 
 
   /*
-   * SCRAPE/CONTENT already acquired the source page.
-   *
-   * candidateHtml() is DATA, not a URL.
-   * Send the compact candidate document directly to
-   * Cloudflare JSON through its native { html } input.
+   * Preserve all deterministic DOM candidates but feed
+   * them into semantic AI in bounded chunks.
    */
-  const result =
-    await extractSemanticJsonFromHtml<any>(
-      env,
+  const BATCH_SIZE =
+    120;
 
-      candidateHtml(
-        candidates
-      ),
 
-      prompt,
+  const selectedUrls:
+    string[] = [];
 
-      {
-        type:
-          "json_schema",
 
-        json_schema:
-          discoverySchema
+  const selectedSeen =
+    new Set<string>();
+
+
+  const batches:any[] = [];
+
+
+  for (
+    let offset = 0;
+    offset < candidates.length;
+    offset += BATCH_SIZE
+  ) {
+    const batch =
+      candidates.slice(
+        offset,
+        offset + BATCH_SIZE
+      );
+
+
+    try {
+      const result =
+        await extractSemanticJsonFromHtml<any>(
+          env,
+
+          candidateHtml(
+            batch
+          ),
+
+          prompt,
+
+          {
+            type:
+              "json_schema",
+
+            json_schema:
+              discoverySchema
+          }
+        );
+
+
+      const proposed =
+        normalizeSelectedUrls(
+          landingUrl,
+          result.value?.urls
+        );
+
+
+      /*
+       * Hard hallucination guard:
+       * a selected URL must literally belong to the
+       * DOM-derived batch AI just received.
+       */
+      const candidateSet =
+        new Set(
+          batch
+            .map(
+              item =>
+                normalizeUrl(
+                  landingUrl,
+                  item.url
+                )
+            )
+            .filter(
+              (
+                value
+              ): value is string =>
+                Boolean(value)
+            )
+        );
+
+
+      const verified =
+        proposed.filter(
+          url =>
+            candidateSet.has(url)
+        );
+
+
+      for (const url of verified) {
+        if (
+          selectedSeen.has(url)
+        ) {
+          continue;
+        }
+
+        selectedSeen.add(url);
+        selectedUrls.push(url);
       }
-    );
 
 
-  const urls =
-    normalizeSelectedUrls(
-      landingUrl,
-      result.value?.urls
-    );
+      batches.push({
+        offset,
 
+        candidates:
+          batch.length,
 
-  /*
-   * Defense against model hallucination:
-   * selected URL must literally exist in candidate set.
-   */
-  const candidateSet =
-    new Set(
-      candidates.map(
-        item =>
-          normalizeUrl(
-            landingUrl,
-            item.url
-          )
-      )
-    );
+        selected:
+          verified.length,
 
+        selectedUrls:
+          verified,
 
-  const verified =
-    urls.filter(
-      url =>
-        candidateSet.has(url)
-    );
+        semantic:
+          result.diagnostics
+      });
+
+    } catch (error) {
+      batches.push({
+        offset,
+
+        candidates:
+          batch.length,
+
+        selected:0,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error)
+      });
+    }
+  }
 
 
   return {
     urls:
-      verified,
+      selectedUrls.slice(
+        0,
+        12
+      ),
 
     method:
-      `cf-${stage}-candidate-ai:${result.method}`,
+      `cf-${stage}-candidate-ai:cf-json-html`,
 
     diagnostics: {
       candidates:
         candidates.length,
 
       selected:
-        verified.length,
+        selectedUrls.length,
 
       selectedUrls:
-        verified,
+        selectedUrls.slice(
+          0,
+          12
+        ),
 
-      semantic:
-        result.diagnostics
+      batches
     }
   };
 }

@@ -261,7 +261,9 @@ async function processSource(
           extractionMethod:
             extracted.method,
           extracted:
-            rawPicks.length
+            rawPicks.length,
+          diagnostics:
+            extracted.diagnostics
         }
       );
 
@@ -477,7 +479,9 @@ async function processSource(
           discovered:
             discovery.urls.length,
           urls:
-            discovery.urls
+            discovery.urls,
+          diagnostics:
+            discovery.diagnostics
         }
       );
 
@@ -492,7 +496,10 @@ async function processSource(
           discovery.method,
 
         discovered:
-          discovery.urls.length
+          discovery.urls.length,
+
+        diagnostics:
+          discovery.diagnostics
       });
 
 
@@ -703,7 +710,9 @@ async function processSource(
           extracted:
             rawPicks.length,
           provenance:
-            provenance ?? null
+            provenance ?? null,
+          diagnostics:
+            extracted.diagnostics
         }
       );
 
@@ -718,7 +727,10 @@ async function processSource(
           validated:0,
 
           outcome:
-            "NO_CURRENT_CARD"
+            "NO_CURRENT_CARD",
+
+          diagnostics:
+            extracted.diagnostics
         });
 
         /*
