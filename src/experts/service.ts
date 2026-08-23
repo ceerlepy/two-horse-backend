@@ -499,7 +499,7 @@ async function processSource(
               0,
 
             outcome:
-              "CACHED_NO_CURRENT_CARD"
+              "CACHED_SEMANTIC_EMPTY"
           });
 
         } else {
@@ -931,10 +931,16 @@ async function processSource(
         {
           method:
             extracted.method,
+
+          extractionStatus:
+            extracted.status,
+
           extracted:
             rawPicks.length,
+
           provenance:
             provenance ?? null,
+
           diagnostics:
             extracted.diagnostics
         }
@@ -951,7 +957,7 @@ async function processSource(
           validated:0,
 
           outcome:
-            "NO_CURRENT_CARD",
+            "SEMANTIC_EMPTY",
 
           diagnostics:
             extracted.diagnostics
@@ -1152,6 +1158,35 @@ async function processSource(
   }
 
 
+  const terminalReason =
+    attempts.some(
+      attempt =>
+        attempt.outcome ===
+          "SEMANTIC_EMPTY" ||
+        attempt.outcome ===
+          "CACHED_SEMANTIC_EMPTY"
+    )
+      ? "semantic-empty"
+
+      : attempts.some(
+          attempt =>
+            attempt.outcome ===
+              "NO_CANONICAL_MATCH" ||
+            attempt.outcome ===
+              "CACHED_NO_CANONICAL_MATCH"
+        )
+        ? "no-canonical-match"
+
+        : attempts.some(
+            attempt =>
+              attempt.outcome ===
+                "STALE_DAILY_ARTICLE_SKIPPED"
+          )
+          ? "no-current-daily-article"
+
+          : "no-current-card";
+
+
   if (hadSemanticSuccess) {
     await recordExpertRefreshTrace(
       env,
@@ -1159,6 +1194,9 @@ async function processSource(
       "NO_CURRENT_CARD",
       null,
       {
+        reason:
+          terminalReason,
+
         attempts
       }
     );
@@ -1341,17 +1379,6 @@ export async function refreshExpertSource(
         source,
         true
       );
-
-    await recordExpertRefreshTrace(
-      env,
-      key,
-      "REFRESH_COMPLETE",
-      (result as any).workingUrl ?? null,
-      {
-        result
-      },
-      startedAt
-    );
 
     return {
       source:

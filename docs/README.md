@@ -171,3 +171,30 @@ SOURCE_AND_DATABASE_ATLAS.md regenerate edilir.
 
 Production acceptance değişirse:
 tjk-production-validation.md güncellenir.
+
+
+---
+
+# Expert acquisition architecture
+
+## EXPERT_ACQUISITION_ARCHITECTURE.md
+
+Expert/comment source production architecture makalesidir.
+
+Şunları tanımlar:
+
+- discovery ve extraction responsibility boundary;
+- SCRAPE DOM candidate discovery;
+- semantic article selection;
+- compact raw AI schema;
+- coupon-number exclusion;
+- semantic-empty ve technical-failure ayrımı;
+- TJK canonical validation;
+- date-aware daily-article cache;
+- stable-page cache;
+- AI/RTN cost invariants;
+- provenance semantics;
+- production debugging order.
+
+Expert-source acquisition veya cache davranışı değişirse bu belge ve
+REFRESH_POLICY.md birlikte güncellenmelidir.
