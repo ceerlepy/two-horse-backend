@@ -33,7 +33,6 @@ import {
   markExpertChecked,
   markExpertFailure,
   markExpertHealthy,
-  markExpertProvenance,
   recordExpertRefreshTrace
 } from "./source-repository";
 
@@ -226,29 +225,6 @@ async function processSource(
 
       hadSemanticSuccess = true;
 
-      /*
-       * Extraction itself succeeded, so provenance is
-       * already useful even if today's canonical card no
-       * longer matches this article.
-       */
-      await markExpertProvenance(
-        env,
-        source.source_key,
-        {
-          workingUrl:
-            cachedWorkingUrl,
-
-          discoveredFromUrl:
-            cachedWorkingUrl,
-
-          discoveryMethod:
-            "cached-working-url",
-
-          extractionMethod:
-            extracted.method
-        }
-      );
-
       const rawPicks =
         extracted.extraction.picks;
 
@@ -346,16 +322,45 @@ async function processSource(
             contentHash,
             cachedWorkingUrl,
             {
+              /*
+               * Preserve ORIGINAL discovery provenance.
+               * A cache hit is reuse, not discovery.
+               */
               discoveredFromUrl:
-                cachedWorkingUrl,
+                null,
 
               discoveryMethod:
-                "cached-working-url",
+                null,
 
               extractionMethod:
                 extracted.method
             }
           );
+
+
+          await recordExpertRefreshTrace(
+            env,
+            source.source_key,
+            "SUCCESS",
+            cachedWorkingUrl,
+            {
+              workingUrl:
+                cachedWorkingUrl,
+
+              persisted:
+                validPicks.length,
+
+              discoveryMethod:
+                "preserved-from-original-discovery",
+
+              extractionMethod:
+                extracted.method,
+
+              cached:
+                true
+            }
+          );
+
 
           return {
             source:
@@ -652,48 +657,13 @@ async function processSource(
         landingUrls.includes(url);
 
       /*
-       * Always persist HOW the successfully-read URL
-       * reached extraction.
+       * Attempt-level provenance belongs to refreshTrace.
        *
-       * discovered article:
-       *   landingUrl + actual discovery method
-       *
-       * direct/fallback landing URL:
-       *   the URL itself + explicit direct-fallback marker
-       *
-       * This is operational provenance only.
-       * Canonical validation below is still mandatory
-       * before prediction persistence.
+       * Durable source_registry last_* fields are written
+       * ONLY after CURRENT canonical validation succeeds.
+       * This prevents empty or invalid reads from replacing
+       * the last verified source provenance.
        */
-      await markExpertProvenance(
-        env,
-        source.source_key,
-        {
-          workingUrl:
-            url === source.last_working_url
-              ? url
-              : null,
-
-          discoveredFromUrl:
-            provenance?.landingUrl ??
-            (
-              isLandingUrl
-                ? url
-                : source.homepage_url
-            ),
-
-          discoveryMethod:
-            provenance?.method ??
-            (
-              isLandingUrl
-                ? "direct-landing-fallback"
-                : "direct-article-fallback"
-            ),
-
-          extractionMethod:
-            extracted.method
-        }
-      );
 
 
       const rawPicks =
@@ -809,6 +779,24 @@ async function processSource(
        * Only a URL that produced CURRENT canonical picks
        * becomes last_working_url.
        */
+      const successfulDiscoveredFromUrl =
+        provenance?.landingUrl ??
+        (
+          isLandingUrl
+            ? url
+            : null
+        );
+
+
+      const successfulDiscoveryMethod =
+        provenance?.method ??
+        (
+          isLandingUrl
+            ? "direct-landing"
+            : null
+        );
+
+
       await markExpertHealthy(
         env,
         source.source_key,
@@ -816,15 +804,46 @@ async function processSource(
         url,
         {
           discoveredFromUrl:
-            provenance?.landingUrl ??
-            null,
+            successfulDiscoveredFromUrl,
 
           discoveryMethod:
-            provenance?.method ??
-            null,
+            successfulDiscoveryMethod,
 
           extractionMethod:
             extracted.method
+        }
+      );
+
+
+      await recordExpertRefreshTrace(
+        env,
+        source.source_key,
+        "SUCCESS",
+        url,
+        {
+          workingUrl:
+            url,
+
+          discoveredFromUrl:
+            successfulDiscoveredFromUrl,
+
+          discoveryMethod:
+            successfulDiscoveryMethod,
+
+          extractionMethod:
+            extracted.method,
+
+          extracted:
+            rawPicks.length,
+
+          validated:
+            validPicks.length,
+
+          persisted:
+            validPicks.length,
+
+          cached:
+            false
         }
       );
 
