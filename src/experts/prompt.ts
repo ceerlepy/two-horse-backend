@@ -25,6 +25,53 @@ Yalnız HEDEF KARTA ait gerçek expert yarış analizlerini kullan.
 
 Başka güne veya yabancı yarışa açıkça ait içeriği çıkarma.
 
+
+ANA SEÇİM ZORUNLU KURALI
+
+Bir gerçek yarış analiz paragrafında ana konu yapılan at MUTLAKA selections[] içinde bulunmalıdır.
+
+Örnek yapı:
+
+"... 9.Koşu ...; (1) AT ADI ... olumlu değerlendirme ... Sırasıyla rakip gördüğümüz isimler: 9-4-5"
+
+Burada:
+
+(1) AT ADI = ANA SEÇİM
+
+9-4-5 = RAKİPLER
+
+Rakip listesini gördüğün halde ana atı atlama.
+
+Bir race object'i gerçek analiz paragrafından üretiyorsan ve paragrafta "(N) AT ADI" biçiminde ana safkan varsa selections=[] OLAMAZ.
+
+Ana safkan için özel "favori" veya "banko" kelimesi bulunması şart değildir.
+
+Aşağıdaki doğal olumlu yorumlar ana selection'dır:
+
+- kazanmaya yakındır
+- birincilikle tanışabilir
+- önde gelen isimdir
+- ilk şansa sahiptir
+- ilk şanslı isimdir
+- rakiplerini geride bırakabilir
+- farklı sonuç elde edebilecek güçtedir
+- gerçek gücünü yarışına yansıtabilir
+- birinciliğin en güçlü adayıdır
+- birinciliğe çok yakındır
+- kazanmasını bekliyoruz
+- fotoyu önde geçmesini bekliyoruz
+- rövanşı alacaktır
+- rakiplerinin bir adım önündedir
+- ilk atımızdır
+- öncelikli şans verdiğimiz isimdir
+
+Pozitif ana yorum var fakat metinde açıkça favorite/banko/star/surprise/avoid sınıfı yoksa:
+
+labels=["strong"]
+
+kullan.
+
+
 OUTPUT YAPISI
 
 Aynı city + raceNumber için city ve raceNumber değerlerini her atta tekrar etme.
@@ -37,6 +84,7 @@ city
 raceNumber
 selections
 numberGroups
+
 
 SELECTIONS
 
@@ -57,6 +105,7 @@ comment yalnız aynı ata ait kısa kaynak ifadesi olsun.
 
 Uzun paragrafı kopyalama.
 
+
 LABELS
 
 Yalnız:
@@ -71,30 +120,73 @@ avoid
 
 kullan.
 
+
 favorite:
-favori, en şanslı veya en güçlü aday.
+
+Yalnız kaynak açıkça:
+
+favori
+en şanslı
+en güçlü aday
+
+ve eşdeğer çok güçlü favori dili kullanıyorsa.
+
+Sadece bir paragrafın ana atı olmak otomatik favorite değildir.
+
 
 banko:
-banko, tek veya açık biçimde tek önerilen.
+
+Yalnız kaynak açıkça:
+
+banko
+tek
+
+veya tartışmasız biçimde tek önerilen anlamı kullanıyorsa.
+
 
 strong:
-ilk şans, güçlü, birinciliğe yakın, kazanmaya yakın,
-kazanmasını bekliyoruz, rövanşı alacaktır, ilk atımızdır
-veya açık ana pozitif expert seçimidir.
+
+Açık pozitif ana seçim.
+
+Özellikle:
+
+ilk şans
+güçlü
+birinciliğe yakın
+kazanmaya yakın
+birincilikle tanışabilir
+önde gelen isimdir
+rakiplerini geride bırakabilir
+farklı sonuç elde edebilecek güçtedir
+kazanmasını bekliyoruz
+rövanşı alacaktır
+ilk atımızdır
+
+gibi ifadeler strong'dur.
+
 
 star:
-kaynak açıkça yıldız veya özel ana seçim diyorsa.
+
+Kaynak açıkça yıldız veya özel ana seçim diyorsa.
+
 
 rival:
-rakip, ikinci şans veya sonraki şans.
+
+Rakip, ikinci şans veya sonraki şans.
+
 
 surprise:
-sürpriz, bomba veya tatlı kaçak.
+
+Sürpriz, bomba veya tatlı kaçak.
+
 
 avoid:
-açıkça önerilmeyen veya elenen.
+
+Açıkça önerilmeyen veya elenen.
+
 
 Bir selection birden fazla label alabilir.
+
 
 NUMBER GROUPS
 
@@ -113,17 +205,8 @@ Bu birleştirme yalnız OUTPUT TRANSPORT optimizasyonudur.
 
 6, 1 ve 8 uygulamada ayrı ayrı at seçimlerine dönüştürülecektir.
 
-Benzer açık numara listelerinde appropriate label kullan:
-
-favorite
-banko
-strong
-star
-rival
-surprise
-avoid
-
 Numara listesinde at adı yazmıyorsa isim uydurma.
+
 
 KUPON / ALTILI BLOKLARI TAMAMEN IGNORE ET
 
@@ -149,6 +232,7 @@ buradaki:
 1 = raceNumber değildir.
 
 5,6,1,4 = otomatik expert seçimleri değildir.
+
 
 IDENTITY
 

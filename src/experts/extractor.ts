@@ -38,6 +38,11 @@ import {
   extractExpertJsonWithWorkersAi
 } from "./workers-ai-extraction";
 
+import {
+  inspectLiderformCompleteness,
+  isLiderformSourceName
+} from "./liderform-completeness";
+
 
 export interface ExtractedExperts {
   extraction:
@@ -301,6 +306,12 @@ export async function extractExperts(
     );
 
 
+  const liderformMode =
+    isLiderformSourceName(
+      sourceName
+    );
+
+
   /*
    * Exactly ONE semantic extraction call.
    *
@@ -310,8 +321,46 @@ export async function extractExperts(
     await extractExpertJsonWithWorkersAi(
       env,
       normalized.text,
-      prompt
+      prompt,
+      {
+        requireSelectionPerRace:
+          liderformMode
+      }
     );
+
+
+  const completeness =
+    liderformMode
+      ? inspectLiderformCompleteness(
+          semantic.value,
+          normalized.text,
+          cities
+        )
+      : null;
+
+
+  /*
+   * A structured response can be syntactically perfect yet
+   * semantically partial.
+   *
+   * Liderform is verified to expose one explicit main
+   * horse per analysis paragraph.
+   *
+   * Do not silently accept:
+   *
+   * race + rivals + missing main.
+   */
+  if (
+    completeness &&
+    !completeness.complete
+  ) {
+    throw new Error(
+      "EXPERT_INCOMPLETE_MAIN_SELECTIONS:" +
+      JSON.stringify(
+        completeness
+      )
+    );
+  }
 
 
   return finalizeExtraction(
@@ -344,7 +393,9 @@ export async function extractExperts(
       },
 
       semantic:
-        semantic.diagnostics
+        semantic.diagnostics,
+
+      completeness
     }
   );
 }

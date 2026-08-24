@@ -19,6 +19,12 @@ export const EXPERT_AI_MAX_OUTPUT_TOKENS =
   4096;
 
 
+export interface WorkersAiExpertOptions {
+  requireSelectionPerRace?:
+    boolean;
+}
+
+
 export interface WorkersAiExpertResult {
   value:
     RawExpertExtraction;
@@ -32,6 +38,9 @@ export interface WorkersAiExpertResult {
 
     articleCharacters:
       number;
+
+    requireSelectionPerRace:
+      boolean;
 
     usage:
       unknown;
@@ -67,23 +76,53 @@ function parseJsonString(
 
 
 /*
- * Workers AI JSON Mode can expose the structured result as:
+ * Keep the generic raw schema unchanged for sources whose
+ * publishing contract may differ.
  *
- * { response: <object> }
+ * Liderform's verified "Koşuların analizi" contract has an
+ * explicit main horse in every real analysis paragraph.
  *
- * or, depending on runtime/model typing:
+ * Therefore only Liderform gets:
  *
- * { response: "<json string>" }
- *
- * Keep the normalization in one place.
+ * selections.minItems = 1
  */
+export function expertResponseSchemaFor(
+  options:
+    WorkersAiExpertOptions = {}
+): any {
+  const schema:
+    any =
+    JSON.parse(
+      JSON.stringify(
+        rawExpertSchema
+      )
+    );
+
+
+  if (
+    options.requireSelectionPerRace ===
+    true
+  ) {
+    schema
+      .properties
+      .races
+      .items
+      .properties
+      .selections
+      .minItems = 1;
+  }
+
+
+  return schema;
+}
+
+
 export function parseWorkersAiExpertResponse(
   raw:
     unknown
 ): RawExpertExtraction {
   const envelope =
-    raw as
-      any;
+    raw as any;
 
 
   let value:
@@ -92,8 +131,7 @@ export function parseWorkersAiExpertResponse(
       envelope &&
       typeof envelope ===
         "object" &&
-      "response" in
-        envelope
+      "response" in envelope
     )
       ? envelope.response
       : raw;
@@ -115,21 +153,17 @@ export function parseWorkersAiExpertResponse(
     typeof value !==
       "object" ||
     !Array.isArray(
-      (
-        value as
-          any
-      ).races
+      (value as any).races
     )
   ) {
     throw new Error(
       "WORKERS_AI_INVALID_EXPERT_STRUCTURE:" +
       JSON.stringify(
         value
+      ).slice(
+        0,
+        4000
       )
-        .slice(
-          0,
-          4000
-        )
     );
   }
 
@@ -147,12 +181,21 @@ export async function extractExpertJsonWithWorkersAi(
     string,
 
   extractionPrompt:
-    string
+    string,
+
+  options:
+    WorkersAiExpertOptions = {}
 ): Promise<WorkersAiExpertResult> {
   const model =
     String(
       env.AI_MODEL ??
       DEFAULT_EXPERT_AI_MODEL
+    );
+
+
+  const responseSchema =
+    expertResponseSchemaFor(
+      options
     );
 
 
@@ -168,7 +211,7 @@ export async function extractExpertJsonWithWorkersAi(
               "system",
 
             content:
-              "You extract structured horse-racing expert selections. Return only data matching response_format. Never invent a horse, race or city."
+              "You extract structured horse-racing expert selections. Every explicit main horse in a real analysis paragraph must be preserved. Return only response_format data. Never invent a horse, race or city."
           },
 
           {
@@ -192,26 +235,12 @@ export async function extractExpertJsonWithWorkersAi(
             "json_schema",
 
           json_schema:
-            rawExpertSchema
+            responseSchema
         },
 
-        /*
-         * Browser /json used the same Llama family but its
-         * generated response was observed terminating at a
-         * very small output budget.
-         *
-         * Direct Workers AI lets us control the ceiling.
-         *
-         * Billing follows actual tokens generated; this is
-         * only the maximum allowed response size.
-         */
         max_tokens:
           EXPERT_AI_MAX_OUTPUT_TOKENS,
 
-        /*
-         * Extraction is deterministic classification, not
-         * creative generation.
-         */
         temperature:
           0
       } as any
@@ -232,6 +261,10 @@ export async function extractExpertJsonWithWorkersAi(
 
       articleCharacters:
         articleText.length,
+
+      requireSelectionPerRace:
+        options.requireSelectionPerRace ===
+        true,
 
       usage:
         raw?.usage ??
