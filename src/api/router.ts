@@ -6,6 +6,10 @@ import {
   refreshExpertsIfDue,
   refreshExpertSource
 } from "../experts/service";
+
+import {
+  extractExperts
+} from "../experts/extractor";
 import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
@@ -340,6 +344,433 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    },400);
   }
  }
+
+
+ /*
+  * ADMIN EXPERT EXTRACTION PREVIEW
+  * ===============================
+  *
+  * Purpose:
+  *
+  * Exercise the REAL acquisition + Workers AI extraction
+  * pipeline without going through refresh scheduling.
+  *
+  * This intentionally bypasses the "upcoming race" refresh
+  * gate because it is a diagnostic/preview operation.
+  *
+  * It does NOT:
+  *
+  * - persist expert_predictions
+  * - modify source health
+  * - modify last_working_url
+  * - modify refresh trace
+  *
+  * It DOES invoke the real Workers AI extractor exactly as
+  * production extraction would.
+  */
+ if(
+  url.pathname==="/api/admin/preview-expert-source" &&
+  request.method==="POST"
+ ) {
+  try {
+   const sourceKey =
+    (
+     url.searchParams.get("source") ??
+     ""
+    ).trim();
+
+   if(!sourceKey) {
+    return json({
+     ok:false,
+     error:"EXPERT_SOURCE_REQUIRED"
+    },400);
+   }
+
+
+   const source =
+    await env.DB.prepare(`
+     SELECT
+      source_key,
+      source_name,
+      last_discovered_article_url,
+      last_working_url
+     FROM source_registry
+     WHERE source_key = ?
+     LIMIT 1
+    `)
+     .bind(sourceKey)
+     .first<any>();
+
+
+   if(!source) {
+    return json({
+     ok:false,
+     error:"EXPERT_SOURCE_NOT_FOUND"
+    },404);
+   }
+
+
+   /*
+    * Prefer the most recently discovered article.
+    *
+    * last_working_url is only fallback because old partial
+    * data may still have marked the same URL as working.
+    */
+   const articleUrl =
+    String(
+     source.last_discovered_article_url ??
+     source.last_working_url ??
+     ""
+    ).trim();
+
+
+   if(!articleUrl) {
+    return json({
+     ok:false,
+     error:"EXPERT_ARTICLE_URL_NOT_AVAILABLE",
+     source:sourceKey
+    },409);
+   }
+
+
+   /*
+    * IMPORTANT:
+    *
+    * Direct extractor call.
+    *
+    * No refresh service -> no upcoming-race scheduling gate.
+    * No persistence service -> DB predictions remain untouched.
+    */
+   const extracted =
+    await extractExperts(
+     env,
+     articleUrl,
+     String(source.source_name)
+    );
+
+
+   const picks =
+    extracted.extraction.picks;
+
+
+   const countFlag =
+    (
+     key:
+      "isFavorite" |
+      "isBanko" |
+      "isStrong" |
+      "isStar" |
+      "isRival" |
+      "isSurprise" |
+      "isAvoid"
+    ) =>
+     picks.filter(
+      pick =>
+       Boolean(
+        pick[key]
+       )
+     ).length;
+
+
+   const isMain =
+    (
+     pick:
+      any
+    ) =>
+     Boolean(
+      pick.isFavorite ||
+      pick.isBanko ||
+      pick.isStrong ||
+      pick.isStar ||
+      pick.isSurprise
+     );
+
+
+   const mainPicks =
+    picks
+     .filter(isMain)
+     .map(
+      pick => ({
+       city:
+        pick.city,
+
+       raceNumber:
+        pick.raceNumber,
+
+       horseNumber:
+        pick.horseNumber,
+
+       horseName:
+        pick.horseName,
+
+       comment:
+        pick.comment,
+
+       labels: [
+        pick.isFavorite
+         ? "favorite"
+         : null,
+
+        pick.isBanko
+         ? "banko"
+         : null,
+
+        pick.isStrong
+         ? "strong"
+         : null,
+
+        pick.isStar
+         ? "star"
+         : null,
+
+        pick.isSurprise
+         ? "surprise"
+         : null
+       ].filter(Boolean),
+
+       confidence:
+        pick.confidence
+      })
+     )
+     .sort(
+      (a,b) =>
+       String(a.city)
+        .localeCompare(
+         String(b.city),
+         "tr"
+        ) ||
+       Number(a.raceNumber) -
+        Number(b.raceNumber)
+     );
+
+
+   const rivalsByRace =
+    new Map<
+     string,
+     {
+      city:string;
+      raceNumber:number;
+      horseNumbers:number[];
+     }
+    >();
+
+
+   for(
+    const pick of
+    picks
+   ) {
+    if(!pick.isRival) {
+     continue;
+    }
+
+
+    const key =
+     [
+      pick.city,
+      pick.raceNumber
+     ].join("|");
+
+
+    let row =
+     rivalsByRace.get(
+      key
+     );
+
+
+    if(!row) {
+     row = {
+      city:
+       pick.city,
+
+      raceNumber:
+       pick.raceNumber,
+
+      horseNumbers:
+       []
+     };
+
+     rivalsByRace.set(
+      key,
+      row
+     );
+    }
+
+
+    row.horseNumbers.push(
+     pick.horseNumber
+    );
+   }
+
+
+   const races =
+    new Set(
+     picks.map(
+      pick =>
+       [
+        pick.city,
+        pick.raceNumber
+       ].join("|")
+     )
+    );
+
+
+   const diagnostics =
+    extracted.diagnostics as
+     any;
+
+
+   return json({
+    ok:true,
+
+    preview:true,
+
+    persisted:false,
+
+    source:
+     sourceKey,
+
+    articleUrl,
+
+    extractionMethod:
+     extracted.method,
+
+    counts: {
+     races:
+      races.size,
+
+     total:
+      picks.length,
+
+     main:
+      mainPicks.length,
+
+     favorite:
+      countFlag(
+       "isFavorite"
+      ),
+
+     banko:
+      countFlag(
+       "isBanko"
+      ),
+
+     strong:
+      countFlag(
+       "isStrong"
+      ),
+
+     star:
+      countFlag(
+       "isStar"
+      ),
+
+     rival:
+      countFlag(
+       "isRival"
+      ),
+
+     surprise:
+      countFlag(
+       "isSurprise"
+      ),
+
+     avoid:
+      countFlag(
+       "isAvoid"
+      )
+    },
+
+    mainPicks,
+
+    rivalsByRace:
+     [
+      ...rivalsByRace.values()
+     ]
+      .map(
+       row => ({
+        ...row,
+
+        horseNumbers:
+         [
+          ...new Set(
+           row.horseNumbers
+          )
+         ].sort(
+          (a,b) =>
+           a-b
+         )
+       })
+      )
+      .sort(
+       (a,b) =>
+        String(a.city)
+         .localeCompare(
+          String(b.city),
+          "tr"
+         ) ||
+        a.raceNumber -
+         b.raceNumber
+      ),
+
+    completeness:
+     diagnostics?.completeness ??
+     null,
+
+    articleText: {
+     selectedRoot:
+      diagnostics
+       ?.articleText
+       ?.selectedRoot ??
+      null,
+
+     characters:
+      diagnostics
+       ?.articleText
+       ?.outputCharacters ??
+      null,
+
+     truncated:
+      diagnostics
+       ?.articleText
+       ?.truncated ??
+      null
+    },
+
+    semantic: {
+     model:
+      diagnostics
+       ?.semantic
+       ?.model ??
+      null,
+
+     maxTokens:
+      diagnostics
+       ?.semantic
+       ?.maxTokens ??
+      null,
+
+     usage:
+      diagnostics
+       ?.semantic
+       ?.usage ??
+      null
+    }
+   });
+
+  } catch(e) {
+   return json({
+    ok:false,
+
+    preview:true,
+
+    persisted:false,
+
+    error:
+     errorMessage(e)
+   },422);
+  }
+ }
+
 
     if(url.pathname==="/api/admin/refresh-field" && request.method==="POST") {
   try {
