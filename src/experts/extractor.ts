@@ -13,7 +13,8 @@ import {
 
 import {
   extractSemanticJsonFromHtml,
-  extractSemanticJsonFromUrl
+  extractSemanticJsonFromUrl,
+  isCfJson422Failure
 } from "../acquisition/semantic-json";
 
 import {
@@ -198,21 +199,25 @@ export async function extractExperts(
 
 
   /*
-   * PRIMARY EXTRACTION
-   * ==================
+   * PRIMARY
    *
-   * Exactly one ordinary semantic call:
+   * Keep transport/semantic execution separate from
+   * application-level finalization.
    *
-   * article/current-page URL
-   * -> JSON(url)
-   *
-   * If the endpoint returns a valid structure containing
-   * picks=[], that is a semantic result.
-   *
-   * It does NOT trigger another semantic AI call.
+   * A successful Browser /json request is finalized only
+   * after the try/catch below so an application parse
+   * failure cannot be mislabeled as transport failure.
    */
+  let primary:
+    Awaited<
+      ReturnType<
+        typeof extractSemanticJsonFromUrl<any>
+      >
+    >;
+
+
   try {
-    const primary =
+    primary =
       await extractSemanticJsonFromUrl<any>(
         env,
         url,
@@ -220,35 +225,56 @@ export async function extractExperts(
         responseFormat
       );
 
-
-    return finalizeExtraction(
-      primary.value,
-      primary.method,
-      primary.diagnostics
-    );
-
   } catch (primaryTechnicalError) {
     /*
-     * TECHNICAL EMERGENCY FALLBACK
-     * ============================
+     * HTTP 422 means Browser /json reached structured
+     * generation but could not produce an accepted
+     * structured response.
      *
-     * This branch exists only because the direct Browser
-     * JSON call itself failed technically.
-     *
-     * CONTENT acquisition does not use Workers AI.
-     *
-     * After rendered HTML is acquired we allow exactly
-     * one emergency JSON(html) semantic call.
+     * DO NOT immediately spend another AI call over the
+     * same article while diagnosing the actual response.
      */
+    if (
+      isCfJson422Failure(
+        primaryTechnicalError
+      )
+    ) {
+      throw primaryTechnicalError;
+    }
+
+
+    /*
+     * Other genuine technical failures retain the existing
+     * emergency path:
+     *
+     * CONTENT(url)
+     * -> JSON(html)
+     */
+    let content:
+      Awaited<
+        ReturnType<
+          typeof acquireCfContentHtml
+        >
+      >;
+
+
+    let fallback:
+      Awaited<
+        ReturnType<
+          typeof extractSemanticJsonFromHtml<any>
+        >
+      >;
+
+
     try {
-      const content =
+      content =
         await acquireCfContentHtml(
           env,
           url
         );
 
 
-      const fallback =
+      fallback =
         await extractSemanticJsonFromHtml<any>(
           env,
           content.html,
@@ -256,29 +282,7 @@ export async function extractExperts(
           responseFormat
         );
 
-
-      const finalized =
-        finalizeExtraction(
-          fallback.value,
-          "cf-json-content-html",
-          {
-            primaryTechnicalError:
-              errorMessage(
-                primaryTechnicalError
-              ),
-
-            contentBodyLength:
-              content.bodyLength,
-
-            fallback:
-              fallback.diagnostics
-          }
-        );
-
-
-      return finalized;
-
-    } catch (fallbackError) {
+    } catch (fallbackTechnicalError) {
       throw new Error(
         "EXPERT_EXTRACTION_TECHNICAL_FAILURE:" +
         JSON.stringify({
@@ -289,10 +293,39 @@ export async function extractExperts(
 
           fallback:
             errorMessage(
-              fallbackError
+              fallbackTechnicalError
             )
         })
       );
     }
+
+
+    return finalizeExtraction(
+      fallback.value,
+      "cf-json-content-html",
+      {
+        primaryTechnicalError:
+          errorMessage(
+            primaryTechnicalError
+          ),
+
+        contentBodyLength:
+          content.bodyLength,
+
+        fallback:
+          fallback.diagnostics
+      }
+    );
   }
+
+
+  /*
+   * HTTP success is NOT a transport failure even if our
+   * own application parser rejects the returned shape.
+   */
+  return finalizeExtraction(
+    primary.value,
+    primary.method,
+    primary.diagnostics
+  );
 }
