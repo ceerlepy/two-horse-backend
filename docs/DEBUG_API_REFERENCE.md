@@ -1096,3 +1096,136 @@ Canonical runner yoksa downstream enrichment araştırılmaz.
 Temporal invariant bozuksa learning accuracy güvenilmez kabul edilir.
 
 Diagnostic sonuçları mümkün olduğunca root cause daraltmak için birlikte okunmalıdır.
+
+---
+
+# POST /api/admin/preview-expert-source
+
+## Amaç
+
+Gerçek production expert acquisition + Workers AI extraction pipeline'ını
+çalıştırır ancak sonucu D1 expert prediction tablolarına persist etmez.
+
+Bu endpoint özellikle normal expert refresh'in:
+
+SKIPPED_NO_UPCOMING_RACE
+
+durumunda olduğu saatlerde completed-day extraction doğrulaması yapmak
+içindir.
+
+## Input
+
+Query:
+
+source=<source_key>
+
+Örnek:
+
+curl -sS \
+  -X POST \
+  -H "$AUTH" \
+  "$BASE_URL/api/admin/preview-expert-source?source=liderform" \
+| python -m json.tool
+
+## Güvenlik ve side-effect contract
+
+Endpoint ADMIN_TOKEN ister.
+
+Preview:
+
+persisted=false
+
+olmalıdır.
+
+Şunları değiştirmez:
+
+expert_predictions
+
+source health
+
+last_working_url
+
+refresh trace
+
+Normal scheduled refresh'in no-upcoming-race gate'ini de değiştirmez.
+
+## Önemli response alanları
+
+counts.races
+
+Semantic extraction tarafından bulunan distinct race sayısı.
+
+counts.main
+
+favorite, banko, strong, star veya surprise ana seçimlerinden en az birine
+sahip horse-level seçim sayısı.
+
+counts.strong
+
+strong label alan seçim sayısı.
+
+counts.rival
+
+rival label alan horse-level seçim sayısı.
+
+counts.total
+
+Grouped AI transport TypeScript tarafından horse-level domain kayıtlarına
+açıldıktan sonraki toplam pick sayısı.
+
+mainPicks
+
+Named/commented ana seçimlerin kısa diagnostic listesi.
+
+rivalsByRace
+
+Her yarışın number-only rival grubunun horse number listesi.
+
+completeness
+
+Source-aware completeness guard sonucu.
+
+Liderform için:
+
+complete=true
+
+ve
+
+missing=[]
+
+beklenir.
+
+semantic.usage
+
+Gerçek Workers AI token/neuron kullanımını gösterir.
+
+## 24 Ağustos 2026 Liderform doğrulaması
+
+Gerçek production preview sonucu:
+
+races=6
+
+main=6
+
+strong=6
+
+rival=18
+
+total=24
+
+favorite=0
+
+banko=0
+
+missing=[]
+
+completeness.complete=true
+
+Bu testte daha önce eksik kalan iki ana selection da doğru geldi:
+
+Bursa R9 #1 SİLUET
+
+Elazığ R8 #14 SKY TURK
+
+Bu nedenle corrected Liderform semantic extraction path'i 24/24 olarak
+production Workers AI üzerinde doğrulanmıştır.

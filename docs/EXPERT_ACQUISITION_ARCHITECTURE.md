@@ -96,53 +96,80 @@ exists.
 
 ### 5. Stage two: article extraction
 
-After discovery, the article URL is already known.
+After discovery, the current article URL is already known.
 
-The extraction question is now narrower:
+The extraction question is deliberately narrower:
 
-Which horses does this source recommend, oppose or identify as rivals?
+Which horses does the article explicitly recommend, oppose or identify
+as rivals, and what semantic role does each signal have?
 
-The normal extraction path is intentionally small:
+The authoritative production path is:
 
-selected article URL
--> Browser Run JSON(url)
--> RawExpertExtraction
+accepted article/current page
+-> Cloudflare rendered CONTENT
+-> editorial-text normalization
+-> direct Workers AI JSON Mode
+-> grouped race-level RawExpertExtraction
+-> deterministic TypeScript expansion
+-> source-aware completeness validation where applicable
+-> TJK canonical runner validation
+-> persistence
 
-One ordinary article extraction therefore requires one semantic AI call.
+Normal semantic extraction uses exactly one Workers AI call.
 
-### 6. Semantic empty and technical failure are different states
+The configured output ceiling is 4096 tokens.
 
-A valid result such as:
+That value is a maximum, not a fixed generation size or fixed billing
+amount.
 
-{ "picks": [] }
+Actual Workers AI usage is captured from runtime diagnostics.
 
-is not a transport failure.
+The 24 August 2026 Liderform production preview demonstrated this
+directly:
 
-It is a semantic result.
+prompt tokens: 2718
+completion tokens: 489
+total tokens: 3207
 
-The system records it as SEMANTIC_EMPTY.
+The article was not truncated and the semantic result was complete.
 
-It does not automatically execute the same semantic question two more
-times using SCRAPE and CONTENT representations.
+### 6. Semantic empty, incomplete and technical failure are different states
 
-That older strategy multiplied Workers AI usage without establishing new
-information.
+The pipeline distinguishes three fundamentally different outcomes.
 
-A real technical error is different.
+SEMANTIC_EMPTY means the semantic endpoint returned a valid structured
+response but no current expert selections.
 
-Examples include Browser Run request failure, timeout or failed semantic
+INCOMPLETE means structured output exists, but a source-specific
+correctness invariant proves that part of the source analysis was lost.
+
+A technical failure means acquisition, Workers AI transport, JSON
+decoding or another execution dependency failed.
+
+These states must not be collapsed.
+
+In particular, syntactically valid JSON is not sufficient evidence of a
+complete extraction.
+
+For a source with a verified editorial structure, the Worker may apply a
+deterministic completeness oracle after semantic extraction.
+
+The oracle does not replace AI interpretation.
+
+It only checks whether required source evidence survived the semantic
 transport.
 
-Only then is an emergency representation fallback justified:
+For Liderform's verified "Koşuların analizi" article format, every real
+analysis paragraph contains an explicit main horse.
 
-JSON(url) technical failure
--> CONTENT(url)
--> unwrap rendered HTML
--> JSON(html)
+Therefore:
 
-The emergency path exists for availability.
+race discovered
++ rivals extracted
++ main selection missing
+= incomplete extraction
 
-It is not the ordinary path.
+and must never silently become a valid persisted result.
 
 ### 7. Cloudflare CONTENT response handling
 
@@ -157,22 +184,49 @@ the result is HTML text and only then pass it to downstream processing.
 Treating the entire JSON envelope as if it were HTML corrupts the
 extraction input.
 
-### 8. Compact semantic contract
+### 8. Compact grouped semantic contract
 
-The semantic model should read source semantics.
+The semantic model reads source meaning.
 
-It should not implement all Two Horse domain policy.
+It does not produce the complete Two Horse persistence model.
 
-The raw contract therefore contains only:
+The raw transport is grouped by race to reduce repetitive output tokens.
+
+Each raw race contains:
 
 city
 raceNumber
-horseNumber
-horseName or null
-comment or null
-labels
+selections[]
+numberGroups[]
 
-The label vocabulary is intentionally finite:
+selections[] contains named or explicitly commented individual horses.
+
+Each selection contains:
+
+horseNumber
+horseName when present
+comment when present
+labels[]
+
+numberGroups[] represents compact source lists such as:
+
+Rakipler: 6-1-8
+
+with:
+
+label = rival
+horseNumbers = [6,1,8]
+
+Grouping exists only at the AI transport boundary.
+
+It is never the persistence identity.
+
+TypeScript deterministically expands the example above into three
+independent horse-level picks before TJK validation.
+
+The final database continues to store individual canonical runners.
+
+The allowed semantic vocabulary is:
 
 favorite
 banko
@@ -182,33 +236,55 @@ rival
 surprise
 avoid
 
-Application code performs deterministic mapping from labels to internal
+Application code deterministically converts these labels into internal
 boolean fields.
 
-This reduces schema complexity, output size, ambiguity and Workers AI
-token usage.
+sourceRank is not generated from ordinary prose.
+
+Extraction confidence is also assigned by application code and represents
+source-reading certainty, not winning probability.
 
 ### 9. Natural Turkish expert language
 
 Expert writers do not use one standardized taxonomy.
 
-A main selection may be described as:
+The semantic extractor therefore classifies meaning rather than requiring
+literal label words.
 
-birinciliğin en güçlü adayıdır
+An explicit banko or tek maps to banko.
 
-ilk şansa sahiptir
+An explicit favori, en şanslı or equivalent favorite language maps to
+favorite.
 
-birinciliğe çok yakındır
+A positive main selection that is not explicitly banko, favorite, star,
+surprise or avoid maps to strong.
+
+Examples of strong main-selection language include:
 
 kazanmaya yakındır
 
+birincilikle tanışabilir
+
+önde gelen isimdir
+
+ilk şansa sahiptir
+
+rakiplerini geride bırakabilir
+
+farklı sonuç elde edebilecek güçtedir
+
+kazanmasını bekliyoruz
+
 rövanşı alacaktır
 
-rakiplerinin bir adım önündedir
+ilk atımızdır
 
-The semantic task therefore identifies the role of the horse in the
-analysis rather than searching for only literal words such as favori or
-banko.
+This distinction is important.
+
+Being the principal positive horse in an analysis paragraph does not
+automatically fabricate a favorite or banko label.
+
+The source's semantic strength is preserved rather than exaggerated.
 
 ### 10. Number-only rivals
 
@@ -591,3 +667,112 @@ refresh.
 
 Repeated technical source failures use bounded backoff to prevent a broken
 source from consuming the normal refresh budget indefinitely.
+
+## Liderform completeness invariant and verified production preview
+
+### Why the invariant exists
+
+The 24 August 2026 Liderform article exposed a subtle structured-output
+failure mode.
+
+The first production extraction correctly found all six analyzed races
+and all eighteen number-only rivals, but omitted the named main selection
+from two races.
+
+The resulting structure therefore contained:
+
+6 races
+4 main selections
+18 rivals
+22 horse-level picks
+
+The missing main selections were:
+
+Bursa race 9, horse 1, SİLUET
+
+Elazığ race 8, horse 14, SKY TURK
+
+This was not a discovery failure.
+
+It was not a race-detection failure.
+
+It was not a rival-grouping failure.
+
+It was a semantic completeness failure: the AI understood the two races
+well enough to extract their rival groups but omitted the paragraph's
+main subject from selections[].
+
+### Source-aware correction
+
+Liderform now uses a source-specific structured-output rule requiring at
+least one explicit selection for every returned analysis race.
+
+The prompt also makes the main-subject contract explicit and covers
+natural positive expressions such as:
+
+"birincilikle tanışabilir"
+
+"farklı sonuç elde edebilecek güçtedir"
+
+A deterministic completeness oracle reads only the structural evidence
+needed to verify:
+
+city
+race number
+explicit main horse number
+
+It does not infer labels, comments, rivals or confidence.
+
+Those remain semantic AI responsibilities.
+
+Thus deterministic code acts as a correctness guard rather than a second
+expert parser.
+
+### Verified result on 24 August 2026
+
+A real production Workers AI preview was executed against:
+
+https://liderform.com.tr/haberler/20266-pazartesi-bursada-6910-ve-elazigda-368-kosularin-analizi.html
+
+The result was:
+
+races = 6
+main selections = 6
+strong = 6
+rivals = 18
+total horse-level picks = 24
+missing = 0
+completeness.complete = true
+article truncated = false
+
+The six main selections were:
+
+Bursa R6 #2 BIG HONEY — strong — "kazanmaya yakındır"
+
+Bursa R9 #1 SİLUET — strong — "birincilikle tanışabilir"
+
+Bursa R10 #5 CANASİLİM — strong — "önde gelen isimdir"
+
+Elazığ R3 #2 DENİZİM HAN — strong — "ilk şansa sahiptir"
+
+Elazığ R6 #9 ÇİLOBEY — strong — "rakiplerini geride bırakabilir"
+
+Elazığ R8 #14 SKY TURK — strong —
+"farklı sonuç elde edebilecek güçtedir"
+
+Each race also retained its own independent rival number group.
+
+The preview used the real production acquisition and Workers AI extraction
+pipeline but intentionally performed no prediction persistence.
+
+This establishes the required separation:
+
+semantic extraction may be exercised diagnostically
+
+without changing expert_predictions
+
+without changing source health
+
+without replacing last_working_url
+
+and without weakening the no-upcoming-race production refresh gate.

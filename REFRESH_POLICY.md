@@ -68,51 +68,76 @@ because later extraction was empty.
 
 ## Extraction policy
 
-Extraction answers a different question:
+Extraction answers:
 
-What expert runner selections does this already-selected URL contain?
+What expert runner selections does the already-selected current URL
+actually contain?
 
-Normal extraction is:
+The authoritative production extraction path is:
 
-article or current-page URL
--> JSON(url)
--> compact RawExpertExtraction
+accepted article/current page
+-> Cloudflare rendered CONTENT
+-> editorial-text normalization
+-> direct Workers AI JSON Mode
+-> grouped race-level structured output
+-> deterministic horse-level expansion
+-> source-aware completeness guard where defined
+-> TJK canonical validation
+-> persistence
 
-This is one ordinary semantic AI call.
+Normal extraction uses one Workers AI semantic call.
 
-A technically valid result containing picks=[] is SEMANTIC_EMPTY.
+The Workers AI request has a 4096 output-token ceiling, but usage and
+billing follow actual generated work rather than the maximum ceiling.
 
-SEMANTIC_EMPTY does not trigger SCRAPE plus JSON or CONTENT plus JSON
-retries.
+CONTENT acquisition is a rendered-page acquisition operation.
 
-Only a real technical failure of JSON(url) may use the emergency path:
+Workers AI is the semantic interpretation operation.
 
-CONTENT(url)
--> rendered HTML
--> JSON(html)
+These responsibilities remain separate.
 
-CONTENT acquisition itself is Browser Run rendering, not Workers AI
-semantic extraction.
+A syntactically valid semantic result is not automatically considered
+complete.
 
-The current Cloudflare Workers Binding returns CONTENT inside a JSON
-envelope result field, which must be unwrapped before the rendered HTML
-is passed downstream.
+If a source has a verified editorial invariant, the Worker may reject a
+partial semantic result before persistence.
+
+Liderform's verified invariant is:
+
+every real returned race-analysis paragraph must contain its explicit
+main selection in selections[].
+
+A race containing rivals while omitting its explicit main horse is
+therefore incomplete rather than successful.
 
 ## Raw semantic contract
 
-The AI is not responsible for producing Two Horse's complete internal
-domain model.
+The AI transport is grouped by race.
 
-It extracts only:
+Each race contains:
 
 - city;
 - raceNumber;
-- horseNumber;
-- horseName or null;
-- comment or null;
-- semantic labels.
+- selections[];
+- numberGroups[].
 
-Allowed labels are:
+selections[] contains explicitly named or commented individual expert
+horses.
+
+numberGroups[] contains compact number-only source lists.
+
+For example:
+
+Rakipler: 6-1-8
+
+may be transported as one rival group containing [6,1,8].
+
+This grouping exists only to reduce semantic output size.
+
+Application code expands it into three separate horse-level domain rows
+before canonical validation and persistence.
+
+Allowed semantic labels are:
 
 - favorite;
 - banko;
@@ -122,13 +147,31 @@ Allowed labels are:
 - surprise;
 - avoid.
 
-The Worker deterministically converts those labels into the domain
-boolean fields.
+Main positive commentary does not automatically become favorite or banko.
+
+Explicit banko/tek language maps to banko.
+
+Explicit favori/en şanslı-equivalent language maps to favorite.
+
+A positive principal selection with no more specific source label maps to
+strong.
+
+Examples include:
+
+- kazanmaya yakındır;
+- birincilikle tanışabilir;
+- önde gelen isimdir;
+- ilk şansa sahiptir;
+- rakiplerini geride bırakabilir;
+- farklı sonuç elde edebilecek güçtedir.
+
+The Worker deterministically converts raw labels to internal boolean
+fields.
 
 sourceRank is not inferred from ordinary prose.
 
-Extraction confidence is assigned deterministically by application code
-from source evidence. It is not a winning probability.
+Extraction confidence is source-reading confidence and is not winning
+probability.
 
 ## Coupon exclusion
 
@@ -182,6 +225,49 @@ horseName may be null during raw extraction.
 
 Only after city, race and horse number identify an official TJK runner
 may the Worker attach the canonical TJK horse name.
+
+## Read-only expert extraction preview
+
+The administrative extraction preview exists for production diagnostics.
+
+Endpoint:
+
+POST /api/admin/preview-expert-source?source=<source_key>
+
+It intentionally calls the real acquisition and semantic extraction path
+without using the scheduled refresh decision.
+
+This allows a completed day's article to be tested even after the normal
+expert subsystem has correctly entered SKIPPED_NO_UPCOMING_RACE.
+
+The preview is not a persistence bypass.
+
+It must not:
+
+- write expert_predictions;
+- update source health;
+- update last_working_url;
+- update refresh trace;
+- weaken the scheduled no-upcoming-race gate.
+
+Its purpose is to answer one narrow diagnostic question:
+
+What would the current production extractor return for this known article
+right now?
+
+The 24 August 2026 Liderform verification returned:
+
+6 races
+6 main selections
+6 strong signals
+18 rivals
+24 total horse-level picks
+0 missing main selections
+
+with completeness.complete=true.
+
+This preview proved the corrected semantic path without modifying the
+existing day's persisted rows.
 
 ## Cache policy
 
