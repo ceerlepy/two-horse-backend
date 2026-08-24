@@ -9,7 +9,8 @@ import {
 } from "../shared";
 
 import {
-  expertCheckIntervalMs
+  expertCheckIntervalMs,
+  expertFailureBackoffRemainingMs
 } from "./policy";
 
 import {
@@ -33,6 +34,7 @@ import {
   markExpertChecked,
   markExpertFailure,
   markExpertHealthy,
+  recordExpertDiscovery,
   recordExpertRefreshTrace
 } from "./source-repository";
 
@@ -44,6 +46,11 @@ import {
 import {
   discoverExpertArticleUrls
 } from "./discovery";
+
+import {
+  expertRequiresDiscoveredArticle,
+  isAllowedDiscoveredArticleUrl
+} from "./source-policy";
 
 import {
   mapLimit
@@ -695,6 +702,10 @@ async function processSource(
   const articleSeen =
     new Set<string>();
 
+
+  let hadDiscoverySuccess =
+    false;
+
   /*
    * Preserve provenance for every discovered article:
    * article URL -> landing URL + acquisition method.
@@ -727,6 +738,32 @@ async function processSource(
         );
 
 
+      hadDiscoverySuccess =
+        true;
+
+
+      const acceptedUrls =
+        discovery.urls.filter(
+          url =>
+            !landingUrls.includes(
+              url
+            ) &&
+            isAllowedDiscoveredArticleUrl(
+              source.source_key,
+              url
+            )
+        );
+
+
+      const rejectedUrls =
+        discovery.urls.filter(
+          url =>
+            !acceptedUrls.includes(
+              url
+            )
+        );
+
+
       await recordExpertRefreshTrace(
         env,
         source.source_key,
@@ -735,14 +772,22 @@ async function processSource(
         {
           method:
             discovery.method,
-          discovered:
+
+          selected:
             discovery.urls.length,
-          urls:
-            discovery.urls,
+
+          accepted:
+            acceptedUrls.length,
+
+          acceptedUrls,
+
+          rejectedUrls,
+
           diagnostics:
             discovery.diagnostics
         }
       );
+
 
       attempts.push({
         url:
@@ -754,23 +799,62 @@ async function processSource(
         acquisition:
           discovery.method,
 
-        discovered:
+        selected:
           discovery.urls.length,
+
+        accepted:
+          acceptedUrls.length,
+
+        rejectedUrls,
 
         diagnostics:
           discovery.diagnostics
       });
 
 
-      for (const url of discovery.urls) {
-        if (!articleSeen.has(url)) {
-          articleSeen.add(url);
-          articleUrls.push(url);
+      /*
+       * Discovery provenance is useful even if later
+       * extraction fails.
+       *
+       * This does NOT mark the URL as working.
+       */
+      if (
+        acceptedUrls.length >
+        0
+      ) {
+        await recordExpertDiscovery(
+          env,
+          source.source_key,
+          acceptedUrls[0],
+          landingUrl,
+          discovery.method
+        );
+      }
+
+
+      for (
+        const url of
+        acceptedUrls
+      ) {
+        if (
+          !articleSeen.has(
+            url
+          )
+        ) {
+          articleSeen.add(
+            url
+          );
+
+          articleUrls.push(
+            url
+          );
+
 
           discoveryProvenance.set(
             url,
             {
               landingUrl,
+
               method:
                 discovery.method
             }
@@ -778,14 +862,18 @@ async function processSource(
         }
       }
 
+
       /*
-       * One semantic landing discovery should return all
-       * today's relevant article URLs (schema allows up
-       * to 12). Once it succeeds, immediately move to
-       * article extraction instead of burning multiple
-       * Browser Run chains on duplicate entry pages.
+       * Discovery stops only after a source-policy-valid
+       * article exists.
+       *
+       * /kayitlar or category/index URLs can therefore
+       * never terminate discovery as an article.
        */
-      if (discovery.urls.length > 0) {
+      if (
+        acceptedUrls.length >
+        0
+      ) {
         break;
       }
 
@@ -826,6 +914,60 @@ async function processSource(
    * discovery found no article at all, because some
    * sources may publish picks directly on an entry page.
    */
+  /*
+   * Some sources publish a separate daily article.
+   *
+   * For those sources:
+   *
+   * no accepted article != extract the homepage.
+   */
+  if (
+    articleUrls.length ===
+      0 &&
+    expertRequiresDiscoveredArticle(
+      source.source_key
+    )
+  ) {
+    if (
+      !hadDiscoverySuccess
+    ) {
+      throw new Error(
+        `EXPERT_DISCOVERY_UNAVAILABLE:${source.source_key}`
+      );
+    }
+
+
+    await recordExpertRefreshTrace(
+      env,
+      source.source_key,
+      "ARTICLE_NOT_PUBLISHED",
+      null,
+      {
+        date:
+          today,
+
+        landingUrls,
+
+        attempts
+      }
+    );
+
+
+    return {
+      source:
+        source.source_key,
+
+      status:
+        "article-not-published",
+
+      count:
+        0,
+
+      attempts
+    } as ExpertRefreshResult;
+  }
+
+
   const urls =
     articleUrls.length > 0
       ? [
@@ -1284,6 +1426,36 @@ export async function refreshExpertsIfDue(
 
       async source => {
         try {
+          const retryAfterMs =
+            force
+              ? 0
+              : expertFailureBackoffRemainingMs(
+                  source.consecutive_failures ??
+                    0,
+
+                  source.last_failure_at,
+
+                  minutes
+                );
+
+
+          if (
+            retryAfterMs >
+            0
+          ) {
+            return {
+              source:
+                source.source_key,
+
+              status:
+                "backoff",
+
+              retryAfterMs
+            } satisfies
+              ExpertRefreshResult;
+          }
+
+
           return await processSource(
             env,
             source,
@@ -1359,6 +1531,70 @@ export async function refreshExpertSource(
       `EXPERT_SOURCE_NOT_FOUND:${key}`
     );
   }
+
+  /*
+   * A diagnostic/force source refresh does not bypass the
+   * central cost invariant.
+   *
+   * No upcoming race means no expert acquisition.
+   */
+  const minutes =
+    await nextRaceMinutes(
+      env
+    );
+
+
+  if (
+    expertCheckIntervalMs(
+      minutes
+    ) ===
+    null
+  ) {
+    await recordExpertRefreshTrace(
+      env,
+      key,
+      "PROCESS_START",
+      null,
+      {
+        admin:
+          true,
+
+        reason:
+          "no-upcoming-race"
+      }
+    );
+
+
+    await recordExpertRefreshTrace(
+      env,
+      key,
+      "SKIPPED_NO_UPCOMING_RACE",
+      null,
+      {
+        date:
+          turkeyDate()
+      }
+    );
+
+
+    return {
+      source:
+        key,
+
+      ok:
+        true,
+
+      result: {
+        source:
+          key,
+
+        status:
+          "no-upcoming-race"
+      } satisfies
+        ExpertRefreshResult
+    };
+  }
+
 
   const startedAt =
     new Date().toISOString();

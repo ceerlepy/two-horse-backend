@@ -510,3 +510,84 @@ Never let a fallback become the normal path merely because it exists.
 
 Never spend upstream compute after its information can no longer improve
 a pre-race decision.
+
+## Authoritative production extraction path
+
+This section supersedes older Browser `/json` article-extraction examples.
+
+Discovery and extraction remain separate.
+
+Discovery:
+
+landing/index
+-> rendered anchor discovery
+-> hard candidate hygiene
+-> bounded candidate AI selection
+-> source-aware article URL validation
+
+Extraction:
+
+accepted article/current page
+-> rendered CONTENT
+-> editorial-text normalization
+-> direct Workers AI JSON Mode
+-> 4096 output-token ceiling
+-> grouped race-level raw schema
+-> deterministic expansion to horse-level picks
+-> canonical TJK validation
+-> persistence
+
+The semantic grouping is a transport optimization only.
+
+A source phrase such as:
+
+Rakipler: 6-1-8
+
+does not create one grouped runner in Two Horse.
+
+It becomes separate runner identities 6, 1 and 8 before validation and
+persistence.
+
+The extraction AI remains responsible for understanding natural Turkish
+expert language, including favorite, banko, strong, star, rival, surprise
+and avoid semantics.
+
+Workers AI usage diagnostics are retained with the extraction trace so
+actual token use can be measured instead of inferred from the configured
+maximum.
+
+### Liderform current article policy
+
+The preferred Liderform landing is `/haberler/analizler`.
+
+The discovery layer removes known utility routes before candidate AI.
+
+A second source-aware fence accepts only Liderform article-detail URLs in
+the `/haberler/*.html` family.
+
+If a current article is not yet published, discovery terminates as
+`ARTICLE_NOT_PUBLISHED`; landing pages are not passed into article
+extraction.
+
+### Provenance levels
+
+Discovery evidence and verified working evidence are intentionally
+different.
+
+`last_discovered_article_url` records the latest accepted discovery result.
+
+`last_working_url` records only a URL that has passed extraction, current
+TJK canonical validation and persistence.
+
+A structured-output failure may therefore leave a valid discovered article
+while correctly leaving `last_working_url` unchanged.
+
+### Runtime cost gates
+
+Expert acquisition is disabled when no upcoming canonical race exists.
+
+This gate applies both to scheduled refresh and isolated admin source
+refresh.
+
+Repeated technical source failures use bounded backoff to prevent a broken
+source from consuming the normal refresh budget indefinitely.

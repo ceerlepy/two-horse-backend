@@ -1,36 +1,84 @@
 export interface ExpertSource {
-  source_key: string;
-  source_name: string;
+  source_key:
+    string;
 
-  homepage_url: string | null;
-  last_working_url: string | null;
+  source_name:
+    string;
 
-  content_hash: string | null;
-  last_checked_at: string | null;
+  homepage_url:
+    string | null;
 
   /*
-   * Optional for backwards-compatible mocks/tests.
-   * Repository reads this field in production.
+   * Verified working URL.
+   *
+   * Only canonical persistence success earns this field.
    */
-  last_success_at?: string | null;
+  last_working_url:
+    string | null;
 
-  source_type: string;
-  base_weight: number;
+  /*
+   * Discovery evidence.
+   *
+   * These do NOT imply extraction succeeded.
+   */
+  last_discovered_article_url?:
+    string | null;
+
+  last_discovered_article_at?:
+    string | null;
+
+  content_hash:
+    string | null;
+
+  last_checked_at:
+    string | null;
+
+  last_success_at?:
+    string | null;
+
+  last_failure_at?:
+    string | null;
+
+  consecutive_failures?:
+    number;
+
+  source_type:
+    string;
+
+  base_weight:
+    number;
 }
 
+
 export interface ExpertRefreshResult {
-  source: string;
+  source:
+    string;
 
   status:
     | "updated"
     | "unchanged"
     | "failed"
     | "no-url"
-    | "no-current-card";
+    | "no-current-card"
+    | "article-not-published"
+    | "no-upcoming-race"
+    | "backoff";
 
-  count?: number;
+  count?:
+    number;
 
-  extractionMethod?: string;
+  extractionMethod?:
+    string;
 
-  error?: string;
+  error?:
+    string;
+
+  retryAfterMs?:
+    number;
+
+  workingUrl?:
+    string;
+
+  attempts?:
+    any[];
 }

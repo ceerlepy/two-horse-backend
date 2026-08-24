@@ -1,57 +1,65 @@
 export function expertExtractionPrompt(
-  sourceName: string,
-  raceDate = "BUGÜN",
-  cities: string[] = []
+  sourceName:
+    string,
+
+  raceDate =
+    "BUGÜN",
+
+  cities:
+    string[] = []
 ): string {
   return `
-${sourceName} sayfasındaki bugünkü Türkiye at yarışı uzman seçimlerini çıkar.
+${sourceName} kaynağındaki bugünkü Türkiye at yarışı uzman seçimlerini çıkar.
 
 HEDEF TARİH:
 ${raceDate}
 
-HEDEF ŞEHİRLER:
+HEDEF TJK ŞEHİRLERİ:
 ${
   cities.length
     ? cities.join(", ")
     : "bugünkü resmi TJK şehirleri"
 }
 
-Bu çağrı current-card extraction içindir.
+Yalnız HEDEF KARTA ait gerçek expert yarış analizlerini kullan.
 
-Türkçe tarih gösterimi, başlık yapısı veya URL slug biçimi farklı olabilir.
-Yalnız tarih formatı farklı görünüyor diye mevcut açık yarış analizlerini yok sayma.
+Başka güne veya yabancı yarışa açıkça ait içeriği çıkarma.
 
-Açıkça başka güne veya yabancı yarışa ait bölüm varsa çıkarma.
+OUTPUT YAPISI
 
-GÖREV
+Aynı city + raceNumber için city ve raceNumber değerlerini her atta tekrar etme.
 
-Kaynak metnindeki gerçek yarış analizlerini structured picks'e dönüştür.
+Her gerçek koşuyu races[] içinde yalnız bir kez üret.
 
-Bir seçim yalnız "favori", "banko" veya "tek" kelimesiyle yazılmak zorunda değildir.
+Her race:
 
-Örneğin aşağıdaki doğal yarış dili de ana expert seçimidir:
+city
+raceNumber
+selections
+numberGroups
 
-- birinciliğin en güçlü adayıdır
-- birinciliğe çok yakındır
-- ilk şansa sahiptir
-- ilk şanslı isimdir
-- kazanmaya yakındır
-- kazanmasını bekliyoruz
-- fotoyu önde geçmesini bekliyoruz
-- rövanşı alacaktır
-- rakiplerinin bir adım önündedir
-- ilk atımızdır
-- öncelikli şans verdiğimiz isimdir
+SELECTIONS
 
-Bir koşu analiz paragrafında:
+Kaynak bir atı adıyla veya açık ayrı yorumuyla analiz ediyorsa selections içine koy.
 
-"(1) PRANDELLO ... birinciliğin en güçlü adayıdır"
+Her selection:
 
-şeklinde ana konu yapılan at bir expert pick'tir.
+horseNumber
+horseName
+comment
+labels
+
+horseName veya comment kaynakta yoksa alanı tamamen OMIT edebilirsin.
+
+At adı uydurma.
+
+comment yalnız aynı ata ait kısa kaynak ifadesi olsun.
+
+Uzun paragrafı kopyalama.
 
 LABELS
 
-Yalnız şu label değerlerini kullan:
+Yalnız:
 
 favorite
 banko
@@ -61,68 +69,67 @@ rival
 surprise
 avoid
 
+kullan.
+
 favorite:
-favori, en şanslı, en güçlü aday.
+favori, en şanslı veya en güçlü aday.
 
 banko:
 banko, tek veya açık biçimde tek önerilen.
 
 strong:
 ilk şans, güçlü, birinciliğe yakın, kazanmaya yakın,
-kazanmasını bekliyoruz, rövanşı alacaktır veya açık ana
-pozitif seçim.
+kazanmasını bekliyoruz, rövanşı alacaktır, ilk atımızdır
+veya açık ana pozitif expert seçimidir.
 
 star:
 kaynak açıkça yıldız veya özel ana seçim diyorsa.
 
 rival:
-rakip, ikinci şans veya daha sonra değerlendirilmesi gereken.
+rakip, ikinci şans veya sonraki şans.
 
 surprise:
 sürpriz, bomba veya tatlı kaçak.
 
 avoid:
-açıkça önerilmeyen, elenen veya olumsuz görülen.
+açıkça önerilmeyen veya elenen.
 
-Bir at birden fazla label alabilir.
+Bir selection birden fazla label alabilir.
 
-RAKİP NUMARALARI
+NUMBER GROUPS
 
-Aynı koşu analizinde:
+Kaynak aynı koşuda yalnız numara listesi veriyorsa bunu compact numberGroups olarak çıkar.
 
-"Sırasıyla rakip gördüğümüz isimler: 2-3-6"
+Örnek:
 
-yazıyorsa:
+Sırasıyla rakip gördüğümüz isimler: 6-1-8
 
-2
-3
-6
+şu anlama gelir:
 
-numaralı atların HER BİRİ ayrı pick'tir.
+label = rival
+horseNumbers = [6,1,8]
 
-Her biri için:
+Bu birleştirme yalnız OUTPUT TRANSPORT optimizasyonudur.
 
-labels=["rival"]
+6, 1 ve 8 uygulamada ayrı ayrı at seçimlerine dönüştürülecektir.
 
-kullan.
+Benzer açık numara listelerinde appropriate label kullan:
 
-Kaynak rakiplerin at adını açıkça vermiyorsa:
+favorite
+banko
+strong
+star
+rival
+surprise
+avoid
 
-horseName=null
+Numara listesinde at adı yazmıyorsa isim uydurma.
 
-kullan.
-
-At adı uydurma.
-
-KUPON VE ALTILI BLOKLARI TAMAMEN IGNORE ET
-
-Aşağıdaki bölümler expert-runner extraction kaynağı değildir:
+KUPON / ALTILI BLOKLARI TAMAMEN IGNORE ET
 
 ALTILI GANYAN TAHMİNİMİZ
 BİRİNCİ ALTILI GANYAN
 İKİNCİ ALTILI GANYAN
-
-ve:
 
 1.Ayak:
 2.Ayak:
@@ -131,48 +138,35 @@ ve:
 5.Ayak:
 6.Ayak:
 
-Örneğin:
+satırları expert runner extraction değildir.
+
+Örnek:
 
 1.Ayak: 5.6.1.4
 
-bir yarış analiz paragrafı değildir.
-
-Buradaki:
+buradaki:
 
 1 = raceNumber değildir.
 
-5,6,1,4 = otomatik expert horse picks değildir.
-
-Yalnız gerçek koşu analiz bağlamını kullan.
+5,6,1,4 = otomatik expert seçimleri değildir.
 
 IDENTITY
 
-city + raceNumber + horseNumber aynı gerçek analiz bağlamına ait olmalıdır.
+city + raceNumber aynı gerçek koşu analizine ait olmalıdır.
 
-horseName kaynakta açıkça görünüyorsa aynı ata ait olmalıdır.
+horseNumber gerçek program numarası olmalıdır.
 
-horseName görünmüyorsa null kullan.
-
-comment yalnız aynı ata ait açık kaynak yorumudur.
-
-Ana atın yorumunu numara-only rakiplere kopyalama.
-
-Rakip için ayrı yorum görünmüyorsa:
-
-comment=null
-
-kullan.
-
-Program numarası, tarih, AGF, HP, kilo, mesafe, oran,
-derece ve kupon ayağı değerlerini horseNumber sanma.
+Program numarası dışındaki tarih, AGF, HP, kilo, mesafe,
+oran, derece ve kupon sayılarını horseNumber sanma.
 
 sourceRank üretme.
 
 confidence üretme.
 
-Sayfada HEDEF KARTA ait açık yarış analizleri bulunuyorsa
-picks=[] döndürme.
+Sayfada hedef karta ait açık expert analizleri varsa races=[] döndürme.
 
-Gerçekten expert seçimi yoksa ancak o zaman picks=[] döndür.
+Gerçekten current-card expert seçimi yoksa ancak o zaman races=[] döndür.
+
+Yalnız response_format JSON schema'sına uygun veri üret.
 `.trim();
 }

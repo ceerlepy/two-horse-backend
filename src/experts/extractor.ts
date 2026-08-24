@@ -7,23 +7,23 @@ import type {
 } from "../types/models";
 
 import {
-  unwrapQuickActionJson,
   turkeyDate
 } from "../shared";
-
-import {
-  extractSemanticJsonFromHtml,
-  extractSemanticJsonFromUrl,
-  isCfJson422Failure
-} from "../acquisition/semantic-json";
 
 import {
   acquireCfContentHtml
 } from "../acquisition/cloudflare-html";
 
 import {
-  mapRawExpertExtraction,
-  rawExpertSchema
+  acquireHttpHtml
+} from "../acquisition/http";
+
+import {
+  expertArticleTextFromHtml
+} from "./article-text";
+
+import {
+  mapRawExpertExtraction
 } from "./raw-extraction";
 
 import type {
@@ -33,6 +33,10 @@ import type {
 import {
   expertExtractionPrompt
 } from "./prompt";
+
+import {
+  extractExpertJsonWithWorkersAi
+} from "./workers-ai-extraction";
 
 
 export interface ExtractedExperts {
@@ -51,6 +55,22 @@ export interface ExtractedExperts {
 }
 
 
+interface AcquiredExpertArticle {
+  html:
+    string;
+
+  method:
+    "cf-content" |
+    "http-fallback";
+
+  bodyLength:
+    number;
+
+  contentError:
+    string | null;
+}
+
+
 function errorMessage(
   error:
     unknown
@@ -61,36 +81,100 @@ function errorMessage(
 }
 
 
-function parseRawExtraction(
-  value:
-    unknown
-): RawExpertExtraction {
-  const parsed =
-    unwrapQuickActionJson(
-      value
-    );
+async function acquireExpertArticle(
+  env:
+    Env,
+
+  url:
+    string
+): Promise<AcquiredExpertArticle> {
+  /*
+   * CONTENT gives us the rendered source used for semantic
+   * extraction without also invoking Workers AI.
+   */
+  try {
+    const content =
+      await acquireCfContentHtml(
+        env,
+        url
+      );
 
 
-  if (
-    !parsed ||
-    !Array.isArray(
-      parsed.picks
-    )
-  ) {
-    throw new Error(
-      "INVALID_RAW_EXPERT_EXTRACTION"
-    );
+    return {
+      html:
+        content.html,
+
+      method:
+        "cf-content",
+
+      bodyLength:
+        content.bodyLength,
+
+      contentError:
+        null
+    };
+
+  } catch (contentError) {
+    /*
+     * Browser rendering is an acquisition dependency, not
+     * semantic truth.
+     *
+     * If CONTENT fails technically, ordinary HTTP gets one
+     * AI-free chance before the source is declared failed.
+     */
+    try {
+      const http =
+        await acquireHttpHtml(
+          url,
+          {
+            timeoutMs:
+              12_000,
+
+            minimumBytes:
+              500
+          }
+        );
+
+
+      return {
+        html:
+          http.html,
+
+        method:
+          "http-fallback",
+
+        bodyLength:
+          http.bodyLength,
+
+        contentError:
+          errorMessage(
+            contentError
+          )
+      };
+
+    } catch (httpError) {
+      throw new Error(
+        "EXPERT_ARTICLE_ACQUISITION_FAILED:" +
+        JSON.stringify({
+          content:
+            errorMessage(
+              contentError
+            ),
+
+          http:
+            errorMessage(
+              httpError
+            )
+        })
+      );
+    }
   }
-
-
-  return parsed as
-    RawExpertExtraction;
 }
 
 
 function finalizeExtraction(
-  value:
-    unknown,
+  raw:
+    RawExpertExtraction,
 
   method:
     string,
@@ -98,12 +182,6 @@ function finalizeExtraction(
   diagnostics:
     unknown
 ): ExtractedExperts {
-  const raw =
-    parseRawExtraction(
-      value
-    );
-
-
   const extraction =
     mapRawExpertExtraction(
       raw
@@ -121,11 +199,19 @@ function finalizeExtraction(
     method,
 
     diagnostics: {
-      semantic:
-        diagnostics,
+      ...(
+        diagnostics &&
+        typeof diagnostics ===
+          "object"
+          ? diagnostics
+          : {
+              semantic:
+                diagnostics
+            }
+      ),
 
-      rawPickCount:
-        raw.picks.length,
+      rawRaceCount:
+        raw.races.length,
 
       mappedPickCount:
         extraction.picks.length
@@ -167,7 +253,10 @@ export async function extractExperts(
       []
     )
       .map(
-        (row:any) =>
+        (
+          row:
+            any
+        ) =>
           String(
             row.city
           )
@@ -181,6 +270,29 @@ export async function extractExperts(
   }
 
 
+  const article =
+    await acquireExpertArticle(
+      env,
+      url
+    );
+
+
+  const normalized =
+    expertArticleTextFromHtml(
+      article.html
+    );
+
+
+  if (
+    normalized.text.length <
+    200
+  ) {
+    throw new Error(
+      `EXPERT_ARTICLE_TEXT_TOO_SMALL:${normalized.text.length}`
+    );
+  }
+
+
   const prompt =
     expertExtractionPrompt(
       sourceName,
@@ -189,143 +301,50 @@ export async function extractExperts(
     );
 
 
-  const responseFormat = {
-    type:
-      "json_schema",
-
-    json_schema:
-      rawExpertSchema
-  } as const;
-
-
   /*
-   * PRIMARY
+   * Exactly ONE semantic extraction call.
    *
-   * Keep transport/semantic execution separate from
-   * application-level finalization.
-   *
-   * A successful Browser /json request is finalized only
-   * after the try/catch below so an application parse
-   * failure cannot be mislabeled as transport failure.
+   * max_tokens is controlled by our Workers AI request.
    */
-  let primary:
-    Awaited<
-      ReturnType<
-        typeof extractSemanticJsonFromUrl<any>
-      >
-    >;
-
-
-  try {
-    primary =
-      await extractSemanticJsonFromUrl<any>(
-        env,
-        url,
-        prompt,
-        responseFormat
-      );
-
-  } catch (primaryTechnicalError) {
-    /*
-     * HTTP 422 means Browser /json reached structured
-     * generation but could not produce an accepted
-     * structured response.
-     *
-     * DO NOT immediately spend another AI call over the
-     * same article while diagnosing the actual response.
-     */
-    if (
-      isCfJson422Failure(
-        primaryTechnicalError
-      )
-    ) {
-      throw primaryTechnicalError;
-    }
-
-
-    /*
-     * Other genuine technical failures retain the existing
-     * emergency path:
-     *
-     * CONTENT(url)
-     * -> JSON(html)
-     */
-    let content:
-      Awaited<
-        ReturnType<
-          typeof acquireCfContentHtml
-        >
-      >;
-
-
-    let fallback:
-      Awaited<
-        ReturnType<
-          typeof extractSemanticJsonFromHtml<any>
-        >
-      >;
-
-
-    try {
-      content =
-        await acquireCfContentHtml(
-          env,
-          url
-        );
-
-
-      fallback =
-        await extractSemanticJsonFromHtml<any>(
-          env,
-          content.html,
-          prompt,
-          responseFormat
-        );
-
-    } catch (fallbackTechnicalError) {
-      throw new Error(
-        "EXPERT_EXTRACTION_TECHNICAL_FAILURE:" +
-        JSON.stringify({
-          primary:
-            errorMessage(
-              primaryTechnicalError
-            ),
-
-          fallback:
-            errorMessage(
-              fallbackTechnicalError
-            )
-        })
-      );
-    }
-
-
-    return finalizeExtraction(
-      fallback.value,
-      "cf-json-content-html",
-      {
-        primaryTechnicalError:
-          errorMessage(
-            primaryTechnicalError
-          ),
-
-        contentBodyLength:
-          content.bodyLength,
-
-        fallback:
-          fallback.diagnostics
-      }
+  const semantic =
+    await extractExpertJsonWithWorkersAi(
+      env,
+      normalized.text,
+      prompt
     );
-  }
 
 
-  /*
-   * HTTP success is NOT a transport failure even if our
-   * own application parser rejects the returned shape.
-   */
   return finalizeExtraction(
-    primary.value,
-    primary.method,
-    primary.diagnostics
+    semantic.value,
+    "cf-content-workers-ai-json",
+    {
+      acquisition: {
+        method:
+          article.method,
+
+        bodyLength:
+          article.bodyLength,
+
+        contentError:
+          article.contentError
+      },
+
+      articleText: {
+        selectedRoot:
+          normalized.selectedRoot,
+
+        originalCharacters:
+          normalized.originalCharacters,
+
+        outputCharacters:
+          normalized.outputCharacters,
+
+        truncated:
+          normalized.truncated
+      },
+
+      semantic:
+        semantic.diagnostics
+    }
   );
 }

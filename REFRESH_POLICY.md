@@ -329,3 +329,92 @@ Source registry state is durable.
 
 Diagnostic and anomaly retention follows the existing operational
 cleanup policy.
+
+## Workers AI extraction implementation
+
+The production expert extraction path no longer relies on Browser `/json`
+for full article structured output.
+
+A production incident on 24 August 2026 demonstrated that Browser `/json`
+could semantically identify correct runners while the generated JSON was
+terminated before completion. The observed raw response ended inside a
+JSON string and produced HTTP 422.
+
+Current extraction is:
+
+article URL
+-> rendered CONTENT
+-> normalized editorial text
+-> direct Workers AI JSON Mode
+-> grouped RawExpertExtraction
+-> deterministic horse-level expansion
+-> TJK canonical validation
+-> persistence
+
+The Workers AI request uses an output ceiling of 4096 tokens. The ceiling
+is not a fixed billed amount; actual inference usage is recorded in
+extraction diagnostics.
+
+The raw semantic model is grouped by race to avoid repeating city and race
+identity for every runner.
+
+Number-only source lists are compressed during semantic transport.
+
+For example:
+
+Rakipler: 6-1-8
+
+may be transported as one `rival` number group containing 6, 1 and 8.
+
+Application code immediately expands that group back into three separate
+horse-level expert selections before canonical validation.
+
+No scoring or persistence layer sees a grouped horse identity.
+
+## Discovery versus working provenance
+
+`last_discovered_article_url` means the latest article URL accepted by
+source-aware discovery.
+
+It may be written even when later extraction fails.
+
+`last_discovered_from_url` is the landing/index URL from which that article
+was discovered.
+
+`last_discovery_method` records the discovery acquisition path.
+
+`last_working_url` is stronger evidence and is written only after the URL
+produces current TJK-canonical picks that are successfully persisted.
+
+Therefore:
+
+discovery success != working success.
+
+## Article-required sources
+
+Liderform currently has a verified distinct daily-article publishing
+contract.
+
+Its preferred discovery landing is:
+
+https://liderform.com.tr/haberler/analizler
+
+Accepted discovered article URLs must belong to the Liderform `/haberler/`
+detail family and end in `.html`.
+
+Utility routes such as `/kayitlar`, `/program`, `/sonuclar`,
+`/muhtemeller` and `/istatistik` are deterministic non-article candidates.
+
+If Liderform discovery completes successfully but no current valid article
+is available, the terminal source state is `ARTICLE_NOT_PUBLISHED`.
+
+The pipeline does not substitute a homepage or index extraction.
+
+## Failure budget
+
+Repeated technical source failures use bounded per-source backoff.
+
+Explicit admin force refresh bypasses failure backoff while a race is
+upcoming.
+
+No admin or scheduled expert refresh bypasses the no-upcoming-race gate.

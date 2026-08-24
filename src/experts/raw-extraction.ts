@@ -16,22 +16,22 @@ export const RAW_EXPERT_LABELS = [
 
 
 export type RawExpertLabel =
-  typeof RAW_EXPERT_LABELS[number];
+  typeof RAW_EXPERT_LABELS[
+    number
+  ];
 
 
-export interface RawExpertPick {
-  city: string;
-
-  raceNumber:
-    number;
-
+export interface RawExpertSelection {
   horseNumber:
     number;
 
-  horseName:
+  /*
+   * Optional to avoid wasting output tokens writing null.
+   */
+  horseName?:
     string | null;
 
-  comment:
+  comment?:
     string | null;
 
   labels:
@@ -39,9 +39,51 @@ export interface RawExpertPick {
 }
 
 
+export interface RawExpertNumberGroup {
+  label:
+    RawExpertLabel;
+
+  horseNumbers:
+    number[];
+}
+
+
+export interface RawExpertRace {
+  city:
+    string;
+
+  raceNumber:
+    number;
+
+  /*
+   * Named/commented individual selections.
+   */
+  selections:
+    RawExpertSelection[];
+
+  /*
+   * Compact number-only source lists.
+   *
+   * Example source:
+   *
+   * Rakipler: 6-1-8
+   *
+   * Transport:
+   *
+   * label = rival
+   * horseNumbers = [6,1,8]
+   *
+   * Application code expands this back into three
+   * independent horse-level picks.
+   */
+  numberGroups:
+    RawExpertNumberGroup[];
+}
+
+
 export interface RawExpertExtraction {
-  picks:
-    RawExpertPick[];
+  races:
+    RawExpertRace[];
 }
 
 
@@ -50,7 +92,7 @@ export const rawExpertSchema = {
     "object",
 
   properties: {
-    picks: {
+    races: {
       type:
         "array",
 
@@ -69,50 +111,115 @@ export const rawExpertSchema = {
               "integer"
           },
 
-          horseNumber: {
-            type:
-              "integer"
-          },
-
-          horseName: {
-            anyOf: [
-              {
-                type:
-                  "string"
-              },
-              {
-                type:
-                  "null"
-              }
-            ]
-          },
-
-          comment: {
-            anyOf: [
-              {
-                type:
-                  "string"
-              },
-              {
-                type:
-                  "null"
-              }
-            ]
-          },
-
-          labels: {
+          selections: {
             type:
               "array",
 
-            minItems:
-              1,
+            items: {
+              type:
+                "object",
+
+              properties: {
+                horseNumber: {
+                  type:
+                    "integer"
+                },
+
+                horseName: {
+                  anyOf: [
+                    {
+                      type:
+                        "string"
+                    },
+                    {
+                      type:
+                        "null"
+                    }
+                  ]
+                },
+
+                comment: {
+                  anyOf: [
+                    {
+                      type:
+                        "string"
+                    },
+                    {
+                      type:
+                        "null"
+                    }
+                  ]
+                },
+
+                labels: {
+                  type:
+                    "array",
+
+                  minItems:
+                    1,
+
+                  items: {
+                    type:
+                      "string",
+
+                    enum:
+                      RAW_EXPERT_LABELS
+                  }
+                }
+              },
+
+              /*
+               * horseName/comment are optional.
+               *
+               * This removes repeated:
+               *
+               * horseName:null
+               * comment:null
+               *
+               * from number-light output.
+               */
+              required: [
+                "horseNumber",
+                "labels"
+              ]
+            }
+          },
+
+          numberGroups: {
+            type:
+              "array",
 
             items: {
               type:
-                "string",
+                "object",
 
-              enum:
-                RAW_EXPERT_LABELS
+              properties: {
+                label: {
+                  type:
+                    "string",
+
+                  enum:
+                    RAW_EXPERT_LABELS
+                },
+
+                horseNumbers: {
+                  type:
+                    "array",
+
+                  minItems:
+                    1,
+
+                  items: {
+                    type:
+                      "integer"
+                  }
+                }
+              },
+
+              required: [
+                "label",
+                "horseNumbers"
+              ]
             }
           }
         },
@@ -120,24 +227,45 @@ export const rawExpertSchema = {
         required: [
           "city",
           "raceNumber",
-          "horseNumber",
-          "horseName",
-          "comment",
-          "labels"
+          "selections",
+          "numberGroups"
         ]
       }
     }
   },
 
   required: [
-    "picks"
+    "races"
   ]
 } as const;
 
 
+interface FlatRawPick {
+  city:
+    string;
+
+  raceNumber:
+    number;
+
+  horseNumber:
+    number;
+
+  horseName?:
+    string | null;
+
+  comment?:
+    string | null;
+
+  labels:
+    RawExpertLabel[];
+}
+
+
 function cleanOptionalText(
   value:
-    string | null | undefined
+    string |
+    null |
+    undefined
 ): string | null {
   const cleaned =
     String(
@@ -158,34 +286,45 @@ function cleanOptionalText(
 
 
 function duplicateKey(
-  city: string,
-  raceNumber: number,
-  horseNumber: number
+  city:
+    string,
+
+  raceNumber:
+    number,
+
+  horseNumber:
+    number
 ): string {
   return [
     city
-      .normalize("NFKC")
+      .normalize(
+        "NFKC"
+      )
       .trim()
-      .toLocaleUpperCase("tr-TR"),
+      .toLocaleUpperCase(
+        "tr-TR"
+      ),
 
     raceNumber,
 
     horseNumber
-  ].join("|");
+  ].join(
+    "|"
+  );
 }
 
 
 function extractionConfidence(
-  horseName: string | null,
-  comment: string | null
+  horseName:
+    string | null,
+
+  comment:
+    string | null
 ): number {
   /*
-   * Deterministic source-reading confidence.
+   * Source-reading certainty.
    *
-   * This is NOT winning probability.
-   *
-   * Canonical TJK validation remains the hard identity
-   * gate after this mapping.
+   * NOT winning probability.
    */
   if (
     horseName &&
@@ -201,24 +340,23 @@ function extractionConfidence(
 
 
   /*
-   * Number-only rival:
-   *
-   * legitimate source format such as
-   * "rakipler: 2-3-6".
+   * Number-only source evidence, later resolved against
+   * canonical TJK identity.
    */
   return 0.85;
 }
 
 
-function mapRawPick(
+function mapFlatRawPick(
   raw:
-    RawExpertPick
+    FlatRawPick
 ): ExpertPickInput | null {
   const city =
     String(
       raw.city ??
       ""
-    ).trim();
+    )
+      .trim();
 
 
   const raceNumber =
@@ -250,21 +388,27 @@ function mapRawPick(
 
   const labels =
     new Set<RawExpertLabel>(
-      Array.isArray(
-        raw.labels
+      (
+        Array.isArray(
+          raw.labels
+        )
+          ? raw.labels
+          : []
       )
-        ? raw.labels.filter(
+        .filter(
+          (
+            value
+          ): value is RawExpertLabel =>
             (
-              value
-            ): value is RawExpertLabel =>
-              (
-                RAW_EXPERT_LABELS as
-                  readonly string[]
-              ).includes(
-                String(value)
+              RAW_EXPERT_LABELS as
+                readonly string[]
+            )
+              .includes(
+                String(
+                  value
+                )
               )
-          )
-        : []
+        )
     );
 
 
@@ -327,9 +471,6 @@ function mapRawPick(
         "avoid"
       ),
 
-    /*
-     * Ordinary prose does not establish a ranked list.
-     */
     sourceRank:
       null,
 
@@ -342,16 +483,109 @@ function mapRawPick(
 }
 
 
+function mergeMappedPick(
+  merged:
+    Map<
+      string,
+      ExpertPickInput
+    >,
+
+  mapped:
+    ExpertPickInput
+): void {
+  const key =
+    duplicateKey(
+      mapped.city,
+      mapped.raceNumber,
+      mapped.horseNumber
+    );
+
+
+  const previous =
+    merged.get(
+      key
+    );
+
+
+  if (!previous) {
+    merged.set(
+      key,
+      mapped
+    );
+
+    return;
+  }
+
+
+  const previousCommentLength =
+    previous.comment
+      ?.length ??
+    0;
+
+
+  const mappedCommentLength =
+    mapped.comment
+      ?.length ??
+    0;
+
+
+  merged.set(
+    key,
+    {
+      ...previous,
+
+      horseName:
+        previous.horseName ??
+        mapped.horseName,
+
+      comment:
+        mappedCommentLength >
+        previousCommentLength
+          ? mapped.comment
+          : previous.comment,
+
+      isFavorite:
+        previous.isFavorite ||
+        mapped.isFavorite,
+
+      isBanko:
+        previous.isBanko ||
+        mapped.isBanko,
+
+      isStrong:
+        previous.isStrong ||
+        mapped.isStrong,
+
+      isStar:
+        previous.isStar ||
+        mapped.isStar,
+
+      isRival:
+        previous.isRival ||
+        mapped.isRival,
+
+      isSurprise:
+        previous.isSurprise ||
+        mapped.isSurprise,
+
+      isAvoid:
+        previous.isAvoid ||
+        mapped.isAvoid,
+
+      confidence:
+        Math.max(
+          previous.confidence,
+          mapped.confidence
+        )
+    }
+  );
+}
+
+
 export function mapRawExpertExtraction(
   raw:
     RawExpertExtraction
 ): ExpertExtractionInput {
-  /*
-   * One source/runner becomes one persisted row.
-   *
-   * If the source mentions the same runner more than once,
-   * labels are merged rather than creating conflicting rows.
-   */
   const merged =
     new Map<
       string,
@@ -360,104 +594,141 @@ export function mapRawExpertExtraction(
 
 
   for (
-    const rawPick of
-    raw.picks ?? []
+    const race of
+    raw.races ??
+    []
   ) {
-    const mapped =
-      mapRawPick(
-        rawPick
+    const city =
+      String(
+        race.city ??
+        ""
+      )
+        .trim();
+
+
+    const raceNumber =
+      Number(
+        race.raceNumber
       );
 
 
-    if (!mapped) {
-      continue;
-    }
+    /*
+     * Explicit/named selections.
+     */
+    for (
+      const selection of
+      race.selections ??
+      []
+    ) {
+      const mapped =
+        mapFlatRawPick({
+          city,
+          raceNumber,
+
+          horseNumber:
+            Number(
+              selection.horseNumber
+            ),
+
+          horseName:
+            selection.horseName,
+
+          comment:
+            selection.comment,
+
+          labels:
+            selection.labels
+        });
 
 
-    const key =
-      duplicateKey(
-        mapped.city,
-        mapped.raceNumber,
-        mapped.horseNumber
-      );
-
-
-    const previous =
-      merged.get(key);
-
-
-    if (!previous) {
-      merged.set(
-        key,
-        mapped
-      );
-
-      continue;
-    }
-
-
-    const previousCommentLength =
-      previous.comment
-        ?.length ??
-      0;
-
-
-    const mappedCommentLength =
-      mapped.comment
-        ?.length ??
-      0;
-
-
-    merged.set(
-      key,
-      {
-        ...previous,
-
-        horseName:
-          previous.horseName ??
-          mapped.horseName,
-
-        comment:
-          mappedCommentLength >
-          previousCommentLength
-            ? mapped.comment
-            : previous.comment,
-
-        isFavorite:
-          previous.isFavorite ||
-          mapped.isFavorite,
-
-        isBanko:
-          previous.isBanko ||
-          mapped.isBanko,
-
-        isStrong:
-          previous.isStrong ||
-          mapped.isStrong,
-
-        isStar:
-          previous.isStar ||
-          mapped.isStar,
-
-        isRival:
-          previous.isRival ||
-          mapped.isRival,
-
-        isSurprise:
-          previous.isSurprise ||
-          mapped.isSurprise,
-
-        isAvoid:
-          previous.isAvoid ||
-          mapped.isAvoid,
-
-        confidence:
-          Math.max(
-            previous.confidence,
-            mapped.confidence
-          )
+      if (mapped) {
+        mergeMappedPick(
+          merged,
+          mapped
+        );
       }
-    );
+    }
+
+
+    /*
+     * Compact AI transport groups become separate
+     * horse-level domain rows here.
+     */
+    for (
+      const group of
+      race.numberGroups ??
+      []
+    ) {
+      const label =
+        String(
+          group.label ??
+          ""
+        ) as
+          RawExpertLabel;
+
+
+      if (
+        !(
+          RAW_EXPERT_LABELS as
+            readonly string[]
+        )
+          .includes(
+            label
+          )
+      ) {
+        continue;
+      }
+
+
+      const uniqueNumbers =
+        new Set<number>(
+          (
+            group.horseNumbers ??
+            []
+          )
+            .map(
+              Number
+            )
+            .filter(
+              value =>
+                Number.isInteger(
+                  value
+                ) &&
+                value > 0
+            )
+        );
+
+
+      for (
+        const horseNumber of
+        uniqueNumbers
+      ) {
+        const mapped =
+          mapFlatRawPick({
+            city,
+            raceNumber,
+            horseNumber,
+
+            horseName:
+              null,
+
+            comment:
+              null,
+
+            labels: [
+              label
+            ]
+          });
+
+
+        if (mapped) {
+          mergeMappedPick(
+            merged,
+            mapped
+          );
+        }
+      }
+    }
   }
 
 

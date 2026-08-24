@@ -503,6 +503,8 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
       source_name,
       homepage_url,
       last_working_url,
+      last_discovered_article_url,
+      last_discovered_article_at,
       last_discovered_from_url,
       last_discovery_method,
       last_extraction_method,

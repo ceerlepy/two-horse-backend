@@ -116,7 +116,20 @@ const OBVIOUS_NON_CONTENT_PATHS = [
   "/contact",
   "/iletisim",
   "/about",
-  "/hakkimizda"
+  "/hakkimizda",
+
+  /*
+   * Racing utility pages.
+   *
+   * These may contain today's date, city and horse numbers
+   * and can therefore look semantically relevant despite
+   * not being editorial prediction articles.
+   */
+  "/kayitlar",
+  "/program",
+  "/sonuclar",
+  "/muhtemeller",
+  "/istatistik"
 ];
 
 
@@ -132,7 +145,7 @@ function cleanText(
 }
 
 
-function isUsableCandidate(
+export function isUsableCandidate(
   landingUrl: string,
   url: string
 ): boolean {

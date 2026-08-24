@@ -4,23 +4,28 @@ import type {
 
 
 /*
- * These are semantic entry points, not acquisition fallbacks.
+ * Durable entry/current-page URLs.
  *
- * Acquisition fallback already exists in:
- * extractSemanticJson():
+ * These URLs are discovery/current-page entry points.
  *
- *   CF_JSON(url)
- *   -> CF_SCRAPE(url) -> CF_JSON(html)
- *   -> CF_CONTENT(url) -> CF_JSON(html)
- *
- * This file solves a different problem:
- * choosing the correct CURRENT prediction page/index URL
- * before that acquisition chain runs.
+ * Dynamically discovered daily article URLs do not belong
+ * here.
  */
 const VERIFIED_ENTRY_URLS:
-  Record<string,string[]> = {
+  Record<
+    string,
+    string[]
+  > = {
 
   liderform: [
+    /*
+     * Verified Liderform analysis category.
+     * This is intentionally first because it contains a
+     * much cleaner candidate set than the general home
+     * page.
+     */
+    "https://liderform.com.tr/haberler/analizler",
+
     "https://liderform.com.tr/",
     "https://liderform.com.tr/uzman-listesi/"
   ],
@@ -62,15 +67,22 @@ const VERIFIED_ENTRY_URLS:
 
 
 function normalizeUrl(
-  value:string | null | undefined
-):string | null {
+  value:
+    string |
+    null |
+    undefined
+): string | null {
   if (!value) {
     return null;
   }
 
+
   try {
     const url =
-      new URL(value);
+      new URL(
+        value
+      );
+
 
     if (
       url.protocol !== "https:" &&
@@ -79,9 +91,14 @@ function normalizeUrl(
       return null;
     }
 
-    url.hash = "";
 
-    return url.toString();
+    url.hash =
+      "";
+
+
+    return url
+      .toString();
+
   } catch {
     return null;
   }
@@ -99,26 +116,39 @@ function dedupeUrls(
   const seen =
     new Set<string>();
 
+
   const result:
     string[] = [];
 
 
-  for (const raw of values) {
+  for (
+    const raw of
+    values
+  ) {
     const url =
-      normalizeUrl(raw);
+      normalizeUrl(
+        raw
+      );
 
 
     if (
       !url ||
-      seen.has(url)
+      seen.has(
+        url
+      )
     ) {
       continue;
     }
 
 
-    seen.add(url);
+    seen.add(
+      url
+    );
 
-    result.push(url);
+
+    result.push(
+      url
+    );
   }
 
 
@@ -126,12 +156,6 @@ function dedupeUrls(
 }
 
 
-/*
- * Durable discovery/current-page entry points.
- *
- * A dynamically discovered daily article is intentionally
- * NOT part of this set.
- */
 export function expertLandingUrls(
   source:
     ExpertSource
@@ -140,7 +164,8 @@ export function expertLandingUrls(
     ...(
       VERIFIED_ENTRY_URLS[
         source.source_key
-      ] ?? []
+      ] ??
+      []
     ),
 
     source.homepage_url
@@ -148,15 +173,6 @@ export function expertLandingUrls(
 }
 
 
-/*
- * Full routing order.
- *
- * last_working_url stays first for same-day/stable-page
- * cache reuse.
- *
- * service.ts decides whether that working URL is eligible
- * for reuse on the current Turkey date.
- */
 export function expertUrlCandidates(
   source:
     ExpertSource

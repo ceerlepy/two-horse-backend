@@ -6,8 +6,10 @@ import type {
   ExpertSource
 } from "./source-types";
 
+
 export async function activeExpertSources(
-  env: Env
+  env:
+    Env
 ): Promise<ExpertSource[]> {
   const result =
     await env.DB.prepare(`
@@ -16,9 +18,13 @@ export async function activeExpertSources(
         source_name,
         homepage_url,
         last_working_url,
+        last_discovered_article_url,
+        last_discovered_article_at,
         content_hash,
         last_checked_at,
         last_success_at,
+        last_failure_at,
+        consecutive_failures,
         source_type,
         base_weight
       FROM source_registry
@@ -27,32 +33,41 @@ export async function activeExpertSources(
     `)
       .all<ExpertSource>();
 
+
   return (
     result.results ??
     []
   );
 }
 
+
 export async function recordExpertRefreshTrace(
-  env: Env,
-  sourceKey: string,
-  phase: string,
-  currentUrl: string | null = null,
-  details: unknown = null,
-  startedAt: string | null = null
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  phase:
+    string,
+
+  currentUrl:
+    string | null = null,
+
+  details:
+    unknown = null,
+
+  startedAt:
+    string | null = null
 ): Promise<void> {
   const now =
-    new Date().toISOString();
+    new Date()
+      .toISOString();
 
 
-  /*
-   * PROCESS_START opens a NEW refresh execution.
-   *
-   * Every later phase keeps that execution's original
-   * start timestamp.
-   */
   const effectiveStartedAt =
-    phase === "PROCESS_START"
+    phase ===
+      "PROCESS_START"
       ? now
       : startedAt;
 
@@ -94,9 +109,12 @@ export async function recordExpertRefreshTrace(
       phase,
       currentUrl,
 
-      details === null
+      details ===
+        null
         ? null
-        : JSON.stringify(details),
+        : JSON.stringify(
+            details
+          ),
 
       effectiveStartedAt,
       now
@@ -106,8 +124,11 @@ export async function recordExpertRefreshTrace(
 
 
 export async function markExpertChecked(
-  env: Env,
-  sourceKey: string
+  env:
+    Env,
+
+  sourceKey:
+    string
 ): Promise<void> {
   await env.DB.prepare(`
     UPDATE source_registry
@@ -126,27 +147,105 @@ export async function markExpertChecked(
     .run();
 }
 
+
+/*
+ * Discovery success is weaker than extraction success.
+ *
+ * It records:
+ *
+ * article URL
+ * landing URL
+ * discovery method
+ *
+ * It deliberately does NOT write:
+ *
+ * last_working_url
+ * last_extraction_method
+ * last_success_at
+ * health_status=healthy
+ */
+export async function recordExpertDiscovery(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  articleUrl:
+    string,
+
+  discoveredFromUrl:
+    string,
+
+  discoveryMethod:
+    string
+): Promise<void> {
+  const now =
+    new Date()
+      .toISOString();
+
+
+  await env.DB.prepare(`
+    UPDATE source_registry
+    SET
+      last_discovered_article_url = ?,
+      last_discovered_article_at = ?,
+      last_discovered_from_url = ?,
+      last_discovery_method = ?,
+      updated_at =
+        CURRENT_TIMESTAMP
+    WHERE source_key = ?
+  `)
+    .bind(
+      articleUrl,
+      now,
+      discoveredFromUrl,
+      discoveryMethod,
+      sourceKey
+    )
+    .run();
+}
+
+
 export async function markExpertHealthy(
-  env: Env,
-  sourceKey: string,
-  contentHash: string,
-  workingUrl?: string | null,
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  contentHash:
+    string,
+
+  workingUrl?:
+    string | null,
+
   diagnostics?: {
-    discoveredFromUrl?: string | null;
-    discoveryMethod?: string | null;
-    extractionMethod?: string | null;
+    discoveredFromUrl?:
+      string | null;
+
+    discoveryMethod?:
+      string | null;
+
+    extractionMethod?:
+      string | null;
   }
 ): Promise<void> {
   const now =
     new Date()
       .toISOString();
 
+
   await env.DB.prepare(`
     UPDATE source_registry
     SET
       content_hash = ?,
+
       last_working_url =
-        COALESCE(?,last_working_url),
+        COALESCE(
+          ?,
+          last_working_url
+        ),
 
       last_discovered_from_url =
         COALESCE(
@@ -175,15 +274,20 @@ export async function markExpertHealthy(
   `)
     .bind(
       contentHash,
-      workingUrl ?? null,
 
-      diagnostics?.discoveredFromUrl ??
+      workingUrl ??
         null,
 
-      diagnostics?.discoveryMethod ??
+      diagnostics
+        ?.discoveredFromUrl ??
         null,
 
-      diagnostics?.extractionMethod ??
+      diagnostics
+        ?.discoveryMethod ??
+        null,
+
+      diagnostics
+        ?.extractionMethod ??
         null,
 
       now,
@@ -192,17 +296,23 @@ export async function markExpertHealthy(
     .run();
 }
 
+
 export async function markExpertFailure(
-  env: Env,
-  sourceKey: string
+  env:
+    Env,
+
+  sourceKey:
+    string
 ): Promise<void> {
   await env.DB.prepare(`
     UPDATE source_registry
     SET
       health_status = 'degraded',
       last_failure_at = ?,
+
       consecutive_failures =
         consecutive_failures + 1,
+
       updated_at =
         CURRENT_TIMESTAMP
     WHERE source_key = ?

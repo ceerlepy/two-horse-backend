@@ -1,40 +1,168 @@
 export function expertCheckIntervalMs(
-  minutesToNextRace: number | null
+  minutesToNextRace:
+    number | null
 ): number | null {
   /*
-   * Expert acquisition exists only to improve an upcoming
-   * pre-race prediction.
+   * No upcoming canonical race:
    *
-   * No upcoming canonical race means:
-   *
-   * - no expert source refresh;
-   * - no Browser Run;
-   * - no Workers AI / RTN usage.
-   *
-   * The Worker cron itself may continue because results,
-   * history, learning and cleanup have independent jobs.
+   * no expert Browser work
+   * no expert Workers AI
    */
   if (
-    minutesToNextRace === null ||
-    minutesToNextRace <= 0
+    minutesToNextRace ===
+      null ||
+    minutesToNextRace <=
+      0
   ) {
     return null;
   }
 
 
   if (
-    minutesToNextRace <= 30
+    minutesToNextRace <=
+    30
   ) {
-    return 5 * 60_000;
+    return 5 *
+      60_000;
   }
 
 
   if (
-    minutesToNextRace <= 120
+    minutesToNextRace <=
+    120
   ) {
-    return 10 * 60_000;
+    return 10 *
+      60_000;
   }
 
 
-  return 15 * 60_000;
+  return 15 *
+    60_000;
+}
+
+
+/*
+ * A broken source must not consume semantic AI on every
+ * global refresh.
+ *
+ * Backoff stays bounded so a recovered source can rejoin.
+ *
+ * Near the next race we shorten the cap.
+ */
+export function expertFailureBackoffMs(
+  consecutiveFailures:
+    number,
+
+  minutesToNextRace:
+    number | null
+): number {
+  const failures =
+    Math.max(
+      0,
+
+      Math.floor(
+        Number(
+          consecutiveFailures
+        ) ||
+        0
+      )
+    );
+
+
+  if (!failures) {
+    return 0;
+  }
+
+
+  let minutes =
+    failures ===
+      1
+      ? 15
+
+      : failures ===
+          2
+        ? 30
+        : 60;
+
+
+  if (
+    minutesToNextRace !==
+      null &&
+    minutesToNextRace <=
+      30
+  ) {
+    minutes =
+      Math.min(
+        minutes,
+        10
+      );
+
+  } else if (
+    minutesToNextRace !==
+      null &&
+    minutesToNextRace <=
+      120
+  ) {
+    minutes =
+      Math.min(
+        minutes,
+        20
+      );
+  }
+
+
+  return minutes *
+    60_000;
+}
+
+
+export function expertFailureBackoffRemainingMs(
+  consecutiveFailures:
+    number,
+
+  lastFailureAt:
+    string |
+    null |
+    undefined,
+
+  minutesToNextRace:
+    number | null,
+
+  nowMs =
+    Date.now()
+): number {
+  if (!lastFailureAt) {
+    return 0;
+  }
+
+
+  const failureTime =
+    Date.parse(
+      lastFailureAt
+    );
+
+
+  if (
+    !Number.isFinite(
+      failureTime
+    )
+  ) {
+    return 0;
+  }
+
+
+  const backoff =
+    expertFailureBackoffMs(
+      consecutiveFailures,
+      minutesToNextRace
+    );
+
+
+  return Math.max(
+    0,
+
+    failureTime +
+      backoff -
+      nowMs
+  );
 }

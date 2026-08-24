@@ -21,7 +21,7 @@ describe(
   "expert pipeline architecture",
   () => {
     it(
-      "keeps coupon legs outside expert extraction",
+      "keeps coupon legs outside extraction",
       () => {
         const prompt =
           expertExtractionPrompt(
@@ -29,54 +29,139 @@ describe(
           );
 
 
-        expect(prompt)
+        expect(
+          prompt
+        )
           .toContain(
             "ALTILI GANYAN"
           );
 
 
-        expect(prompt)
+        expect(
+          prompt
+        )
           .toContain(
-            "1.Ayak:"
-          );
-
-
-        expect(prompt)
-          .toContain(
-            'labels=["rival"]'
+            "numberGroups"
           );
       }
     );
 
 
     it(
-      "maps compact semantic labels into domain flags",
+      "expands compact number groups into separate horse-level picks",
       () => {
         const mapped =
           mapRawExpertExtraction({
-            picks: [
+            races: [
               {
                 city:
-                  "İstanbul",
+                  "Bursa",
 
                 raceNumber:
-                  5,
+                  6,
 
-                horseNumber:
-                  1,
+                selections: [
+                  {
+                    horseNumber:
+                      2,
 
-                horseName:
-                  "PRANDELLO",
+                    horseName:
+                      "BIG HONEY",
 
-                comment:
-                  "birinciliğin en güçlü adayıdır",
+                    comment:
+                      "kazanmaya yakındır",
 
-                labels: [
-                  "favorite",
-                  "strong"
+                    labels: [
+                      "strong"
+                    ]
+                  }
+                ],
+
+                numberGroups: [
+                  {
+                    label:
+                      "rival",
+
+                    horseNumbers: [
+                      6,
+                      1,
+                      8
+                    ]
+                  }
                 ]
-              },
+              }
+            ]
+          });
 
+
+        /*
+         * Main horse + 3 rivals.
+         *
+         * Four separate final horse records.
+         */
+        expect(
+          mapped.picks
+        )
+          .toHaveLength(
+            4
+          );
+
+
+        const bigHoney =
+          mapped.picks.find(
+            item =>
+              item.horseNumber ===
+              2
+          );
+
+
+        expect(
+          bigHoney?.isStrong
+        )
+          .toBe(
+            true
+          );
+
+
+        for (
+          const number of
+          [
+            6,
+            1,
+            8
+          ]
+        ) {
+          const rival =
+            mapped.picks.find(
+              item =>
+                item.horseNumber ===
+                number
+            );
+
+
+          expect(
+            rival?.isRival
+          )
+            .toBe(
+              true
+            );
+
+
+          expect(
+            rival?.horseName
+          )
+            .toBeNull();
+        }
+      }
+    );
+
+
+    it(
+      "merges multiple labels for the same horse",
+      () => {
+        const mapped =
+          mapRawExpertExtraction({
+            races: [
               {
                 city:
                   "İstanbul",
@@ -84,17 +169,30 @@ describe(
                 raceNumber:
                   5,
 
-                horseNumber:
-                  2,
+                selections: [
+                  {
+                    horseNumber:
+                      1,
 
-                horseName:
-                  null,
+                    horseName:
+                      "PRANDELLO",
 
-                comment:
-                  null,
+                    labels: [
+                      "favorite",
+                      "strong"
+                    ]
+                  }
+                ],
 
-                labels: [
-                  "rival"
+                numberGroups: [
+                  {
+                    label:
+                      "rival",
+
+                    horseNumbers: [
+                      1
+                    ]
+                  }
                 ]
               }
             ]
@@ -103,43 +201,43 @@ describe(
 
         expect(
           mapped.picks
-        ).toHaveLength(2);
+        )
+          .toHaveLength(
+            1
+          );
 
 
         expect(
           mapped.picks[0]
             .isFavorite
-        ).toBe(true);
+        )
+          .toBe(
+            true
+          );
 
 
         expect(
           mapped.picks[0]
             .isStrong
-        ).toBe(true);
+        )
+          .toBe(
+            true
+          );
 
 
         expect(
-          mapped.picks[1]
+          mapped.picks[0]
             .isRival
-        ).toBe(true);
-
-
-        expect(
-          mapped.picks[1]
-            .horseName
-        ).toBeNull();
-
-
-        expect(
-          mapped.picks[1]
-            .confidence
-        ).toBeGreaterThan(0);
+        )
+          .toBe(
+            true
+          );
       }
     );
 
 
     it(
-      "preserves output order under bounded concurrency",
+      "preserves mapLimit output order",
       async () => {
         const values =
           await mapLimit(
@@ -152,11 +250,14 @@ describe(
             2,
 
             async value =>
-              value * 10
+              value *
+              10
           );
 
 
-        expect(values)
+        expect(
+          values
+        )
           .toEqual(
             [
               10,
