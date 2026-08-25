@@ -1457,6 +1457,88 @@ async function discoverFromLanding(
   }
 
 
+  /*
+   * Last transport may fail even though earlier structural
+   * stages already produced usable candidates.
+   *
+   * Never discard that accumulated pool.
+   */
+  const finalCandidates =
+    candidatePoolValues(
+      pool
+    );
+
+
+  const finalFingerprint =
+    candidateFingerprint(
+      finalCandidates
+    );
+
+
+  const shouldFinalize =
+    finalCandidates.length > 0 &&
+    (
+      finalFingerprint !==
+        lastSelectionFingerprint ||
+      lastSelectionHadError
+    );
+
+
+  diagnostics.finalPoolSelection = {
+    candidateCount:
+      finalCandidates.length,
+
+    attempted:
+      shouldFinalize,
+
+    selected:[],
+    aiError:null
+  };
+
+
+  if (shouldFinalize) {
+    const finalSelection =
+      await selectCurrentTargets(
+        env,
+        sourceKey,
+        sourceName,
+        landingUrl,
+        raceDate,
+        cities,
+        finalCandidates
+      );
+
+
+    diagnostics.finalPoolSelection = {
+      candidateCount:
+        finalCandidates.length,
+
+      attempted:true,
+
+      selected:
+        finalSelection.urls,
+
+      aiError:
+        finalSelection.aiError
+    };
+
+
+    if (
+      finalSelection.urls.length
+    ) {
+      return {
+        urls:
+          finalSelection.urls,
+
+        method:
+          "final-pool-workers-ai-candidate-selection",
+
+        diagnostics
+      };
+    }
+  }
+
+
   return {
     urls:[],
 
@@ -1678,6 +1760,214 @@ async function recoverLandingFromRoot(
 }
 
 
+export function directPageDateEvidence(
+  sourceKey:
+    string,
+
+  rawText:
+    string,
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+) {
+  const source =
+    expertSourceConfig(
+      sourceKey
+    );
+
+
+  const policy =
+    source
+      .directPageDatePolicy ??
+    "none";
+
+
+  if (
+    policy ===
+    "none"
+  ) {
+    return {
+      ok:true,
+      policy,
+      reason:null
+    };
+  }
+
+
+  const headCharacters =
+    EXPERT_ACQUISITION_CONFIG
+      .extraction
+      .directPageDateEvidenceCharacters;
+
+
+  const text =
+    normalizeExpertSearchText(
+      rawText.slice(
+        0,
+        headCharacters
+      )
+    );
+
+
+  if (
+    policy ===
+    "target-date"
+  ) {
+    const hit =
+      buildExpertRaceDateTokens(
+        raceDate,
+        {
+          allowYearless:
+            source
+              .allowYearlessDateEvidence
+        }
+      ).some(
+        token =>
+          token &&
+          text.includes(
+            token
+          )
+      );
+
+
+    return {
+      ok:hit,
+      policy,
+
+      reason:
+        hit
+          ? null
+          : "TARGET_DATE_NOT_FOUND"
+    };
+  }
+
+
+  /*
+   * Publication date alone is not enough.
+   *
+   * Example:
+   * 26 AĞUSTOS İSTANBUL TAHMİNLERİ
+   * 25.08.2026   <-- publication date
+   *
+   * For target 25 August this must fail.
+   */
+  const dateTokens =
+    buildExpertRaceDateTokens(
+      raceDate,
+      {
+        allowYearless:true
+      }
+    ).filter(
+      token =>
+        /[a-z]/i.test(
+          token
+        )
+    );
+
+
+  const targetCities =
+    cities.map(
+      normalizeExpertSearchText
+    );
+
+
+  const predictionTerms =
+    [
+      "tahmin",
+      "altılı",
+      "ganyan"
+    ].map(
+      normalizeExpertSearchText
+    );
+
+
+  for (const token of dateTokens) {
+    let from=0;
+
+    while (
+      from <
+      text.length
+    ) {
+      const index =
+        text.indexOf(
+          token,
+          from
+        );
+
+
+      if (
+        index < 0
+      ) {
+        break;
+      }
+
+
+      const window =
+        text.slice(
+          Math.max(
+            0,
+            index - 80
+          ),
+          Math.min(
+            text.length,
+            index + 280
+          )
+        );
+
+
+      const cityHit =
+        targetCities.some(
+          city =>
+            window.includes(
+              city
+            )
+        );
+
+
+      const predictionHit =
+        predictionTerms.some(
+          term =>
+            window.includes(
+              term
+            )
+        );
+
+
+      if (
+        cityHit &&
+        predictionHit
+      ) {
+        return {
+          ok:true,
+          policy,
+          reason:null
+        };
+      }
+
+
+      from =
+        index +
+        Math.max(
+          token.length,
+          1
+        );
+    }
+  }
+
+
+  return {
+    ok:false,
+    policy,
+
+    reason:
+      "TARGET_CITY_DATE_HEADING_NOT_FOUND"
+  };
+}
+
+
 function directPageEvidence(
   sourceKey:
     string,
@@ -1685,9 +1975,12 @@ function directPageEvidence(
   html:
     string,
 
+  raceDate:
+    string,
+
   cities:
     string[]
-): boolean {
+) {
   const source =
     expertSourceConfig(
       sourceKey
@@ -1702,9 +1995,22 @@ function directPageEvidence(
     .remove();
 
 
+  const rawText =
+    $("body").text();
+
+
   const text =
     normalizeExpertSearchText(
-      $("body").text()
+      rawText
+    );
+
+
+  const dateEvidence =
+    directPageDateEvidence(
+      sourceKey,
+      rawText,
+      raceDate,
+      cities
     );
 
 
@@ -1714,7 +2020,11 @@ function directPageEvidence(
       .extraction
       .minimumTextCharacters
   ) {
-    return false;
+    return {
+      usable:false,
+      reason:"TEXT_TOO_SMALL",
+      dateEvidence
+    };
   }
 
 
@@ -1733,7 +2043,22 @@ function directPageEvidence(
 
 
   if (!racing) {
-    return false;
+    return {
+      usable:false,
+      reason:
+        "NO_EXPERT_RACING_EVIDENCE",
+      dateEvidence
+    };
+  }
+
+
+  if (!dateEvidence.ok) {
+    return {
+      usable:false,
+      reason:
+        dateEvidence.reason,
+      dateEvidence
+    };
   }
 
 
@@ -1741,18 +2066,36 @@ function directPageEvidence(
     !source
       .preflightRequiresCity
   ) {
-    return true;
+    return {
+      usable:true,
+      reason:null,
+      dateEvidence
+    };
   }
 
 
-  return cities.some(
-    city =>
-      text.includes(
-        normalizeExpertSearchText(
-          city
+  const cityHit =
+    cities.some(
+      city =>
+        text.includes(
+          normalizeExpertSearchText(
+            city
+          )
         )
-      )
-  );
+    );
+
+
+  return {
+    usable:
+      cityHit,
+
+    reason:
+      cityHit
+        ? null
+        : "NO_TARGET_CITY_EVIDENCE",
+
+    dateEvidence
+  };
 }
 
 
@@ -1764,6 +2107,9 @@ async function probeDirectPage(
     string,
 
   url:
+    string,
+
+  raceDate:
     string,
 
   cities:
@@ -1789,10 +2135,11 @@ async function probeDirectPage(
         );
 
 
-      const usable =
+      const evidence =
         directPageEvidence(
           sourceKey,
           acquired.html,
+          raceDate,
           cities
         );
 
@@ -1803,11 +2150,20 @@ async function probeDirectPage(
         bodyLength:
           acquired.bodyLength,
 
-        usable
+        usable:
+          evidence.usable,
+
+        reason:
+          evidence.reason,
+
+        dateEvidence:
+          evidence.dateEvidence
       });
 
 
-      if (usable) {
+      if (
+        evidence.usable
+      ) {
         return {
           ok:true,
           diagnostics
@@ -1847,6 +2203,9 @@ export async function resolveDirectCurrentPageUrl(
   rootUrl:
     string | null,
 
+  raceDate:
+    string,
+
   cities:
     string[]
 ): Promise<DirectCurrentPageResolution> {
@@ -1873,6 +2232,7 @@ export async function resolveDirectCurrentPageUrl(
         env,
         sourceKey,
         url,
+        raceDate,
         cities
       );
 
@@ -1916,6 +2276,7 @@ export async function resolveDirectCurrentPageUrl(
           env,
           sourceKey,
           recovery.url,
+          raceDate,
           cities
         );
 

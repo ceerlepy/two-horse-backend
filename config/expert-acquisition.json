@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -112,7 +112,8 @@
       "altılı",
       "ayak",
       "yorum"
-    ]
+    ],
+    "directPageDateEvidenceCharacters": 4000
   },
   "sources": {
     "liderform": {
@@ -147,7 +148,8 @@
       "allowYearlessDateEvidence": false,
       "excludedCandidateTerms": [
         "takip edilmesi gereken safkanlar"
-      ]
+      ],
+      "completenessProfile": "liderform-main"
     },
     "yaris_dergisi": {
       "host": "yarisdergisi.com",
@@ -156,6 +158,7 @@
       "rootIsEditorial": true,
       "preflightRequiresCity": true,
       "entryUrls": [
+        "https://www.yarisdergisi.com/tag/yaris-tahminleri/",
         "https://www.yarisdergisi.com/"
       ],
       "navigationLabels": [
@@ -207,7 +210,8 @@
         "şili",
         "fransa",
         "birleşik krallık"
-      ]
+      ],
+      "completenessProfile": "coupon-explicit"
     },
     "horseturk": {
       "host": "horseturk.com",
@@ -239,7 +243,8 @@
         }
       ],
       "allowYearlessDateEvidence": false,
-      "excludedCandidateTerms": []
+      "excludedCandidateTerms": [],
+      "completenessProfile": "coupon-explicit"
     },
     "yaris_analizi": {
       "host": "yarisanalizi.com",
@@ -266,7 +271,14 @@
         }
       ],
       "allowYearlessDateEvidence": false,
-      "excludedCandidateTerms": []
+      "excludedCandidateTerms": [],
+      "completenessProfile": "coupon-explicit",
+      "accessDeniedTerms": [
+        "yetkiniz yok",
+        "vip üyelerimize özeldir",
+        "bu alana giremezler",
+        "vip üye ol"
+      ]
     },
     "istinye_ganyan": {
       "host": "istinyeganyan.com",
@@ -284,7 +296,8 @@
       "contextBoostTerms": [],
       "preferredPathRules": [],
       "allowYearlessDateEvidence": false,
-      "excludedCandidateTerms": []
+      "excludedCandidateTerms": [],
+      "directPageDatePolicy": "target-city-heading"
     },
     "ganyan_canavari": {
       "host": "ganyancanavari.com.tr",
@@ -293,9 +306,15 @@
       "rootIsEditorial": true,
       "preflightRequiresCity": true,
       "entryUrls": [
+        "https://www.ganyancanavari.com.tr/site/yaris-programi.html",
+        "https://www.ganyancanavari.com.tr/site/gunluk-galoplar.html",
         "https://www.ganyancanavari.com.tr/"
       ],
-      "navigationLabels": [],
+      "navigationLabels": [
+        "Yarış Programı",
+        "Günlük Galoplar",
+        "Galoplar (Özet)"
+      ],
       "contextBoostTerms": [
         "En Son Yorumlar",
         "Banko Gösterilenler"
@@ -337,7 +356,8 @@
       "contextBoostTerms": [],
       "preferredPathRules": [],
       "allowYearlessDateEvidence": false,
-      "excludedCandidateTerms": []
+      "excludedCandidateTerms": [],
+      "directPageDatePolicy": "target-date"
     }
   }
 }

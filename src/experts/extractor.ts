@@ -48,6 +48,12 @@ import {
   isLiderformSourceName
 } from "./liderform-completeness";
 
+import {
+  explicitCouponExpectedSelections,
+  explicitCouponExpectationPrompt,
+  inspectExplicitCouponCompleteness
+} from "./coupon-completeness";
+
 
 export interface ExtractedExperts {
   extraction:
@@ -110,6 +116,36 @@ function preflight(
     );
 
 
+  const source =
+    expertSourceConfig(
+      sourceKey
+    );
+
+
+  const accessDeniedTerm =
+    (
+      source.accessDeniedTerms ??
+      []
+    ).find(
+      term =>
+        normalized.includes(
+          normalizeExpertSearchText(
+            term
+          )
+        )
+    );
+
+
+  if (accessDeniedTerm) {
+    return {
+      ok:false,
+
+      reason:
+        `ACCESS_RESTRICTED:${accessDeniedTerm}`
+    };
+  }
+
+
   const racing =
     extraction
       .relevanceTerms
@@ -134,9 +170,7 @@ function preflight(
 
 
   if (
-    !expertSourceConfig(
-      sourceKey
-    )
+    !source
       .preflightRequiresCity
   ) {
     return {
@@ -445,6 +479,28 @@ async function acquireDocument(
   }
 
 
+  const accessRestricted =
+    failures.some(
+      failure =>
+        String(
+          failure?.reason ??
+          ""
+        ).startsWith(
+          "ACCESS_RESTRICTED:"
+        )
+    );
+
+
+  if (accessRestricted) {
+    throw new Error(
+      "EXPERT_ACCESS_RESTRICTED:" +
+      JSON.stringify(
+        failures
+      )
+    );
+  }
+
+
   throw new Error(
     "EXPERT_DOCUMENT_ACQUISITION_FAILED:" +
     JSON.stringify(
@@ -650,7 +706,43 @@ export async function extractExperts(
     );
 
 
-  const prompt =
+  const sourceConfig =
+    expertSourceConfig(
+      sourceKey
+    );
+
+
+  const completenessProfile =
+    sourceConfig
+      .completenessProfile ??
+    (
+      sourceConfig.promptProfile ===
+        "liderform"
+        ? "liderform-main"
+        : "none"
+    );
+
+
+  const liderformMode =
+    completenessProfile ===
+      "liderform-main" ||
+    isLiderformSourceName(
+      sourceName
+    );
+
+
+  const couponExpected =
+    completenessProfile ===
+      "coupon-explicit"
+      ? explicitCouponExpectedSelections(
+          document.semanticText,
+          cities,
+          sixfoldStarts
+        )
+      : [];
+
+
+  const basePrompt =
     expertExtractionPrompt(
       sourceName,
       raceDate,
@@ -660,15 +752,21 @@ export async function extractExperts(
     );
 
 
-  const liderformMode =
-    expertSourceConfig(
-      sourceKey
-    )
-      .promptProfile ===
-      "liderform" ||
-    isLiderformSourceName(
-      sourceName
-    );
+  const prompt =
+    couponExpected.length
+      ? [
+          basePrompt,
+          "",
+          explicitCouponExpectationPrompt(
+            couponExpected
+          )
+        ].join("\n")
+      : basePrompt;
+
+
+  const explicitEvidence =
+    liderformMode ||
+    couponExpected.length > 0;
 
 
   const semantic =
@@ -677,20 +775,40 @@ export async function extractExperts(
       document.semanticText,
       prompt,
       {
+        requireRace:
+          explicitEvidence,
+
         requireSelectionPerRace:
-          liderformMode
+          explicitEvidence
       }
     );
 
 
-  const completeness =
+  const completeness:any =
     liderformMode
-      ? inspectLiderformCompleteness(
-          semantic.value,
-          document.normalized.text,
-          cities
-        )
-      : null;
+      ? {
+          profile:
+            "liderform-main",
+
+          ...inspectLiderformCompleteness(
+            semantic.value,
+            document.normalized.text,
+            cities
+          )
+        }
+
+      : couponExpected.length
+        ? {
+            profile:
+              "coupon-explicit",
+
+            ...inspectExplicitCouponCompleteness(
+              semantic.value,
+              couponExpected
+            )
+          }
+
+        : null;
 
 
   if (
@@ -698,7 +816,12 @@ export async function extractExperts(
     !completeness.complete
   ) {
     throw new Error(
-      "EXPERT_INCOMPLETE_MAIN_SELECTIONS:" +
+      (
+        completeness.profile ===
+          "coupon-explicit"
+          ? "EXPERT_INCOMPLETE_EXPLICIT_SELECTIONS:"
+          : "EXPERT_INCOMPLETE_MAIN_SELECTIONS:"
+      ) +
       JSON.stringify(
         completeness
       )

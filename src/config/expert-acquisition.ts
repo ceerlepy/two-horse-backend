@@ -34,6 +34,18 @@ export type ExpertPromptProfile =
   | "coupon-legs";
 
 
+export type ExpertCompletenessProfile =
+  | "none"
+  | "liderform-main"
+  | "coupon-explicit";
+
+
+export type ExpertDirectPageDatePolicy =
+  | "none"
+  | "target-date"
+  | "target-city-heading";
+
+
 export interface ExpertPathRule {
   kind:
     | "prefix"
@@ -57,6 +69,15 @@ export interface ExpertSourceConfig {
 
   promptProfile:
     ExpertPromptProfile;
+
+  completenessProfile?:
+    ExpertCompletenessProfile;
+
+  directPageDatePolicy?:
+    ExpertDirectPageDatePolicy;
+
+  accessDeniedTerms?:
+    string[];
 
   rootIsEditorial:
     boolean;
@@ -134,6 +155,9 @@ export interface ExpertAcquisitionConfig {
       number;
 
     relevanceWindowLines:
+      number;
+
+    directPageDateEvidenceCharacters:
       number;
 
     relevanceTerms:

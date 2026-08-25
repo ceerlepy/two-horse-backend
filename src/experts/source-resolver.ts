@@ -78,6 +78,7 @@ export async function resolveExpertSourceTargets(
         expertRootUrl(
           source
         ),
+        raceDate,
         cities
       );
 

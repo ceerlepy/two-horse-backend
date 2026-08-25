@@ -470,6 +470,7 @@ export async function previewExpertSource(
   let neurons=0;
 
   let hadFailure=false;
+  let hadAccessRestricted=false;
   let hadCanonicalIncomplete=false;
   let hadSemanticEmpty=false;
 
@@ -609,8 +610,25 @@ export async function previewExpertSource(
       );
 
     } catch(error) {
+      const message =
+        errorMessage(
+          error
+        );
+
+
       hadFailure =
         true;
+
+
+      if (
+        message.startsWith(
+          "EXPERT_ACCESS_RESTRICTED:"
+        )
+      ) {
+        hadAccessRestricted =
+          true;
+      }
+
 
       attempts.push({
         url,
@@ -619,7 +637,7 @@ export async function previewExpertSource(
           "failed",
 
         error:
-          errorMessage(error)
+          message
       });
 
       /*
@@ -635,8 +653,12 @@ export async function previewExpertSource(
 
 
   const status =
-    hadFailure
-      ? "extraction-failed"
+    hadAccessRestricted &&
+    !picks.length
+      ? "access-restricted"
+
+      : hadFailure
+        ? "extraction-failed"
 
       : hadCanonicalIncomplete
         ? "canonical-incomplete"

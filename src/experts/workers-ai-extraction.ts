@@ -20,6 +20,9 @@ export const EXPERT_AI_MAX_OUTPUT_TOKENS =
 
 
 export interface WorkersAiExpertOptions {
+  requireRace?:
+    boolean;
+
   requireSelectionPerRace?:
     boolean;
 }
@@ -38,6 +41,9 @@ export interface WorkersAiExpertResult {
 
     articleCharacters:
       number;
+
+    requireRace:
+      boolean;
 
     requireSelectionPerRace:
       boolean;
@@ -97,6 +103,17 @@ export function expertResponseSchemaFor(
         rawExpertSchema
       )
     );
+
+
+  if (
+    options.requireRace ===
+    true
+  ) {
+    schema
+      .properties
+      .races
+      .minItems = 1;
+  }
 
 
   if (
@@ -261,6 +278,10 @@ export async function extractExpertJsonWithWorkersAi(
 
       articleCharacters:
         articleText.length,
+
+      requireRace:
+        options.requireRace ===
+        true,
 
       requireSelectionPerRace:
         options.requireSelectionPerRace ===
