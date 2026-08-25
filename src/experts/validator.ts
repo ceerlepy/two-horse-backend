@@ -39,20 +39,22 @@ export function normalizeExpertHorseName(
     .toLocaleUpperCase("tr-TR")
 
     /*
-     * TJK canonical names may append draw/order metadata:
+     * TJK may append draw/order metadata:
      *
      * BIG HONEY (3)
      *
-     * It is not part of horse identity.
+     * Character classes avoid fragile escaped
+     * parenthesis representation.
      */
     .replace(
-      /\s*\\d+\\s*$/u,
+      /\s*[(][0-9]+[)]\s*$/u,
       ""
     )
 
     .replace(/\s+/g,"")
+
     .replace(
-      /[’'`´".,()\-_/\\]/g,
+      /[’'`´".,()_\/\\-]/g,
       ""
     );
 }

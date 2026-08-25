@@ -9,18 +9,98 @@ const DEFAULT_TIMEOUT_MS =
 
 function unwrap(
   value:
-    any
-): any {
+    unknown
+): unknown {
   if (
     value &&
     typeof value ===
       "object" &&
     "result" in value
   ) {
-    return value.result;
+    return (
+      value as {
+        result:
+          unknown;
+      }
+    ).result;
   }
 
+
   return value;
+}
+
+
+function rawLinkValues(
+  payload:
+    unknown
+): unknown[] {
+  if (
+    Array.isArray(
+      payload
+    )
+  ) {
+    return payload;
+  }
+
+
+  if (
+    payload &&
+    typeof payload ===
+      "object"
+  ) {
+    const links =
+      (
+        payload as {
+          links?:
+            unknown;
+        }
+      ).links;
+
+
+    if (
+      Array.isArray(
+        links
+      )
+    ) {
+      return links;
+    }
+  }
+
+
+  return [];
+}
+
+
+function normalizeLinks(
+  values:
+    unknown[]
+): string[] {
+  const links =
+    values
+      .map(
+        (
+          value:
+            unknown
+        ): string =>
+          String(
+            value
+          ).trim()
+      )
+      .filter(
+        (
+          value:
+            string
+        ): boolean =>
+          value.length >
+          0
+      );
+
+
+  return [
+    ...new Set<string>(
+      links
+    )
+  ];
 }
 
 
@@ -60,48 +140,37 @@ export async function acquireCfLinks(
     );
 
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
     throw new Error(
       `CF_LINKS_HTTP_${response.status}`
     );
   }
 
 
-  const raw:any =
+  const raw:
+    unknown =
     await response.json();
 
 
   const payload =
-    unwrap(raw);
-
-
-  const values =
-    Array.isArray(payload)
-      ? payload
-      : (
-          Array.isArray(
-            payload?.links
-          )
-            ? payload.links
-            : []
-        );
+    unwrap(
+      raw
+    );
 
 
   const links =
-    [
-      ...new Set(
-        values
-          .map(
-            value =>
-              String(value)
-                .trim()
-          )
-          .filter(Boolean)
+    normalizeLinks(
+      rawLinkValues(
+        payload
       )
-    ];
+    );
 
 
-  if (!links.length) {
+  if (
+    !links.length
+  ) {
     throw new Error(
       "CF_LINKS_EMPTY"
     );
@@ -110,6 +179,7 @@ export async function acquireCfLinks(
 
   return {
     links,
+
     status:
       response.status
   };

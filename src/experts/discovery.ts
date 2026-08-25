@@ -109,6 +109,39 @@ interface StageCandidates {
 }
 
 
+interface TargetSelectionResult {
+  urls:
+    string[];
+
+  aiError:
+    string | null;
+
+  diagnostics:
+    Record<string,unknown>;
+}
+
+
+export interface ExpertArticleDiscoveryResult {
+  urls:
+    string[];
+
+  method:
+    string;
+
+  diagnostics:
+    any;
+}
+
+
+export interface DirectCurrentPageResolution {
+  url:
+    string | null;
+
+  diagnostics:
+    any;
+}
+
+
 function normalizedHost(
   value:
     string
@@ -978,7 +1011,7 @@ async function selectCurrentTargets(
 
   candidates:
     CandidateLink[]
-) {
+): Promise<TargetSelectionResult> {
   try {
     const semantic =
       await selectExpertCandidateUrlsWithWorkersAi(
@@ -1169,7 +1202,7 @@ async function discoverFromLanding(
 
   cities:
     string[]
-) {
+): Promise<ExpertArticleDiscoveryResult> {
   const stages =
     EXPERT_ACQUISITION_CONFIG
       .discovery
@@ -1271,7 +1304,8 @@ async function discoverFromLanding(
         );
 
 
-      let selection:any =
+      let selection:
+        TargetSelectionResult | null =
         null;
 
 
@@ -1749,7 +1783,7 @@ export async function resolveDirectCurrentPageUrl(
 
   cities:
     string[]
-) {
+): Promise<DirectCurrentPageResolution> {
   const diagnostics:any = {
     directAttempts:[],
     rootRecovery:null
@@ -1865,7 +1899,7 @@ export async function discoverExpertArticleUrls(
 
   raceDateOverride?:
     string
-) {
+): Promise<ExpertArticleDiscoveryResult> {
   const raceDate =
     raceDateOverride ??
     turkeyDate();

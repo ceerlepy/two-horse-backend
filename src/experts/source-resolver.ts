@@ -127,18 +127,30 @@ export async function resolveExpertSourceTargets(
         );
 
 
-      const accepted =
+      const discoveredUrls:
+        string[] =
+        discovery.urls;
+
+
+      const accepted:
+        string[] =
         [
-          ...new Set(
-            discovery.urls
+          ...new Set<string>(
+            discoveredUrls
               .filter(
-                url =>
+                (
+                  url:
+                    string
+                ) =>
                   !landingUrls.includes(
                     url
                   )
               )
               .filter(
-                url =>
+                (
+                  url:
+                    string
+                ) =>
                   isAllowedDiscoveredArticleUrl(
                     source.source_key,
                     url
