@@ -29,7 +29,7 @@ function normalizeCity(
 }
 
 
-function normalizeHorseName(
+export function normalizeExpertHorseName(
   value:
     string
 ): string {
@@ -37,12 +37,24 @@ function normalizeHorseName(
     .normalize("NFKC")
     .trim()
     .toLocaleUpperCase("tr-TR")
+
+    /*
+     * TJK canonical names may append draw/order metadata:
+     *
+     * BIG HONEY (3)
+     *
+     * It is not part of horse identity.
+     */
     .replace(
-      /\s*\d+\s*$/u,
+      /\s*\\d+\\s*$/u,
       ""
     )
+
     .replace(/\s+/g,"")
-    .replace(/[’'`´".,()\-_/\\]/g,"");
+    .replace(
+      /[’'`´".,()\-_/\\]/g,
+      ""
+    );
 }
 
 
@@ -233,13 +245,13 @@ export async function validateExpertPicks(
 
     if (suppliedName) {
       const sourceName =
-        normalizeHorseName(
+        normalizeExpertHorseName(
           suppliedName
         );
 
 
       const officialName =
-        normalizeHorseName(
+        normalizeExpertHorseName(
           runner.horseName
         );
 

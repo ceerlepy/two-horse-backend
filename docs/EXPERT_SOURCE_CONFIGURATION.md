@@ -138,3 +138,31 @@ It does not persist predictions or write anomalies.
 Historical regression:
 
 `POST /api/admin/preview-expert-source?source=<source>&date=YYYY-MM-DD`
+## Discovery stage configuration v5
+
+`config/expert-acquisition.json` declares the structural discovery order.
+
+Current order:
+
+`cf-scrape`
+`cf-links`
+`cf-content`
+`http`
+
+`cf-links` is a discovery-only stage.
+
+It is never used for article text extraction.
+
+Extraction keeps its independent HTML acquisition order:
+
+`cf-scrape`
+`cf-content`
+`http`
+
+The distinction is represented by separate TypeScript types:
+`ExpertDiscoveryStage` and `ExpertHtmlAcquisitionStage`.
+
+Final article selection is not configuration scoring.
+
+Configuration supplies evidence and exclusions; Workers AI makes the final
+choice among real hard-filtered candidate URLs.

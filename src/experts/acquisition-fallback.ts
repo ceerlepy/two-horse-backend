@@ -16,7 +16,7 @@ import {
 } from "../acquisition/http";
 
 import type {
-  ExpertAcquisitionStage
+  ExpertHtmlAcquisitionStage
 } from "../config/expert-acquisition";
 
 
@@ -28,7 +28,7 @@ export async function acquireExpertHtmlStage(
     string,
 
   stage:
-    ExpertAcquisitionStage
+    ExpertHtmlAcquisitionStage
 ): Promise<AcquiredHtml> {
   switch(stage) {
 

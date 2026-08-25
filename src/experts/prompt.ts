@@ -75,6 +75,77 @@ dönüştürme.
 `.trim();
 
 
+    case "coupon-legs":
+      return `
+ALTILI / AYAK FORMATLI KAYNAK KURALI
+
+AYAK numarası raceNumber değildir.
+
+Öncelik her zaman CANONICAL TJK ALTILI BAŞLANGIÇ
+HARİTASIDIR.
+
+Örneğin canonical data:
+
+2. ALTILI -> 4. KOŞUDA BAŞLAR
+
+ise:
+
+1.AYAK = 4.KOŞU
+2.AYAK = 5.KOŞU
+3.AYAK = 6.KOŞU
+
+Kaynak ayrıca açık biçimde:
+
+"2. Altılı 4. Koşuda başlar"
+
+diyorsa bu ifade canonical mapping ile tutarlı olduğu zaman
+named/semantic selection için ek context olarak kullanılabilir.
+
+Örnek:
+
+4.AYAK:
+2 GÖREME BEYİ BANKO
+
+canonical başlangıç R3 ise:
+
+4.AYAK -> R6
+horseNumber=2
+labels=["banko"]
+
+ÇIPLAK KUPON üyeliğine semantic label UYDURMA.
+
+Örneğin:
+
+1.AYAK: 1-5-11-8
+2.AYAK: 3-4-5
+
+tek başına:
+
+favorite
+strong
+rival
+surprise
+
+anlamına gelmez.
+
+Ancak açık:
+
+BANKO
+TEK
+FAVORİ
+FAVORİM
+İLK ŞANS
+RAKİP
+SÜRPRİZ
+
+gibi semantic ifade varsa selection üret.
+
+Aynı named selection birden fazla kupon özetinde duplicate
+geçiyorsa aynı official race + horse identity için tek evidence
+üret.
+`.trim();
+
+
     case "generic":
       return `
 GENEL ALTILI GANYAN / TAHMİN KURALI

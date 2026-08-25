@@ -7,21 +7,26 @@ import type {
 } from "../env";
 
 import {
-  extractSemanticJsonFromHtml
-} from "../acquisition/semantic-json";
-
-import {
   EXPERT_ACQUISITION_CONFIG,
   expertSourceConfig
 } from "../config/expert-acquisition";
 
 import type {
-  ExpertAcquisitionStage
+  ExpertDiscoveryStage,
+  ExpertHtmlAcquisitionStage
 } from "../config/expert-acquisition";
 
 import {
   acquireExpertHtmlStage
 } from "./acquisition-fallback";
+
+import {
+  acquireCfLinks
+} from "../acquisition/cloudflare-links";
+
+import {
+  selectExpertCandidateUrlsWithWorkersAi
+} from "./workers-ai-discovery";
 
 import {
   buildExpertRaceDateTokens
@@ -55,6 +60,9 @@ interface CandidateLink {
   score:
     number;
 
+  matchedCities:
+    string[];
+
   hasCity:
     boolean;
 
@@ -64,31 +72,41 @@ interface CandidateLink {
   hasPredictionLanguage:
     boolean;
 
+  hasNegativeLanguage:
+    boolean;
+
+  /*
+   * Hard-filter result.
+   *
+   * "deterministic" is retained only for compatibility with
+   * existing diagnostics/tests.
+   *
+   * It MUST NEVER directly select a final article URL.
+   */
   deterministic:
     boolean;
 }
 
 
-const discoverySchema = {
-  type:
-    "object",
+interface CandidateCoverage {
+  matchedCities:
+    string[];
 
-  properties: {
-    urls: {
-      type:
-        "array",
+  missingCities:
+    string[];
 
-      items: {
-        type:
-          "string"
-      }
-    }
-  },
+  complete:
+    boolean;
+}
 
-  required: [
-    "urls"
-  ]
-} as const;
+
+interface StageCandidates {
+  candidates:
+    CandidateLink[];
+
+  metadata:
+    Record<string,unknown>;
+}
 
 
 function normalizedHost(
@@ -114,18 +132,17 @@ function sameHost(
   second:
     string
 ): boolean {
-  const firstHost =
+  const a =
     normalizedHost(first);
 
-  const secondHost =
+  const b =
     normalizedHost(second);
 
 
   return Boolean(
-    firstHost &&
-    secondHost &&
-    firstHost ===
-      secondHost
+    a &&
+    b &&
+    a === b
   );
 }
 
@@ -146,10 +163,8 @@ function normalizeUrl(
 
 
     if (
-      url.protocol !==
-        "http:" &&
-      url.protocol !==
-        "https:"
+      url.protocol !== "http:" &&
+      url.protocol !== "https:"
     ) {
       return null;
     }
@@ -162,6 +177,36 @@ function normalizeUrl(
 
   } catch {
     return null;
+  }
+}
+
+
+function sameUrl(
+  first:
+    string,
+
+  second:
+    string
+): boolean {
+  try {
+    const a =
+      new URL(first);
+
+    const b =
+      new URL(second);
+
+
+    a.hash = "";
+    b.hash = "";
+
+
+    return (
+      a.toString() ===
+      b.toString()
+    );
+
+  } catch {
+    return false;
   }
 }
 
@@ -225,6 +270,10 @@ export function isUsableCandidate(
       landingUrl,
       value
     ) &&
+    !sameUrl(
+      landingUrl,
+      value
+    ) &&
     !assetUrl(value) &&
     !isRootUrl(value) &&
     !isExcludedExpertUtilityPath(
@@ -285,8 +334,8 @@ export function candidateEvidence(
     );
 
 
-  const hasCity =
-    cities.some(
+  const matchedCities =
+    cities.filter(
       city =>
         material.includes(
           normalizeExpertSearchText(
@@ -296,12 +345,29 @@ export function candidateEvidence(
     );
 
 
+  const hasCity =
+    matchedCities.length >
+    0;
+
+
+  /*
+   * HARD DATE GATE.
+   *
+   * preferredPathScore can increase ranking.
+   * It can never replace current-date evidence.
+   */
   const hasDate =
     buildExpertRaceDateTokens(
-      raceDate
+      raceDate,
+      {
+        allowYearless:
+          source
+            .allowYearlessDateEvidence
+      }
     )
       .some(
         token =>
+          token &&
           material.includes(
             token
           )
@@ -319,6 +385,11 @@ export function candidateEvidence(
     hasAnyTerm(
       material,
       discovery.negativeTerms
+    ) ||
+    hasAnyTerm(
+      material,
+      source
+        .excludedCandidateTerms
     );
 
 
@@ -372,23 +443,95 @@ export function candidateEvidence(
   }
 
 
+  const hardEligible =
+    !hasNegativeLanguage &&
+    hasDate &&
+    hasCity &&
+    hasPredictionLanguage &&
+    score >=
+      discovery
+        .candidateMinScore;
+
+
   return {
     score,
+    matchedCities,
     hasCity,
     hasDate,
     hasPredictionLanguage,
+    hasNegativeLanguage,
 
+    /*
+     * Compatibility diagnostic only.
+     *
+     * NEVER used as a final URL selector.
+     */
     deterministic:
-      !hasNegativeLanguage &&
-      hasCity &&
-      hasPredictionLanguage &&
-      (
-        hasDate ||
-        pathScore >= 5
-      ) &&
+      hardEligible &&
       score >=
         discovery
           .deterministicMinScore
+  };
+}
+
+
+function candidateFromEvidence(
+  sourceKey:
+    string,
+
+  landingUrl:
+    string,
+
+  url:
+    string,
+
+  text:
+    string,
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+): CandidateLink | null {
+  if (
+    !isUsableCandidate(
+      landingUrl,
+      url
+    ) ||
+    !isAllowedDiscoveredArticleUrl(
+      sourceKey,
+      url
+    )
+  ) {
+    return null;
+  }
+
+
+  const evidence =
+    candidateEvidence(
+      sourceKey,
+      url,
+      text,
+      raceDate,
+      cities
+    );
+
+
+  if (
+    !evidence.hasDate ||
+    !evidence.hasCity ||
+    !evidence.hasPredictionLanguage ||
+    evidence.hasNegativeLanguage
+  ) {
+    return null;
+  }
+
+
+  return {
+    url,
+    text,
+    ...evidence
   };
 }
 
@@ -467,25 +610,16 @@ function candidatesFromHtml(
         );
 
 
-      if (
-        !url ||
-        !isUsableCandidate(
-          landingUrl,
-          url
-        ) ||
-        !isAllowedDiscoveredArticleUrl(
-          sourceKey,
-          url
-        )
-      ) {
+      if (!url) {
         return;
       }
 
 
       const context =
-        anchor.closest(
-          contextSelector
-        )
+        anchor
+          .closest(
+            contextSelector
+          )
           .first();
 
 
@@ -503,9 +637,10 @@ function candidatesFromHtml(
         );
 
 
-      const evidence =
-        candidateEvidence(
+      const candidate =
+        candidateFromEvidence(
           sourceKey,
+          landingUrl,
           url,
           text,
           raceDate,
@@ -513,44 +648,113 @@ function candidatesFromHtml(
         );
 
 
-      if (
-        evidence.score <
-        discovery
-          .candidateMinScore
-      ) {
-        return;
+      if (candidate) {
+        output.push(
+          candidate
+        );
       }
-
-
-      output.push({
-        url,
-        text,
-        ...evidence
-      });
     }
   );
 
 
-  const deduped =
+  return dedupeCandidates(
+    output
+  );
+}
+
+
+function candidatesFromUrls(
+  sourceKey:
+    string,
+
+  landingUrl:
+    string,
+
+  values:
+    string[],
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+): CandidateLink[] {
+  const output:
+    CandidateLink[] = [];
+
+
+  for (const value of values) {
+    const url =
+      normalizeUrl(
+        landingUrl,
+        value
+      );
+
+
+    if (!url) {
+      continue;
+    }
+
+
+    /*
+     * /links has URL identity but not rich anchor/card text.
+     * The URL itself therefore supplies available evidence.
+     */
+    const candidate =
+      candidateFromEvidence(
+        sourceKey,
+        landingUrl,
+        url,
+        url,
+        raceDate,
+        cities
+      );
+
+
+    if (candidate) {
+      output.push(
+        candidate
+      );
+    }
+  }
+
+
+  return dedupeCandidates(
+    output
+  );
+}
+
+
+function dedupeCandidates(
+  values:
+    CandidateLink[]
+): CandidateLink[] {
+  const map =
     new Map<
       string,
       CandidateLink
     >();
 
 
-  for (const candidate of output) {
-    const old =
-      deduped.get(
+  for (const candidate of values) {
+    const previous =
+      map.get(
         candidate.url
       );
 
 
     if (
-      !old ||
+      !previous ||
       candidate.score >
-        old.score
+        previous.score ||
+      (
+        candidate.score ===
+          previous.score &&
+        candidate.text.length >
+          previous.text.length
+      )
     ) {
-      deduped.set(
+      map.set(
         candidate.url,
         candidate
       );
@@ -559,7 +763,7 @@ function candidatesFromHtml(
 
 
   return [
-    ...deduped.values()
+    ...map.values()
   ]
     .sort(
       (
@@ -571,47 +775,143 @@ function candidatesFromHtml(
     )
     .slice(
       0,
-      discovery.maxCandidates
+      EXPERT_ACQUISITION_CONFIG
+        .discovery
+        .maxCandidates
     );
 }
 
 
-function escapeHtml(
-  value:
-    string
-): string {
-  return value
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;");
+function mergeCandidatePool(
+  pool:
+    Map<string,CandidateLink>,
+
+  candidates:
+    CandidateLink[]
+): void {
+  for (const candidate of candidates) {
+    const previous =
+      pool.get(
+        candidate.url
+      );
+
+
+    if (
+      !previous ||
+      candidate.score >
+        previous.score ||
+      (
+        candidate.score ===
+          previous.score &&
+        candidate.text.length >
+          previous.text.length
+      )
+    ) {
+      pool.set(
+        candidate.url,
+        candidate
+      );
+    }
+  }
 }
 
 
-function candidatesAsHtml(
-  values:
+function candidatePoolValues(
+  pool:
+    Map<string,CandidateLink>
+): CandidateLink[] {
+  return [
+    ...pool.values()
+  ]
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        second.score -
+        first.score
+    )
+    .slice(
+      0,
+      EXPERT_ACQUISITION_CONFIG
+        .discovery
+        .maxCandidates
+    );
+}
+
+
+function candidateCoverage(
+  candidates:
+    CandidateLink[],
+
+  cities:
+    string[]
+): CandidateCoverage {
+  const normalizedMatched =
+    new Set<string>();
+
+
+  for (const candidate of candidates) {
+    for (
+      const city of
+      candidate.matchedCities
+    ) {
+      normalizedMatched.add(
+        normalizeExpertSearchText(
+          city
+        )
+      );
+    }
+  }
+
+
+  const matchedCities =
+    cities.filter(
+      city =>
+        normalizedMatched.has(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
+
+
+  const missingCities =
+    cities.filter(
+      city =>
+        !normalizedMatched.has(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
+
+
+  return {
+    matchedCities,
+    missingCities,
+
+    complete:
+      missingCities.length ===
+      0
+  };
+}
+
+
+function candidateFingerprint(
+  candidates:
     CandidateLink[]
 ): string {
-  return `
-<html>
-<body>
-<ul>
-${
-  values
+  return candidates
     .map(
-      value =>
-        `<li data-score="${value.score}">
-          <a href="${escapeHtml(value.url)}">
-            ${escapeHtml(value.text)}
-          </a>
-        </li>`
+      candidate =>
+        [
+          candidate.url,
+          candidate.score,
+          candidate.text
+        ].join("|")
     )
-    .join("\n")
-}
-</ul>
-</body>
-</html>
-`.trim();
+    .join("\n");
 }
 
 
@@ -619,11 +919,11 @@ function normalizeSelectedUrls(
   landingUrl:
     string,
 
-  value:
+  values:
     unknown
 ): string[] {
   if (
-    !Array.isArray(value)
+    !Array.isArray(values)
   ) {
     return [];
   }
@@ -631,25 +931,25 @@ function normalizeSelectedUrls(
 
   return [
     ...new Set(
-      value
+      values
         .map(
-          item =>
+          value =>
             normalizeUrl(
               landingUrl,
-              String(item)
+              String(value)
             )
         )
         .filter(
           (
-            item
-          ): item is string =>
-            Boolean(item)
+            value
+          ): value is string =>
+            Boolean(value)
         )
         .filter(
-          item =>
+          value =>
             sameHost(
               landingUrl,
-              item
+              value
             )
         )
     )
@@ -657,7 +957,7 @@ function normalizeSelectedUrls(
 }
 
 
-async function selectCandidates(
+async function selectCurrentTargets(
   env:
     Env,
 
@@ -677,80 +977,30 @@ async function selectCandidates(
     string[],
 
   candidates:
-    CandidateLink[],
-
-  stage:
-    ExpertAcquisitionStage
+    CandidateLink[]
 ) {
-  const deterministic =
-    candidates
-      .filter(
-        candidate =>
-          candidate.deterministic
-      )
-      .map(
-        candidate =>
-          candidate.url
-      );
-
-
-  if (!candidates.length) {
-    return {
-      urls:[],
-
-      diagnostics:{
-        stage,
-        aiInvoked:false,
-        candidateCount:0,
-        deterministic:[]
-      }
-    };
-  }
-
-
-  const prompt = `
-${sourceName} sitesinin gerçek DOM/HTML candidate linkleri.
-
-HEDEF TARİH:
-${raceDate}
-
-HEDEF TJK ŞEHİRLERİ:
-${cities.join(", ")}
-
-Yalnız bu listede gerçekten bulunan current Türkiye at yarışı
-TAHMİN / ANALİZ / UZMAN YORUM targetlarını seç.
-
-Kurallar:
-
-- Listede olmayan URL üretme.
-- Eski tarihli article seçme.
-- Yurt dışı yarışı seçme.
-- Genel haber seçme.
-- Koşmama, sakatlık, satış, transfer ve sonuç/program haberi seçme.
-- Navigasyon/kategori sayfasını current article sanma.
-- Aynı gün birden fazla gerçek şehir/article varsa hepsini seç.
-- URL prefix'i değişmiş olabilir; eski prefix tek başına hard truth değildir.
-- Anchor/card context + hedef tarih + hedef şehir + tahmin bağlamını birlikte değerlendir.
-- Emin değilsen seçme.
-
-Yalnız JSON schema'ya uygun cevap ver.
-`.trim();
-
-
   try {
     const semantic =
-      await extractSemanticJsonFromHtml<any>(
+      await selectExpertCandidateUrlsWithWorkersAi(
         env,
-        candidatesAsHtml(
-          candidates
-        ),
-        prompt,
         {
-          type:
-            "json_schema",
+          sourceName,
+          raceDate,
+          cities,
 
-          json_schema:
-            discoverySchema
+          candidates:
+            candidates.map(
+              candidate => ({
+                url:
+                  candidate.url,
+
+                text:
+                  candidate.text,
+
+                score:
+                  candidate.score
+              })
+            )
         }
       );
 
@@ -767,11 +1017,13 @@ Yalnız JSON schema'ya uygun cevap ver.
     const selected =
       normalizeSelectedUrls(
         landingUrl,
-        semantic.value?.urls
+        semantic.urls
       )
         .filter(
           url =>
-            candidateSet.has(url)
+            candidateSet.has(
+              url
+            )
         )
         .filter(
           url =>
@@ -782,41 +1034,18 @@ Yalnız JSON schema'ya uygun cevap ver.
         );
 
 
-    /*
-     * Do not let AI silently drop a second deterministic
-     * current-city/current-article target.
-     */
-    const urls =
-      [
-        ...new Set([
-          ...deterministic,
-          ...selected
-        ])
-      ];
-
-
     return {
-      urls,
+      urls:
+        selected,
 
-      diagnostics:{
-        stage,
-        aiInvoked:true,
+      aiError:
+        null as string | null,
 
+      diagnostics: {
         candidateCount:
           candidates.length,
 
-        candidateSample:
-          candidates.slice(
-            0,
-            20
-          ),
-
-        deterministic,
-        aiSelected:
-          selected,
-
-        selected:
-          urls,
+        selected,
 
         semantic:
           semantic.diagnostics
@@ -824,25 +1053,19 @@ Yalnız JSON schema'ya uygun cevap ver.
     };
 
   } catch(error) {
-    /*
-     * Candidate AI failure cannot destroy strong local
-     * deterministic evidence.
-     */
     return {
-      urls:
-        deterministic,
+      urls:[],
 
-      diagnostics:{
-        stage,
-        aiInvoked:true,
+      aiError:
+        error instanceof Error
+          ? error.message
+          : String(error),
 
+      diagnostics: {
         candidateCount:
           candidates.length,
 
-        deterministic,
-
-        selected:
-          deterministic,
+        selected:[],
 
         aiError:
           error instanceof Error
@@ -851,6 +1074,80 @@ Yalnız JSON schema'ya uygun cevap ver.
       }
     };
   }
+}
+
+
+async function acquireDiscoveryStageCandidates(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  landingUrl:
+    string,
+
+  raceDate:
+    string,
+
+  cities:
+    string[],
+
+  stage:
+    ExpertDiscoveryStage
+): Promise<StageCandidates> {
+  if (
+    stage ===
+    "cf-links"
+  ) {
+    const acquired =
+      await acquireCfLinks(
+        env,
+        landingUrl
+      );
+
+
+    return {
+      candidates:
+        candidatesFromUrls(
+          sourceKey,
+          landingUrl,
+          acquired.links,
+          raceDate,
+          cities
+        ),
+
+      metadata: {
+        linkCount:
+          acquired.links.length
+      }
+    };
+  }
+
+
+  const acquired =
+    await acquireExpertHtmlStage(
+      env,
+      landingUrl,
+      stage
+    );
+
+
+  return {
+    candidates:
+      candidatesFromHtml(
+        sourceKey,
+        landingUrl,
+        acquired.html,
+        raceDate,
+        cities
+      ),
+
+    metadata: {
+      bodyLength:
+        acquired.bodyLength
+    }
+  };
 }
 
 
@@ -873,66 +1170,175 @@ async function discoverFromLanding(
   cities:
     string[]
 ) {
+  const stages =
+    EXPERT_ACQUISITION_CONFIG
+      .discovery
+      .acquisitionOrder;
+
+
+  const pool =
+    new Map<
+      string,
+      CandidateLink
+    >();
+
+
   const diagnostics:any = {
     stages:[]
   };
 
 
+  let lastSelectionFingerprint =
+    "";
+
+  let lastSelectionHadError =
+    false;
+
+
   for (
-    const stage of
-    EXPERT_ACQUISITION_CONFIG
-      .discovery
-      .acquisitionOrder
+    let index=0;
+    index<stages.length;
+    index++
   ) {
+    const stage =
+      stages[index];
+
+
+    const isLastStage =
+      index ===
+      stages.length - 1;
+
+
     try {
       const acquired =
-        await acquireExpertHtmlStage(
+        await acquireDiscoveryStageCandidates(
           env,
+          sourceKey,
           landingUrl,
+          raceDate,
+          cities,
           stage
         );
 
 
+      mergeCandidatePool(
+        pool,
+        acquired.candidates
+      );
+
+
       const candidates =
-        candidatesFromHtml(
-          sourceKey,
-          landingUrl,
-          acquired.html,
-          raceDate,
+        candidatePoolValues(
+          pool
+        );
+
+
+      const coverage =
+        candidateCoverage(
+          candidates,
           cities
         );
 
 
-      const selected =
-        await selectCandidates(
-          env,
-          sourceKey,
-          sourceName,
-          landingUrl,
-          raceDate,
-          cities,
-          candidates,
-          stage
+      const fingerprint =
+        candidateFingerprint(
+          candidates
         );
 
 
-      diagnostics.stages.push({
-        bodyLength:
-          acquired.bodyLength,
+      /*
+       * Selection is attempted when:
+       *
+       * 1. structural acquisition now covers every target
+       *    TJK city, OR
+       *
+       * 2. this is the final acquisition fallback.
+       *
+       * If AI returns [] or errors, discovery continues to
+       * the next structural fallback.
+       */
+      const shouldSelect =
+        candidates.length >
+          0 &&
+        (
+          coverage.complete ||
+          isLastStage
+        ) &&
+        (
+          fingerprint !==
+            lastSelectionFingerprint ||
+          lastSelectionHadError
+        );
 
-        ...selected.diagnostics
+
+      let selection:any =
+        null;
+
+
+      if (shouldSelect) {
+        selection =
+          await selectCurrentTargets(
+            env,
+            sourceKey,
+            sourceName,
+            landingUrl,
+            raceDate,
+            cities,
+            candidates
+          );
+
+
+        lastSelectionFingerprint =
+          fingerprint;
+
+
+        lastSelectionHadError =
+          Boolean(
+            selection.aiError
+          );
+      }
+
+
+      diagnostics.stages.push({
+        stage,
+        ...acquired.metadata,
+
+        stageCandidateCount:
+          acquired.candidates.length,
+
+        accumulatedCandidateCount:
+          candidates.length,
+
+        coverage,
+
+        selectionAttempted:
+          shouldSelect,
+
+        aiSelected:
+          selection?.urls ??
+          [],
+
+        aiError:
+          selection?.aiError ??
+          null
       });
 
 
+      /*
+       * FINAL URL decision is AI-only.
+       *
+       * Local scoring / "deterministic" flags are never
+       * unioned back into this result.
+       */
       if (
-        selected.urls.length
+        selection?.urls?.length
       ) {
         return {
           urls:
-            selected.urls,
+            selection.urls,
 
           method:
-            `${stage}-anchored-candidate-selection`,
+            `${stage}-workers-ai-candidate-selection`,
 
           diagnostics
         };
@@ -953,8 +1359,10 @@ async function discoverFromLanding(
 
   return {
     urls:[],
+
     method:
-      "anchored-discovery-empty",
+      "progressive-discovery-empty",
+
     diagnostics
   };
 }
@@ -989,7 +1397,9 @@ function navigationTargetFromHtml(
 
 
   let winnerUrl:
-    string | null = null;
+    string | null =
+      null;
+
 
   let winnerScore =
     0;
@@ -1102,10 +1512,14 @@ async function recoverLandingFromRoot(
   };
 
 
+  /*
+   * Navigation recovery needs anchor text/HTML.
+   * /links alone cannot provide semantic nav labels.
+   */
   for (
     const stage of
     EXPERT_ACQUISITION_CONFIG
-      .discovery
+      .extraction
       .acquisitionOrder
   ) {
     try {
@@ -1190,8 +1604,7 @@ function directPageEvidence(
 
   const text =
     normalizeExpertSearchText(
-      $("body")
-        .text()
+      $("body").text()
     );
 
 
@@ -1205,20 +1618,28 @@ function directPageEvidence(
   }
 
 
-  if (
-    !hasAnyTerm(
-      text,
-      EXPERT_ACQUISITION_CONFIG
-        .extraction
-        .relevanceTerms
-    )
-  ) {
+  const racing =
+    EXPERT_ACQUISITION_CONFIG
+      .extraction
+      .relevanceTerms
+      .some(
+        term =>
+          text.includes(
+            normalizeExpertSearchText(
+              term
+            )
+          )
+      );
+
+
+  if (!racing) {
     return false;
   }
 
 
   if (
-    !source.preflightRequiresCity
+    !source
+      .preflightRequiresCity
   ) {
     return true;
   }
@@ -1256,7 +1677,7 @@ async function probeDirectPage(
   for (
     const stage of
     EXPERT_ACQUISITION_CONFIG
-      .discovery
+      .extraction
       .acquisitionOrder
   ) {
     try {
@@ -1339,7 +1760,10 @@ export async function resolveDirectCurrentPageUrl(
     entryUrls.filter(
       url =>
         !rootUrl ||
-        url !== rootUrl
+        !sameUrl(
+          url,
+          rootUrl
+        )
     );
 
 
@@ -1369,9 +1793,9 @@ export async function resolveDirectCurrentPageUrl(
 
 
   /*
-   * Known direct path moved:
+   * Known direct-current-page path moved:
    *
-   * root is used ONLY to recover the new navigation href.
+   * root is used only to rediscover its navigation target.
    */
   if (rootUrl) {
     const recovery =
@@ -1448,8 +1872,10 @@ export async function discoverExpertArticleUrls(
 
 
   /*
-   * A root that is not itself the intended editorial
-   * surface first tries navigation recovery.
+   * Root is not the normal first discovery step for sources
+   * whose root is only navigation.
+   *
+   * Try navigation recovery first.
    */
   if (
     isRootUrl(
@@ -1469,10 +1895,12 @@ export async function discoverExpertArticleUrls(
 
     if (
       recovery.url &&
-      recovery.url !==
+      !sameUrl(
+        recovery.url,
         landingUrl
+      )
     ) {
-      const recovered =
+      const discovered =
         await discoverFromLanding(
           env,
           sourceKey,
@@ -1484,15 +1912,15 @@ export async function discoverExpertArticleUrls(
 
 
       if (
-        recovered.urls.length
+        discovered.urls.length
       ) {
         return {
-          ...recovered,
+          ...discovered,
 
           method:
-            `root-nav-recovery:${recovered.method}`,
+            `root-nav-recovery:${discovered.method}`,
 
-          diagnostics:{
+          diagnostics: {
             rootRecovery:
               recovery,
 
@@ -1500,7 +1928,7 @@ export async function discoverExpertArticleUrls(
               recovery.url,
 
             discovery:
-              recovered.diagnostics
+              discovered.diagnostics
           }
         };
       }
@@ -1508,12 +1936,11 @@ export async function discoverExpertArticleUrls(
 
 
     /*
-     * Last structural recovery:
+     * If navigation moved too, root may still contain real
+     * current article links.
      *
-     * root itself may still link directly to today's
-     * articles even if the old navigation label changed.
-     *
-     * Local date/city/prediction filtering still applies.
+     * The same hard date/city/source filtering and Workers AI
+     * final selection is used.
      */
     const rootFallback =
       await discoverFromLanding(
@@ -1529,7 +1956,7 @@ export async function discoverExpertArticleUrls(
     return {
       ...rootFallback,
 
-      diagnostics:{
+      diagnostics: {
         rootRecovery:
           recovery,
 

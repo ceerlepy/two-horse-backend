@@ -43,6 +43,7 @@ describe(
         )
           .toEqual([
             "cf-scrape",
+            "cf-links",
             "cf-content",
             "http"
           ]);
@@ -105,7 +106,7 @@ describe(
 
         expect(tokens)
           .toContain(
-            "2026/08/25"
+            "2026 08 25"
           );
       }
     );

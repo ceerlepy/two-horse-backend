@@ -1,8 +1,9 @@
 {
-  "version": 4,
+  "version": 5,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
+      "cf-links",
       "cf-content",
       "http"
     ],
@@ -86,8 +87,7 @@
     "candidateMinScore": 4,
     "deterministicMinScore": 13,
     "maxCandidates": 220,
-    "candidateContextCharacters": 1400,
-    "useLinksFallback": true
+    "candidateContextCharacters": 1400
   },
   "extraction": {
     "acquisitionOrder": [

@@ -2,10 +2,23 @@ import rawConfig
   from "../../config/expert-acquisition.json";
 
 
-export type ExpertAcquisitionStage =
+export type ExpertHtmlAcquisitionStage =
   | "cf-scrape"
   | "cf-content"
   | "http";
+
+
+export type ExpertDiscoveryStage =
+  | ExpertHtmlAcquisitionStage
+  | "cf-links";
+
+
+/*
+ * Backwards-compatible alias for existing HTML acquisition
+ * code. New code should prefer ExpertHtmlAcquisitionStage.
+ */
+export type ExpertAcquisitionStage =
+  ExpertHtmlAcquisitionStage;
 
 
 export type ExpertPublishingMode =
@@ -71,16 +84,13 @@ export interface ExpertSourceConfig {
 }
 
 
-interface ExpertAcquisitionConfig {
+export interface ExpertAcquisitionConfig {
   version:
     number;
 
   discovery: {
     acquisitionOrder:
-      ExpertAcquisitionStage[];
-
-    useLinksFallback:
-      boolean;
+      ExpertDiscoveryStage[];
 
     excludedPathPrefixes:
       string[];
@@ -112,7 +122,7 @@ interface ExpertAcquisitionConfig {
 
   extraction: {
     acquisitionOrder:
-      ExpertAcquisitionStage[];
+      ExpertHtmlAcquisitionStage[];
 
     minimumTextCharacters:
       number;
@@ -138,14 +148,57 @@ interface ExpertAcquisitionConfig {
 }
 
 
+const DISCOVERY_STAGES =
+  new Set<string>([
+    "cf-scrape",
+    "cf-links",
+    "cf-content",
+    "http"
+  ]);
+
+
+const HTML_STAGES =
+  new Set<string>([
+    "cf-scrape",
+    "cf-content",
+    "http"
+  ]);
+
+
+function validateStageList(
+  values:
+    unknown,
+
+  allowed:
+    Set<string>,
+
+  name:
+    string
+): void {
+  if (
+    !Array.isArray(values) ||
+    !values.length ||
+    values.some(
+      value =>
+        !allowed.has(
+          String(value)
+        )
+    )
+  ) {
+    throw new Error(
+      `INVALID_EXPERT_STAGE_CONFIG:${name}`
+    );
+  }
+}
+
+
 function validateConfig(
   value:
     ExpertAcquisitionConfig
 ): void {
   if (
     !value ||
-    typeof value !==
-      "object" ||
+    typeof value !== "object" ||
     !value.sources ||
     !value.discovery ||
     !value.extraction
@@ -154,6 +207,22 @@ function validateConfig(
       "INVALID_EXPERT_ACQUISITION_CONFIG"
     );
   }
+
+
+  validateStageList(
+    value.discovery
+      .acquisitionOrder,
+    DISCOVERY_STAGES,
+    "discovery"
+  );
+
+
+  validateStageList(
+    value.extraction
+      .acquisitionOrder,
+    HTML_STAGES,
+    "extraction"
+  );
 
 
   for (
@@ -170,7 +239,16 @@ function validateConfig(
       !Array.isArray(
         source.entryUrls
       ) ||
-      !source.entryUrls.length
+      !source.entryUrls.length ||
+      !Array.isArray(
+        source.navigationLabels
+      ) ||
+      !Array.isArray(
+        source.excludedCandidateTerms
+      ) ||
+      !Array.isArray(
+        source.preferredPathRules
+      )
     ) {
       throw new Error(
         `INVALID_EXPERT_SOURCE_CONFIG:${sourceKey}`
@@ -203,12 +281,6 @@ export function expertSourceConfig(
 
 
   if (!source) {
-    /*
-     * Fail closed.
-     *
-     * Adding a DB source without an acquisition config must
-     * never silently fall into generic scraping.
-     */
     throw new Error(
       `EXPERT_SOURCE_CONFIG_NOT_FOUND:${sourceKey}`
     );

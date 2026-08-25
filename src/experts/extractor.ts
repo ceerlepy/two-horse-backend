@@ -749,6 +749,8 @@ export async function extractExperts(
             .truncated
       },
 
+      sixfoldStarts,
+
       semantic:
         semantic.diagnostics,
 

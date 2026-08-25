@@ -855,3 +855,62 @@ Coupon/AYAK-oriented sources may map legs from the canonical TJK
 six-fold start map. Source-declared six-fold start text is secondary and
 may only assist named selections with an explicit semantic label.
 Plain coupon membership must not invent favorite/strong/rival labels.
+## Authoritative progressive discovery v5
+
+This section supersedes earlier expert URL-selection descriptions.
+
+Article discovery is now progressive and has one clear responsibility
+boundary.
+
+Structural acquisition order is configured as:
+
+`SCRAPE -> LINKS -> CONTENT -> HTTP`
+
+Each structural stage obtains only real links from the source.
+
+The application then performs local hard filtering:
+
+same source host
+
+not an asset
+
+not a configured utility route
+
+target race date is mandatory
+
+at least one target TJK city is mandatory
+
+prediction/analysis context is mandatory
+
+configured negative/source-excluded terms are rejected
+
+preferred path rules only affect ranking
+
+Local deterministic scoring never selects the final article URL.
+
+When enough candidate coverage exists, the accumulated real candidate set
+is sent to the direct Workers AI candidate selector.
+
+The Workers AI decision is authoritative inside that hard-filtered set.
+
+If Workers AI returns an empty URL list, the next structural acquisition
+fallback is attempted.
+
+If the Workers AI call itself fails, the next structural acquisition
+fallback is attempted.
+
+A deterministic candidate list is never unioned back into the AI result.
+
+There is no Browser `/json` semantic URL selection in this path.
+
+After Workers AI selects one or more real candidate URLs, each selected
+document enters the independent extraction pipeline:
+
+`SCRAPE -> CONTENT -> HTTP`
+-> content preflight
+-> Workers AI expert extraction
+-> horse-level expansion
+-> TJK canonical validation.
+
+Production persistence remains fail closed and occurs only after the
+complete current source bundle validates.
