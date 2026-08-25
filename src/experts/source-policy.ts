@@ -77,6 +77,41 @@ export function expertPreflightRequiresCity(
 }
 
 
+function normalizePathMatchValue(
+  value:
+    string
+): string | null {
+  try {
+    const raw =
+      value.startsWith(
+        "http://"
+      ) ||
+      value.startsWith(
+        "https://"
+      )
+        ? new URL(value)
+            .pathname
+        : value;
+
+
+    return decodeURIComponent(
+      raw
+    )
+      .normalize(
+        "NFKC"
+      )
+      .toLowerCase()
+      .replace(
+        /^\/+|\/+$/g,
+        ""
+      );
+
+  } catch {
+    return null;
+  }
+}
+
+
 export function preferredArticlePathScore(
   sourceKey:
     string,
@@ -84,58 +119,64 @@ export function preferredArticlePathScore(
   value:
     string
 ): number {
-  try {
-    const path =
-      new URL(value)
-        .pathname
-        .toLowerCase();
+  const path =
+    normalizePathMatchValue(
+      value
+    );
 
 
-    return expertSourceConfig(
-      sourceKey
-    )
-      .preferredPathRules
-      .reduce(
-        (
-          score,
-          rule
-        ) => {
-          const candidate =
+  if (!path) {
+    return 0;
+  }
+
+
+  return expertSourceConfig(
+    sourceKey
+  )
+    .preferredPathRules
+    .reduce(
+      (
+        score,
+        rule
+      ) => {
+        const candidate =
+          normalizePathMatchValue(
             rule.value
-              .toLowerCase();
+          );
 
 
-          const matches =
-            rule.kind ===
-              "prefix"
-              ? path.startsWith(
+        if (!candidate) {
+          return score;
+        }
+
+
+        const matches =
+          rule.kind ===
+            "prefix"
+            ? path.startsWith(
+                candidate
+              )
+
+            : rule.kind ===
+                "suffix"
+              ? path.endsWith(
                   candidate
                 )
 
-              : rule.kind ===
-                  "suffix"
-                ? path.endsWith(
-                    candidate
-                  )
-
-                : path.includes(
-                    candidate
-                  );
+              : path.includes(
+                  candidate
+                );
 
 
-          return score +
-            (
-              matches
-                ? rule.score
-                : 0
-            );
-        },
-        0
-      );
-
-  } catch {
-    return 0;
-  }
+        return score +
+          (
+            matches
+              ? rule.score
+              : 0
+          );
+      },
+      0
+    );
 }
 
 
