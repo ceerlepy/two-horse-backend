@@ -1229,3 +1229,30 @@ Elazığ R8 #14 SKY TURK
 
 Bu nedenle corrected Liderform semantic extraction path'i 24/24 olarak
 production Workers AI üzerinde doğrulanmıştır.
+
+
+## Config-driven expert preview
+
+Read-only endpoint:
+
+`POST /api/admin/preview-expert-source?source=<source_key>`
+
+Historical regression:
+
+`POST /api/admin/preview-expert-source?source=<source_key>&date=YYYY-MM-DD`
+
+Preview runs the same config-driven resolver, SCRAPE/CONTENT/HTTP
+acquisition, Workers AI extraction and TJK canonical validation used by
+production.
+
+It does not persist expert predictions and does not write mismatch
+anomalies.
+
+Inspect:
+
+`resolution`
+`targets`
+`extractionAttempts`
+`counts`
+`mainPicks`
+`semanticUsage`

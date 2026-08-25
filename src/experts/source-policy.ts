@@ -1,33 +1,17 @@
-interface ExpertPublishingPolicy {
-  requiresDiscoveredArticle:
-    boolean;
+import {
+  EXPERT_ACQUISITION_CONFIG,
+  expertSourceConfig
+} from "../config/expert-acquisition";
+
+
+function normalizedHost(
+  value:
+    URL
+): string {
+  return value.hostname
+    .replace(/^www\./,"")
+    .toLowerCase();
 }
-
-
-const DEFAULT_POLICY:
-  ExpertPublishingPolicy = {
-  requiresDiscoveredArticle:
-    false
-};
-
-
-const POLICIES:
-  Record<
-    string,
-    ExpertPublishingPolicy
-  > = {
-  /*
-   * Liderform publishes the current expert analysis as a
-   * separate Haberler article.
-   *
-   * Its homepage, records, program and other utility
-   * pages must never substitute for a missing article.
-   */
-  liderform: {
-    requiresDiscoveredArticle:
-      true
-  }
-};
 
 
 export function expertRequiresDiscoveredArticle(
@@ -35,31 +19,152 @@ export function expertRequiresDiscoveredArticle(
     string
 ): boolean {
   return (
-    POLICIES[
+    expertSourceConfig(
       sourceKey
-    ] ??
-    DEFAULT_POLICY
+    )
+      .mode ===
+    "article"
+  );
+}
+
+
+export function expertUsesDirectCurrentPage(
+  sourceKey:
+    string
+): boolean {
+  return (
+    expertSourceConfig(
+      sourceKey
+    )
+      .mode ===
+    "direct-current-page"
+  );
+}
+
+
+export function expertRootIsEditorial(
+  sourceKey:
+    string
+): boolean {
+  return expertSourceConfig(
+    sourceKey
   )
-    .requiresDiscoveredArticle;
+    .rootIsEditorial;
+}
+
+
+export function expertNavigationLabels(
+  sourceKey:
+    string
+): string[] {
+  return [
+    ...expertSourceConfig(
+      sourceKey
+    )
+      .navigationLabels
+  ];
+}
+
+
+export function expertPreflightRequiresCity(
+  sourceKey:
+    string
+): boolean {
+  return expertSourceConfig(
+    sourceKey
+  )
+    .preflightRequiresCity;
+}
+
+
+export function preferredArticlePathScore(
+  sourceKey:
+    string,
+
+  value:
+    string
+): number {
+  try {
+    const path =
+      new URL(value)
+        .pathname
+        .toLowerCase();
+
+
+    return expertSourceConfig(
+      sourceKey
+    )
+      .preferredPathRules
+      .reduce(
+        (
+          score,
+          rule
+        ) => {
+          const candidate =
+            rule.value
+              .toLowerCase();
+
+
+          const matches =
+            rule.kind ===
+              "prefix"
+              ? path.startsWith(
+                  candidate
+                )
+
+              : rule.kind ===
+                  "suffix"
+                ? path.endsWith(
+                    candidate
+                  )
+
+                : path.includes(
+                    candidate
+                  );
+
+
+          return score +
+            (
+              matches
+                ? rule.score
+                : 0
+            );
+        },
+        0
+      );
+
+  } catch {
+    return 0;
+  }
+}
+
+
+function excludedUtilityPath(
+  path:
+    string
+): boolean {
+  return EXPERT_ACQUISITION_CONFIG
+    .discovery
+    .excludedPathPrefixes
+    .some(
+      prefix =>
+        path === prefix ||
+        path.startsWith(
+          `${prefix}/`
+        )
+    );
 }
 
 
 /*
- * Source-aware hard fence AFTER semantic discovery.
+ * Hard fence:
  *
- * Discovery AI still decides which current article is
- * relevant, but it cannot promote a URL outside the
- * source's known editorial URL family.
+ * - correct configured source host
+ * - HTTP(S)
+ * - not root itself
+ * - not a configured utility path
  *
- * Verified Liderform article contract:
- *
- * /haberler/<article>.html
- *
- * Category/index pages such as:
- *
- * /haberler/analizler
- *
- * are intentionally not accepted as article URLs.
+ * Article prefixes are NOT hard truth.
  */
 export function isAllowedDiscoveredArticleUrl(
   sourceKey:
@@ -68,28 +173,35 @@ export function isAllowedDiscoveredArticleUrl(
   value:
     string
 ): boolean {
-  if (
-    sourceKey !==
-    "liderform"
-  ) {
-    return true;
-  }
-
-
   try {
-    const url =
-      new URL(
-        value
+    const source =
+      expertSourceConfig(
+        sourceKey
       );
 
 
-    const host =
-      url.hostname
-        .replace(
-          /^www\./,
-          ""
-        )
-        .toLowerCase();
+    const url =
+      new URL(value);
+
+
+    if (
+      normalizedHost(url) !==
+      source.host
+        .replace(/^www\./,"")
+        .toLowerCase()
+    ) {
+      return false;
+    }
+
+
+    if (
+      url.protocol !==
+        "https:" &&
+      url.protocol !==
+        "http:"
+    ) {
+      return false;
+    }
 
 
     const path =
@@ -97,15 +209,16 @@ export function isAllowedDiscoveredArticleUrl(
         .toLowerCase();
 
 
-    return (
-      host ===
-        "liderform.com.tr" &&
-      path.startsWith(
-        "/haberler/"
-      ) &&
-      path.endsWith(
-        ".html"
-      )
+    if (
+      path === "/" &&
+      !url.search
+    ) {
+      return false;
+    }
+
+
+    return !excludedUtilityPath(
+      path
     );
 
   } catch {

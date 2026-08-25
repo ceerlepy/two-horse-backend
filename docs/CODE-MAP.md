@@ -73,3 +73,35 @@ Root cause mümkün olduğunca tek owning subsystem'e atanmalıdır.
 
 Downstream scoring değiştirilmeden önce upstream discovery, extraction and
 canonical validation evidence doğrulanmalıdır.
+
+
+### Expert configuration and resilient acquisition
+
+`config/expert-acquisition.json`
+contains source URLs, hosts, publishing modes, navigation recovery labels,
+excluded utility paths, acquisition order, scoring hints and extraction
+thresholds.
+
+`src/config/expert-acquisition.ts`
+is the typed and fail-closed config adapter.
+
+`src/experts/date-evidence.ts`
+generates Turkish date evidence using Intl rather than manual month tables.
+
+`src/experts/acquisition-fallback.ts`
+owns shared SCRAPE/CONTENT/HTTP acquisition behavior.
+
+`src/experts/discovery.ts`
+contains generic real-link discovery and navigation recovery.
+
+`src/experts/source-resolver.ts`
+resolves current article bundles or direct current pages.
+
+`src/experts/extractor.ts`
+owns preflight, source-aware compaction and Workers AI extraction.
+
+`src/experts/service.ts`
+owns production gates and complete bundle persistence.
+
+`src/experts/preview.ts`
+runs the same path read-only.

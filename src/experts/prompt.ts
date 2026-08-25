@@ -1,3 +1,135 @@
+import {
+  expertSourceConfig
+} from "../config/expert-acquisition";
+
+
+export interface SixfoldStartInfo {
+  city:
+    string;
+
+  sixfoldNumber:
+    number;
+
+  raceNumber:
+    number;
+}
+
+
+function profileRules(
+  sourceKey:
+    string
+): string {
+  const profile =
+    expertSourceConfig(
+      sourceKey
+    )
+      .promptProfile;
+
+
+  switch(profile) {
+
+    case "liderform":
+      return `
+LIDERFORM ÖZEL KURALI
+
+Gerçek koşu analiz paragrafları SOURCE DATA'dır.
+
+Yazının sonundaki Altılı kupon özeti aynı analizin duplicate
+özetidir.
+
+Yalnız bu duplicate kupon özeti ikinci kez horse-level
+evidence üretmemelidir.
+`.trim();
+
+
+    case "istinye":
+      return `
+İSTİNYE GANYAN ÖZEL KURALI
+
+Gerçek expert prose bölümlerini kullan.
+
+Bankomuz, tekimiz, ilk şanslı, rakip, sürpriz ve favori gibi
+ifadeler source evidence'dır.
+
+Çıplak sayı/grid tablolarından semantic role veya horse
+identity uydurma.
+`.trim();
+
+
+    case "ganyan-canavari":
+      return `
+GANYAN CANAVARI ÖZEL KURALI
+
+Race + horse identity ile bağlı gerçek yorumları kullan.
+
+"N. koşuda (X) AT ADI için yazıldı" benzeri identity
+bağlantıları güvenli evidence'dır.
+
+Açık Banko Gösterilenler veya horse kimliğine bağlı banko,
+favori, strong, rival veya surprise yorumunu kullan.
+
+Çıplak kupon kombinasyonlarını bağımsız expert horse pick'e
+dönüştürme.
+`.trim();
+
+
+    case "generic":
+      return `
+GENEL ALTILI / TAHMİN KURALI
+
+Bir article'ın başlığında ALTILI, TAHMİN veya BÜLTEN yazması
+içeriği IGNORE etme sebebi DEĞİLDİR.
+
+Altılı/Ayak bölümleri gerçek source prediction data
+taşıyabilir.
+
+BANKO, TEK, FAVORİ, FAVORİM, İLK ŞANS, RAKİP, SÜRPRİZ ve
+diğer açık expert ifadelerini koru.
+
+AYAK numarasını kendi başına resmi raceNumber sanma.
+`.trim();
+  }
+}
+
+
+function sixfoldRules(
+  values:
+    SixfoldStartInfo[]
+): string {
+  if (!values.length) {
+    return `
+CANONICAL TJK ALTILI BAŞLANGIÇ HARİTASI YOK.
+
+Çıplak N.AYAK bilgisinden resmi raceNumber tahmin etme.
+
+Yalnız açık N.KOŞU identity varsa kullan.
+`.trim();
+  }
+
+
+  return `
+CANONICAL TJK ALTILI BAŞLANGIÇ HARİTASI
+
+${
+  values
+    .map(
+      value =>
+        `${value.city}: ${value.sixfoldNumber}. ALTILI -> ${value.raceNumber}. KOŞUDA BAŞLAR`
+    )
+    .join("\n")
+}
+
+AYAK mapping yalnız bu canonical haritadan yapılır.
+
+raceNumber =
+canonicalStartRace + ayakNumber - 1
+
+Şehir veya hangi Altılı olduğu güvenli değilse mapping
+uydurma.
+`.trim();
+}
+
+
 export function expertExtractionPrompt(
   sourceName:
     string,
@@ -6,105 +138,40 @@ export function expertExtractionPrompt(
     "BUGÜN",
 
   cities:
-    string[] = []
+    string[] = [],
+
+  sourceKey =
+    "",
+
+  sixfoldStarts:
+    SixfoldStartInfo[] = []
 ): string {
   return `
-${sourceName} kaynağındaki bugünkü Türkiye at yarışı uzman seçimlerini çıkar.
+${sourceName} kaynağındaki Türkiye at yarışı expert
+seçimlerini çıkar.
 
 HEDEF TARİH:
 ${raceDate}
 
 HEDEF TJK ŞEHİRLERİ:
-${
-  cities.length
-    ? cities.join(", ")
-    : "bugünkü resmi TJK şehirleri"
-}
+${cities.join(", ")}
 
-Yalnız HEDEF KARTA ait gerçek expert yarış analizlerini kullan.
+Yalnız hedef tarih/şehir source prediction verisini kullan.
 
-Başka güne veya yabancı yarışa açıkça ait içeriği çıkarma.
+${profileRules(sourceKey)}
 
+${sixfoldRules(sixfoldStarts)}
 
-ANA SEÇİM ZORUNLU KURALI
+ANA SEÇİM
 
-Bir gerçek yarış analiz paragrafında ana konu yapılan at MUTLAKA selections[] içinde bulunmalıdır.
+Gerçek koşu analizinde açıkça pozitif ana konu yapılan horse
+selections[] içinde bulunmalıdır.
 
-Örnek yapı:
+Özel BANKO veya FAVORİ kelimesi şart değildir.
 
-"... 9.Koşu ...; (1) AT ADI ... olumlu değerlendirme ... Sırasıyla rakip gördüğümüz isimler: 9-4-5"
-
-Burada:
-
-(1) AT ADI = ANA SEÇİM
-
-9-4-5 = RAKİPLER
-
-Rakip listesini gördüğün halde ana atı atlama.
-
-Bir race object'i gerçek analiz paragrafından üretiyorsan ve paragrafta "(N) AT ADI" biçiminde ana safkan varsa selections=[] OLAMAZ.
-
-Ana safkan için özel "favori" veya "banko" kelimesi bulunması şart değildir.
-
-Aşağıdaki doğal olumlu yorumlar ana selection'dır:
-
-- kazanmaya yakındır
-- birincilikle tanışabilir
-- önde gelen isimdir
-- ilk şansa sahiptir
-- ilk şanslı isimdir
-- rakiplerini geride bırakabilir
-- farklı sonuç elde edebilecek güçtedir
-- gerçek gücünü yarışına yansıtabilir
-- birinciliğin en güçlü adayıdır
-- birinciliğe çok yakındır
-- kazanmasını bekliyoruz
-- fotoyu önde geçmesini bekliyoruz
-- rövanşı alacaktır
-- rakiplerinin bir adım önündedir
-- ilk atımızdır
-- öncelikli şans verdiğimiz isimdir
-
-Pozitif ana yorum var fakat metinde açıkça favorite/banko/star/surprise/avoid sınıfı yoksa:
+Açık pozitif ana yorum daha özel label yoksa:
 
 labels=["strong"]
-
-kullan.
-
-
-OUTPUT YAPISI
-
-Aynı city + raceNumber için city ve raceNumber değerlerini her atta tekrar etme.
-
-Her gerçek koşuyu races[] içinde yalnız bir kez üret.
-
-Her race:
-
-city
-raceNumber
-selections
-numberGroups
-
-
-SELECTIONS
-
-Kaynak bir atı adıyla veya açık ayrı yorumuyla analiz ediyorsa selections içine koy.
-
-Her selection:
-
-horseNumber
-horseName
-comment
-labels
-
-horseName veya comment kaynakta yoksa alanı tamamen OMIT edebilirsin.
-
-At adı uydurma.
-
-comment yalnız aynı ata ait kısa kaynak ifadesi olsun.
-
-Uzun paragrafı kopyalama.
-
 
 LABELS
 
@@ -118,139 +185,74 @@ rival
 surprise
 avoid
 
-kullan.
-
-
 favorite:
-
-Yalnız kaynak açıkça:
-
-favori
-en şanslı
-en güçlü aday
-
-ve eşdeğer çok güçlü favori dili kullanıyorsa.
-
-Sadece bir paragrafın ana atı olmak otomatik favorite değildir.
-
+açık favori/favorim/en şanslı/en güçlü aday.
 
 banko:
-
-Yalnız kaynak açıkça:
-
-banko
-tek
-
-veya tartışmasız biçimde tek önerilen anlamı kullanıyorsa.
-
+açık banko/tek/yalnız bırakılabilir.
 
 strong:
-
-Açık pozitif ana seçim.
-
-Özellikle:
-
-ilk şans
-güçlü
-birinciliğe yakın
-kazanmaya yakın
-birincilikle tanışabilir
-önde gelen isimdir
-rakiplerini geride bırakabilir
-farklı sonuç elde edebilecek güçtedir
-kazanmasını bekliyoruz
-rövanşı alacaktır
-ilk atımızdır
-
-gibi ifadeler strong'dur.
-
+pozitif ana seçim, daha özel label yok.
 
 star:
-
-Kaynak açıkça yıldız veya özel ana seçim diyorsa.
-
+açık yıldız/özel ana seçim.
 
 rival:
-
-Rakip, ikinci şans veya sonraki şans.
-
+rakip/ikinci şans/sonraki şans.
 
 surprise:
-
-Sürpriz, bomba veya tatlı kaçak.
-
+sürpriz/bomba/tatlı kaçak.
 
 avoid:
+açık önerilmeyen/elenecek.
 
-Açıkça önerilmeyen veya elenen.
+OUTPUT
 
+Her gerçek koşu races[] içinde bir kez:
 
-Bir selection birden fazla label alabilir.
+city
+raceNumber
+selections
+numberGroups
 
+SELECTION
 
-NUMBER GROUPS
+horseNumber
+horseName
+comment
+labels
 
-Kaynak aynı koşuda yalnız numara listesi veriyorsa bunu compact numberGroups olarak çıkar.
+At adı uydurma.
 
-Örnek:
+NUMBER GROUP
 
-Sırasıyla rakip gördüğümüz isimler: 6-1-8
+Örneğin:
 
-şu anlama gelir:
+Rakipler: 6-1-8
 
-label = rival
-horseNumbers = [6,1,8]
+güvenli biçimde aynı resmi koşuya aitse:
 
-Bu birleştirme yalnız OUTPUT TRANSPORT optimizasyonudur.
+label="rival"
+horseNumbers=[6,1,8]
 
-6, 1 ve 8 uygulamada ayrı ayrı at seçimlerine dönüştürülecektir.
-
-Numara listesinde at adı yazmıyorsa isim uydurma.
-
-
-KUPON / ALTILI BLOKLARI TAMAMEN IGNORE ET
-
-ALTILI GANYAN TAHMİNİMİZ
-BİRİNCİ ALTILI GANYAN
-İKİNCİ ALTILI GANYAN
-
-1.Ayak:
-2.Ayak:
-3.Ayak:
-4.Ayak:
-5.Ayak:
-6.Ayak:
-
-satırları expert runner extraction değildir.
-
-Örnek:
-
-1.Ayak: 5.6.1.4
-
-buradaki:
-
-1 = raceNumber değildir.
-
-5,6,1,4 = otomatik expert seçimleri değildir.
-
+Bu yalnız transport grouping'dir.
 
 IDENTITY
 
-city + raceNumber aynı gerçek koşu analizine ait olmalıdır.
+city + raceNumber gerçek TJK koşusu olmalı.
 
-horseNumber gerçek program numarası olmalıdır.
+horseNumber gerçek program numarası olmalı.
 
-Program numarası dışındaki tarih, AGF, HP, kilo, mesafe,
-oran, derece ve kupon sayılarını horseNumber sanma.
+Tarih, AGF, HP, kilo, oran, derece veya AYAK numarasını
+horseNumber/raceNumber sanma.
 
 sourceRank üretme.
-
 confidence üretme.
 
-Sayfada hedef karta ait açık expert analizleri varsa races=[] döndürme.
+Güvenli current-card expert data varsa races=[] döndürme.
 
-Gerçekten current-card expert seçimi yoksa ancak o zaman races=[] döndür.
+Gerçekten yoksa races=[] döndür.
 
-Yalnız response_format JSON schema'sına uygun veri üret.
+Yalnız JSON schema'ya uygun data üret.
 `.trim();
 }

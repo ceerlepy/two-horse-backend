@@ -379,10 +379,18 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    }
 
 
+   const previewDate =
+    (
+     url.searchParams.get("date") ??
+     ""
+    ).trim() || undefined;
+
+
    const preview =
     await previewExpertSource(
      env,
-     sourceKey
+     sourceKey,
+     previewDate
     );
 
 

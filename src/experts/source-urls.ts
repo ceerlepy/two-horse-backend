@@ -2,68 +2,9 @@ import type {
   ExpertSource
 } from "./source-types";
 
-
-/*
- * Durable entry/current-page URLs.
- *
- * These URLs are discovery/current-page entry points.
- *
- * Dynamically discovered daily article URLs do not belong
- * here.
- */
-const VERIFIED_ENTRY_URLS:
-  Record<
-    string,
-    string[]
-  > = {
-
-  liderform: [
-    /*
-     * Verified Liderform analysis category.
-     * This is intentionally first because it contains a
-     * much cleaner candidate set than the general home
-     * page.
-     */
-    "https://liderform.com.tr/haberler/analizler",
-
-    "https://liderform.com.tr/",
-    "https://liderform.com.tr/uzman-listesi/"
-  ],
-
-  yaris_dergisi: [
-    "https://www.yarisdergisi.com/tag/tahminler/",
-    "https://www.yarisdergisi.com/tag/altili-tahmin/",
-    "https://www.yarisdergisi.com/"
-  ],
-
-  banko_tahminler: [
-    "https://www.bankotahminler.com/tahminler/",
-    "https://www.bankotahminler.com/bulten/",
-    "https://www.bankotahminler.com/"
-  ],
-
-  yaris_analizi: [
-    "https://www.yarisanalizi.com/yazarlar/yazilari/9/Yaris-Analizi.html",
-    "https://www.yarisanalizi.com/"
-  ],
-
-  istinye_ganyan: [
-    "https://istinyeganyan.com/ganyan/tahminler/",
-    "https://istinyeganyan.com/"
-  ],
-
-  horseturk: [
-    "https://www.horseturk.com/"
-  ],
-
-  ganyan_canavari: [
-    "https://www.ganyancanavari.com.tr/"
-  ],
-
-  afa: [
-    "https://atlarafisildayanadam.com/"
-  ]
-};
+import {
+  expertSourceConfig
+} from "../config/expert-acquisition";
 
 
 function normalizeUrl(
@@ -79,25 +20,23 @@ function normalizeUrl(
 
   try {
     const url =
-      new URL(
-        value
-      );
+      new URL(value);
 
 
     if (
-      url.protocol !== "https:" &&
-      url.protocol !== "http:"
+      url.protocol !==
+        "https:" &&
+      url.protocol !==
+        "http:"
     ) {
       return null;
     }
 
 
-    url.hash =
-      "";
+    url.hash = "";
 
 
-    return url
-      .toString();
+    return url.toString();
 
   } catch {
     return null;
@@ -105,7 +44,7 @@ function normalizeUrl(
 }
 
 
-function dedupeUrls(
+function dedupe(
   values:
     Array<
       string |
@@ -117,42 +56,54 @@ function dedupeUrls(
     new Set<string>();
 
 
-  const result:
+  const output:
     string[] = [];
 
 
-  for (
-    const raw of
-    values
-  ) {
+  for (const value of values) {
     const url =
       normalizeUrl(
-        raw
+        value
       );
 
 
     if (
       !url ||
-      seen.has(
-        url
-      )
+      seen.has(url)
     ) {
       continue;
     }
 
 
-    seen.add(
-      url
-    );
-
-
-    result.push(
-      url
-    );
+    seen.add(url);
+    output.push(url);
   }
 
 
-  return result;
+  return output;
+}
+
+
+export function expertConfiguredEntryUrls(
+  source:
+    ExpertSource
+): string[] {
+  return dedupe(
+    expertSourceConfig(
+      source.source_key
+    )
+      .entryUrls
+  );
+}
+
+
+export function expertRootUrl(
+  source:
+    ExpertSource
+): string | null {
+  return normalizeUrl(
+    source.homepage_url
+  );
 }
 
 
@@ -160,15 +111,14 @@ export function expertLandingUrls(
   source:
     ExpertSource
 ): string[] {
-  return dedupeUrls([
-    ...(
-      VERIFIED_ENTRY_URLS[
-        source.source_key
-      ] ??
-      []
+  return dedupe([
+    ...expertConfiguredEntryUrls(
+      source
     ),
 
-    source.homepage_url
+    expertRootUrl(
+      source
+    )
   ]);
 }
 
@@ -177,7 +127,7 @@ export function expertUrlCandidates(
   source:
     ExpertSource
 ): string[] {
-  return dedupeUrls([
+  return dedupe([
     source.last_working_url,
 
     ...expertLandingUrls(

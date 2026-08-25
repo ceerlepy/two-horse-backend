@@ -2,193 +2,228 @@ import type {
   Env
 } from "../env";
 
+import type {
+  ExpertPickInput
+} from "../types/models";
+
 import {
   errorMessage,
   turkeyDate
 } from "../shared";
 
 import {
-  expertLandingUrls
-} from "./source-urls";
-
-import {
-  discoverExpertArticleUrls
-} from "./discovery";
-
-import {
-  expertRequiresDiscoveredArticle,
-  isAllowedDiscoveredArticleUrl
-} from "./source-policy";
+  resolveExpertSourceTargets
+} from "./source-resolver";
 
 import {
   extractExperts
 } from "./extractor";
 
-
-type PreviewPick = {
-  city:string;
-  raceNumber:number;
-  horseNumber:number;
-
-  horseName?:
-    string | null;
-
-  comment?:
-    string | null;
-
-  isFavorite:boolean;
-  isBanko:boolean;
-  isStrong:boolean;
-  isStar:boolean;
-  isRival:boolean;
-  isSurprise:boolean;
-  isAvoid:boolean;
-
-  sourceRank:
-    number | null;
-
-  confidence:
-    number;
-};
+import {
+  validateExpertPicks
+} from "./validator";
 
 
-function pickKey(
+function validDate(
+  value:
+    string
+): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/
+    .test(value);
+}
+
+
+function key(
   pick:
-    PreviewPick
+    ExpertPickInput
 ): string {
   return [
-    String(pick.city)
+    pick.city
       .normalize("NFKC")
-      .trim()
-      .toLocaleUpperCase("tr-TR"),
+      .toLocaleUpperCase(
+        "tr-TR"
+      ),
 
-    Number(
-      pick.raceNumber
-    ),
-
-    Number(
-      pick.horseNumber
-    )
+    pick.raceNumber,
+    pick.horseNumber
   ].join("|");
 }
 
 
-function mergePick(
-  merged:
-    Map<string,PreviewPick>,
-
-  incoming:
-    PreviewPick
-): void {
-  const key =
-    pickKey(
-      incoming
-    );
-
-  const previous =
-    merged.get(
-      key
-    );
+function merge(
+  picks:
+    ExpertPickInput[]
+): ExpertPickInput[] {
+  const result =
+    new Map<
+      string,
+      ExpertPickInput
+    >();
 
 
-  if (!previous) {
-    merged.set(
-      key,
+  for (const pick of picks) {
+    const identity =
+      key(
+        pick
+      );
+
+
+    const old =
+      result.get(
+        identity
+      );
+
+
+    if (!old) {
+      result.set(
+        identity,
+        {
+          ...pick
+        }
+      );
+
+      continue;
+    }
+
+
+    result.set(
+      identity,
       {
-        ...incoming
+        ...old,
+
+        comment:
+          String(
+            pick.comment ??
+            ""
+          ).length >
+          String(
+            old.comment ??
+            ""
+          ).length
+            ? pick.comment
+            : old.comment,
+
+        isFavorite:
+          old.isFavorite ||
+          pick.isFavorite,
+
+        isBanko:
+          old.isBanko ||
+          pick.isBanko,
+
+        isStrong:
+          old.isStrong ||
+          pick.isStrong,
+
+        isStar:
+          old.isStar ||
+          pick.isStar,
+
+        isRival:
+          old.isRival ||
+          pick.isRival,
+
+        isSurprise:
+          old.isSurprise ||
+          pick.isSurprise,
+
+        isAvoid:
+          old.isAvoid ||
+          pick.isAvoid,
+
+        confidence:
+          Math.max(
+            old.confidence,
+            pick.confidence
+          )
       }
     );
-
-    return;
   }
 
 
-  const previousComment =
-    String(
-      previous.comment ??
-      ""
-    );
-
-  const incomingComment =
-    String(
-      incoming.comment ??
-      ""
-    );
-
-
-  merged.set(
-    key,
-    {
-      ...previous,
-
-      horseName:
-        previous.horseName ??
-        incoming.horseName ??
-        null,
-
-      comment:
-        incomingComment.length >
-        previousComment.length
-          ? incoming.comment
-          : previous.comment,
-
-      isFavorite:
-        previous.isFavorite ||
-        incoming.isFavorite,
-
-      isBanko:
-        previous.isBanko ||
-        incoming.isBanko,
-
-      isStrong:
-        previous.isStrong ||
-        incoming.isStrong,
-
-      isStar:
-        previous.isStar ||
-        incoming.isStar,
-
-      isRival:
-        previous.isRival ||
-        incoming.isRival,
-
-      isSurprise:
-        previous.isSurprise ||
-        incoming.isSurprise,
-
-      isAvoid:
-        previous.isAvoid ||
-        incoming.isAvoid,
-
-      confidence:
-        Math.max(
-          Number(
-            previous.confidence ??
-            0
-          ),
-
-          Number(
-            incoming.confidence ??
-            0
-          )
-        )
-    }
-  );
+  return [
+    ...result.values()
+  ];
 }
 
 
-function emptyCounts() {
+function summarize(
+  picks:
+    ExpertPickInput[]
+) {
+  const races =
+    new Set(
+      picks.map(
+        pick =>
+          `${pick.city}|${pick.raceNumber}`
+      )
+    );
+
+
+  const count =
+    (
+      field:
+        keyof ExpertPickInput
+    ) =>
+      picks.filter(
+        pick =>
+          Boolean(
+            pick[field]
+          )
+      ).length;
+
+
   return {
-    races:0,
-    total:0,
-    main:0,
-    favorite:0,
-    banko:0,
-    strong:0,
-    star:0,
-    rival:0,
-    surprise:0,
-    avoid:0
+    races:
+      races.size,
+
+    total:
+      picks.length,
+
+    main:
+      picks.filter(
+        pick =>
+          pick.isFavorite ||
+          pick.isBanko ||
+          pick.isStrong ||
+          pick.isStar ||
+          pick.isSurprise
+      ).length,
+
+    favorite:
+      count(
+        "isFavorite"
+      ),
+
+    banko:
+      count(
+        "isBanko"
+      ),
+
+    strong:
+      count(
+        "isStrong"
+      ),
+
+    star:
+      count(
+        "isStar"
+      ),
+
+    rival:
+      count(
+        "isRival"
+      ),
+
+    surprise:
+      count(
+        "isSurprise"
+      ),
+
+    avoid:
+      count(
+        "isAvoid"
+      )
   };
 }
 
@@ -198,8 +233,33 @@ export async function previewExpertSource(
     Env,
 
   sourceKey:
+    string,
+
+  raceDateOverride?:
     string
 ): Promise<any> {
+  if (
+    raceDateOverride &&
+    !validDate(
+      raceDateOverride
+    )
+  ) {
+    return {
+      ok:false,
+      preview:true,
+      persisted:false,
+
+      error:
+        "INVALID_RACE_DATE"
+    };
+  }
+
+
+  const raceDate =
+    raceDateOverride ??
+    turkeyDate();
+
+
   const source =
     await env.DB.prepare(`
       SELECT
@@ -207,7 +267,15 @@ export async function previewExpertSource(
         source_name,
         homepage_url,
         last_working_url,
-        last_discovered_article_url
+        last_discovered_article_url,
+        last_discovered_article_at,
+        content_hash,
+        last_checked_at,
+        last_success_at,
+        last_failure_at,
+        consecutive_failures,
+        source_type,
+        base_weight
       FROM source_registry
       WHERE source_key = ?
       LIMIT 1
@@ -223,14 +291,11 @@ export async function previewExpertSource(
       ok:false,
       preview:true,
       persisted:false,
+
       error:
         "EXPERT_SOURCE_NOT_FOUND"
     };
   }
-
-
-  const today =
-    turkeyDate();
 
 
   const meetings =
@@ -241,7 +306,7 @@ export async function previewExpertSource(
       ORDER BY city
     `)
       .bind(
-        today
+        raceDate
       )
       .all<any>();
 
@@ -265,331 +330,105 @@ export async function previewExpertSource(
       ok:false,
       preview:true,
       persisted:false,
+
       source:
         sourceKey,
+
+      date:
+        raceDate,
+
       error:
         "EXPERT_NO_CANONICAL_MEETINGS"
     };
   }
 
 
-  /*
-   * IMPORTANT:
-   *
-   * Do NOT trust stored last_working_url as the starting
-   * point of a cross-source regression preview.
-   *
-   * Start from each source's verified entry/current-page
-   * configuration exactly as normal discovery does.
-   */
-  const landingUrls =
-    expertLandingUrls(
-      source as any
+  const resolution =
+    await resolveExpertSourceTargets(
+      env,
+      source,
+      raceDate,
+      cities
     );
 
 
-  if (!landingUrls.length) {
-    return {
-      ok:false,
-      preview:true,
-      persisted:false,
-      source:
-        sourceKey,
-      error:
-        "EXPERT_NO_VERIFIED_ENTRY_URL"
-    };
-  }
-
-
-  const discoveryAttempts:
-    any[] = [];
-
-
-  const articleUrls:
-    string[] = [];
-
-
-  const articleSeen =
-    new Set<string>();
-
-
-  /*
-   * Mirror normal source discovery priority:
-   *
-   * try source-specific entry URLs in configured order;
-   * stop after the first landing that yields accepted
-   * current article candidates.
-   */
-  for (
-    const landingUrl of
-    landingUrls
-  ) {
-    try {
-      const discovery =
-        await discoverExpertArticleUrls(
-          env,
-          landingUrl,
-          String(
-            source.source_name
-          ),
-          cities
-        );
-
-
-      const accepted =
-        discovery.urls
-          .filter(
-            candidate =>
-              !landingUrls.includes(
-                candidate
-              )
-          )
-          .filter(
-            candidate =>
-              isAllowedDiscoveredArticleUrl(
-                sourceKey,
-                candidate
-              )
-          );
-
-
-      discoveryAttempts.push({
-        landingUrl,
-
-        method:
-          discovery.method,
-
-        selected:
-          discovery.urls.length,
-
-        accepted:
-          accepted.length,
-
-        acceptedUrls:
-          accepted
-      });
-
-
-      for (
-        const articleUrl of
-        accepted
-      ) {
-        if (
-          articleSeen.has(
-            articleUrl
-          )
-        ) {
-          continue;
-        }
-
-        articleSeen.add(
-          articleUrl
-        );
-
-        articleUrls.push(
-          articleUrl
-        );
-      }
-
-
-      /*
-       * Same priority behavior as production:
-       *
-       * once this source's preferred landing proves one or
-       * more current articles, do not keep burning discovery
-       * calls on lower-priority entry pages.
-       */
-      if (
-        accepted.length >
-        0
-      ) {
-        break;
-      }
-
-    } catch (error) {
-      discoveryAttempts.push({
-        landingUrl,
-
-        method:
-          "failed",
-
-        selected:
-          0,
-
-        accepted:
-          0,
-
-        acceptedUrls:
-          [],
-
-        error:
-          errorMessage(
-            error
-          )
-      });
-    }
-  }
-
-
-  const requiresArticle =
-    expertRequiresDiscoveredArticle(
-      sourceKey
-    );
-
-
-  /*
-   * Liderform-style source:
-   *
-   * an explicit daily article is mandatory.
-   */
   if (
-    requiresArticle &&
-    articleUrls.length ===
-      0
+    resolution.status !==
+      "ready"
   ) {
     return {
-      ok:true,
+      ok:
+        resolution.status ===
+        "not-published",
 
       preview:true,
-
       persisted:false,
 
       status:
-        "article-not-published",
+        resolution.status,
 
       source:
         sourceKey,
 
       date:
-        today,
+        raceDate,
 
       cities,
 
-      mode:
-        "discovered-article-required",
-
-      discovery:
-        discoveryAttempts,
-
-      extractionAttempts:
-        [],
+      resolution,
 
       counts:
-        emptyCounts(),
+        summarize([]),
 
-      mainPicks:
-        [],
-
-      rivalsByRace:
-        [],
-
-      completenessByArticle:
-        []
+      extractionAttempts:[]
     };
   }
 
 
-  /*
-   * If discovery found real current articles, extract all
-   * accepted articles from that successful source landing.
-   *
-   * This is important for sources such as a magazine/site
-   * that may publish separate current city articles.
-   *
-   * If no article was discovered and the source is allowed
-   * to publish directly on a stable/current page, use the
-   * configured source landing URLs as extraction candidates.
-   */
-  const extractionMode =
-    articleUrls.length >
-      0
-      ? "discovered-articles"
-      : "direct-current-page";
+  const all:
+    ExpertPickInput[] = [];
 
 
-  const extractionUrls =
-    articleUrls.length >
-      0
-      ? articleUrls
-      : landingUrls;
-
-
-  const extractionAttempts:
+  const attempts:
     any[] = [];
 
 
-  const completenessByArticle:
-    any[] = [];
+  let promptTokens=0;
+  let completionTokens=0;
+  let totalTokens=0;
+  let neurons=0;
 
 
-  const merged =
-    new Map<
-      string,
-      PreviewPick
-    >();
-
-
-  let hadSemanticResponse =
-    false;
-
-
-  let totalPromptTokens =
-    0;
-
-
-  let totalCompletionTokens =
-    0;
-
-
-  let totalTokens =
-    0;
-
-
-  let totalNeurons =
-    0;
-
-
-  /*
-   * ARTICLE MODE:
-   *
-   * Extract every current article selected from the
-   * successful landing. This gives a source-level preview
-   * instead of arbitrarily showing only one city/article.
-   *
-   * DIRECT CURRENT-PAGE MODE:
-   *
-   * configured URLs are alternatives, so stop at the first
-   * one that actually yields usable picks.
-   */
-  for (
-    const extractionUrl of
-    extractionUrls
-  ) {
+  for (const url of resolution.targets) {
     try {
       const extracted =
         await extractExperts(
           env,
-          extractionUrl,
-          String(
-            source.source_name
-          )
+          url,
+          source.source_name,
+          sourceKey,
+          raceDate
         );
 
 
-      hadSemanticResponse =
-        true;
+      const raw =
+        extracted.extraction
+          .picks;
 
 
-      const picks =
-        extracted
-          .extraction
-          .picks as
-          PreviewPick[];
+      const validated =
+        await validateExpertPicks(
+          env,
+          raw,
+          raceDate,
+          {
+            writeAnomalies:false
+          }
+        );
 
 
       const diagnostics =
-        extracted
-          .diagnostics as any;
+        extracted.diagnostics as any;
 
 
       const usage =
@@ -599,14 +438,14 @@ export async function previewExpertSource(
         {};
 
 
-      totalPromptTokens +=
+      promptTokens +=
         Number(
           usage.prompt_tokens ??
           0
         );
 
 
-      totalCompletionTokens +=
+      completionTokens +=
         Number(
           usage.completion_tokens ??
           0
@@ -620,109 +459,84 @@ export async function previewExpertSource(
         );
 
 
-      totalNeurons +=
+      neurons +=
         Number(
           usage.neurons ??
           0
         );
 
 
-      extractionAttempts.push({
-        url:
-          extractionUrl,
-
-        status:
-          extracted.status,
+      attempts.push({
+        url,
 
         method:
           extracted.method,
 
-        picks:
-          picks.length,
+        extracted:
+          raw.length,
 
-        articleText: {
-          selectedRoot:
-            diagnostics
-              ?.articleText
-              ?.selectedRoot ??
-            null,
+        validated:
+          validated.length,
 
-          characters:
-            diagnostics
-              ?.articleText
-              ?.outputCharacters ??
-            null,
+        completeCanonical:
+          raw.length > 0 &&
+          raw.length ===
+            validated.length,
 
-          truncated:
-            diagnostics
-              ?.articleText
-              ?.truncated ??
-            null
-        },
-
-        usage: {
-          promptTokens:
-            Number(
-              usage.prompt_tokens ??
-              0
-            ),
-
-          completionTokens:
-            Number(
-              usage.completion_tokens ??
-              0
-            ),
-
-          totalTokens:
-            Number(
-              usage.total_tokens ??
-              0
-            ),
-
-          neurons:
-            Number(
-              usage.neurons ??
-              0
-            )
-        }
+        diagnostics
       });
-
-
-      completenessByArticle.push({
-        url:
-          extractionUrl,
-
-        completeness:
-          diagnostics
-            ?.completeness ??
-          null
-      });
-
-
-      for (
-        const pick of
-        picks
-      ) {
-        mergePick(
-          merged,
-          pick
-        );
-      }
 
 
       if (
-        extractionMode ===
-          "direct-current-page" &&
-        picks.length >
-          0
+        !raw.length ||
+        validated.length !==
+          raw.length
       ) {
-        break;
+        return {
+          ok:false,
+          preview:true,
+          persisted:false,
+
+          status:
+            raw.length
+              ? "canonical-incomplete"
+              : "semantic-empty",
+
+          source:
+            sourceKey,
+
+          date:
+            raceDate,
+
+          cities,
+
+          resolution,
+
+          extractionAttempts:
+            attempts,
+
+          counts:
+            summarize(
+              merge(all)
+            ),
+
+          semanticUsage:{
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            neurons
+          }
+        };
       }
 
-    } catch (error) {
-      extractionAttempts.push({
-        url:
-          extractionUrl,
+
+      all.push(
+        ...validated
+      );
+
+    } catch(error) {
+      attempts.push({
+        url,
 
         status:
           "failed",
@@ -734,285 +548,47 @@ export async function previewExpertSource(
       });
 
 
-      /*
-       * For alternative direct pages, continue to the next
-       * configured entry.
-       *
-       * For article mode, one broken article must not hide
-       * results from another current article.
-       */
-      continue;
+      return {
+        ok:false,
+        preview:true,
+        persisted:false,
+
+        status:
+          "extraction-failed",
+
+        source:
+          sourceKey,
+
+        date:
+          raceDate,
+
+        cities,
+
+        resolution,
+
+        extractionAttempts:
+          attempts,
+
+        error:
+          "EXPERT_PREVIEW_EXTRACTION_FAILED"
+      };
     }
   }
 
 
   const picks =
-    [
-      ...merged.values()
-    ];
-
-
-  const isMain =
-    (
-      pick:
-        PreviewPick
-    ) =>
-      Boolean(
-        pick.isFavorite ||
-        pick.isBanko ||
-        pick.isStrong ||
-        pick.isStar ||
-        pick.isSurprise
-      );
-
-
-  const countFlag =
-    (
-      key:
-        | "isFavorite"
-        | "isBanko"
-        | "isStrong"
-        | "isStar"
-        | "isRival"
-        | "isSurprise"
-        | "isAvoid"
-    ) =>
-      picks.filter(
-        pick =>
-          Boolean(
-            pick[key]
-          )
-      ).length;
-
-
-  const mainPicks =
-    picks
-      .filter(
-        isMain
-      )
-      .map(
-        pick => ({
-          city:
-            pick.city,
-
-          raceNumber:
-            pick.raceNumber,
-
-          horseNumber:
-            pick.horseNumber,
-
-          horseName:
-            pick.horseName ??
-            null,
-
-          comment:
-            pick.comment ??
-            null,
-
-          labels: [
-            pick.isFavorite
-              ? "favorite"
-              : null,
-
-            pick.isBanko
-              ? "banko"
-              : null,
-
-            pick.isStrong
-              ? "strong"
-              : null,
-
-            pick.isStar
-              ? "star"
-              : null,
-
-            pick.isSurprise
-              ? "surprise"
-              : null
-          ]
-            .filter(Boolean),
-
-          confidence:
-            pick.confidence
-        })
-      )
-      .sort(
-        (a,b) =>
-          String(a.city)
-            .localeCompare(
-              String(b.city),
-              "tr"
-            ) ||
-          Number(
-            a.raceNumber
-          ) -
-          Number(
-            b.raceNumber
-          ) ||
-          Number(
-            a.horseNumber
-          ) -
-          Number(
-            b.horseNumber
-          )
-      );
-
-
-  const rivals =
-    new Map<
-      string,
-      {
-        city:string;
-        raceNumber:number;
-        horseNumbers:number[];
-      }
-    >();
-
-
-  for (
-    const pick of
-    picks
-  ) {
-    if (!pick.isRival) {
-      continue;
-    }
-
-
-    const key =
-      [
-        pick.city,
-        pick.raceNumber
-      ].join("|");
-
-
-    const existing =
-      rivals.get(
-        key
-      ) ??
-      {
-        city:
-          pick.city,
-
-        raceNumber:
-          pick.raceNumber,
-
-        horseNumbers:
-          []
-      };
-
-
-    existing
-      .horseNumbers
-      .push(
-        pick.horseNumber
-      );
-
-
-    rivals.set(
-      key,
-      existing
+    merge(
+      all
     );
-  }
-
-
-  const rivalsByRace =
-    [
-      ...rivals.values()
-    ]
-      .map(
-        row => ({
-          ...row,
-
-          horseNumbers:
-            [
-              ...new Set(
-                row.horseNumbers
-              )
-            ]
-              .sort(
-                (a,b) =>
-                  a-b
-              )
-        })
-      )
-      .sort(
-        (a,b) =>
-          String(a.city)
-            .localeCompare(
-              String(b.city),
-              "tr"
-            ) ||
-          a.raceNumber -
-          b.raceNumber
-      );
-
-
-  const races =
-    new Set(
-      picks.map(
-        pick =>
-          [
-            pick.city,
-            pick.raceNumber
-          ].join("|")
-      )
-    );
-
-
-  /*
-   * No extraction error + zero picks is a valid diagnostic
-   * semantic-empty result.
-   *
-   * If every candidate technically failed, expose that
-   * clearly instead of pretending the source had no picks.
-   */
-  if (
-    picks.length ===
-      0 &&
-    !hadSemanticResponse
-  ) {
-    return {
-      ok:false,
-
-      preview:true,
-
-      persisted:false,
-
-      status:
-        "extraction-failed",
-
-      source:
-        sourceKey,
-
-      date:
-        today,
-
-      cities,
-
-      mode:
-        extractionMode,
-
-      discovery:
-        discoveryAttempts,
-
-      extractionAttempts,
-
-      error:
-        "EXPERT_PREVIEW_EXTRACTION_FAILED"
-    };
-  }
 
 
   return {
     ok:true,
-
     preview:true,
-
     persisted:false,
 
     status:
-      picks.length >
-        0
+      picks.length
         ? "success"
         : "semantic-empty",
 
@@ -1020,86 +596,86 @@ export async function previewExpertSource(
       sourceKey,
 
     date:
-      today,
+      raceDate,
 
     cities,
 
     mode:
-      extractionMode,
+      resolution.mode,
 
-    discoveredArticleUrls:
-      articleUrls,
+    targets:
+      resolution.targets,
 
-    extractionUrls,
+    resolution,
 
-    discovery:
-      discoveryAttempts,
+    extractionAttempts:
+      attempts,
 
-    extractionAttempts,
+    counts:
+      summarize(
+        picks
+      ),
 
-    counts: {
-      races:
-        races.size,
-
-      total:
-        picks.length,
-
-      main:
-        mainPicks.length,
-
-      favorite:
-        countFlag(
-          "isFavorite"
-        ),
-
-      banko:
-        countFlag(
-          "isBanko"
-        ),
-
-      strong:
-        countFlag(
-          "isStrong"
-        ),
-
-      star:
-        countFlag(
-          "isStar"
-        ),
-
-      rival:
-        countFlag(
-          "isRival"
-        ),
-
-      surprise:
-        countFlag(
-          "isSurprise"
-        ),
-
-      avoid:
-        countFlag(
-          "isAvoid"
+    mainPicks:
+      picks
+        .filter(
+          pick =>
+            pick.isFavorite ||
+            pick.isBanko ||
+            pick.isStrong ||
+            pick.isStar ||
+            pick.isSurprise
         )
-    },
+        .map(
+          pick => ({
+            city:
+              pick.city,
 
-    mainPicks,
+            raceNumber:
+              pick.raceNumber,
 
-    rivalsByRace,
+            horseNumber:
+              pick.horseNumber,
 
-    completenessByArticle,
+            horseName:
+              pick.horseName,
 
-    semanticUsage: {
-      promptTokens:
-        totalPromptTokens,
+            comment:
+              pick.comment,
 
-      completionTokens:
-        totalCompletionTokens,
+            labels:[
+              pick.isFavorite
+                ? "favorite"
+                : null,
 
+              pick.isBanko
+                ? "banko"
+                : null,
+
+              pick.isStrong
+                ? "strong"
+                : null,
+
+              pick.isStar
+                ? "star"
+                : null,
+
+              pick.isSurprise
+                ? "surprise"
+                : null
+            ]
+              .filter(Boolean),
+
+            confidence:
+              pick.confidence
+          })
+        ),
+
+    semanticUsage:{
+      promptTokens,
+      completionTokens,
       totalTokens,
-
-      neurons:
-        totalNeurons
+      neurons
     }
   };
 }

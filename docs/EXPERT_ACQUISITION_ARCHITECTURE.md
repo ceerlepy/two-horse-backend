@@ -776,3 +776,42 @@ without changing source health
 without replacing last_working_url
 
 and without weakening the no-upcoming-race production refresh gate.
+
+
+## Authoritative config-driven source acquisition v3
+
+Source URL and discovery policy is now declared in
+`config/expert-acquisition.json`.
+
+This section supersedes older source-specific URL maps and the previous
+full-page semantic discovery fallback.
+
+Discovery is:
+
+verified entry
+-> SCRAPE
+-> CONTENT
+-> HTTP
+-> real href extraction
+-> local config-driven evidence filtering
+-> bounded candidate semantic selection
+-> fetched target
+
+Full-page semantic URL generation is not part of the production path.
+
+When a verified entry moves, root-navigation recovery uses configured
+navigation labels and then resumes the same discovery pipeline.
+
+Article prefixes are preference signals, not permanent hard URL contracts.
+
+Turkish month evidence is generated with `Intl.DateTimeFormat("tr-TR")`;
+month names are not hard-coded.
+
+Extraction remains semantic Workers AI extraction followed by deterministic
+horse-level expansion and canonical TJK validation.
+
+Source-specific semantic profiles remain explicit, including Liderform's
+duplicate coupon rule and Altılı/Ayak sources' canonical six-fold mapping.
+
+Multi-document source updates are fail closed and replace source/day rows
+only after the entire resolved bundle validates.

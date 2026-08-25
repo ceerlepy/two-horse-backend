@@ -7,20 +7,25 @@ import type {
 } from "../types/models";
 
 import {
+  EXPERT_ACQUISITION_CONFIG,
+  expertSourceConfig
+} from "../config/expert-acquisition";
+
+import {
   turkeyDate
 } from "../shared";
 
 import {
-  acquireCfContentHtml
-} from "../acquisition/cloudflare-html";
-
-import {
-  acquireHttpHtml
-} from "../acquisition/http";
+  acquireExpertHtmlStage
+} from "./acquisition-fallback";
 
 import {
   expertArticleTextFromHtml
 } from "./article-text";
+
+import {
+  normalizeExpertSearchText
+} from "./text-normalization";
 
 import {
   mapRawExpertExtraction
@@ -60,22 +65,6 @@ export interface ExtractedExperts {
 }
 
 
-interface AcquiredExpertArticle {
-  html:
-    string;
-
-  method:
-    "cf-content" |
-    "http-fallback";
-
-  bodyLength:
-    number;
-
-  contentError:
-    string | null;
-}
-
-
 function errorMessage(
   error:
     unknown
@@ -86,94 +75,382 @@ function errorMessage(
 }
 
 
-async function acquireExpertArticle(
+function preflight(
+  sourceKey:
+    string,
+
+  text:
+    string,
+
+  cities:
+    string[]
+) {
+  const extraction =
+    EXPERT_ACQUISITION_CONFIG
+      .extraction;
+
+
+  if (
+    text.length <
+    extraction
+      .minimumTextCharacters
+  ) {
+    return {
+      ok:false,
+
+      reason:
+        `TEXT_TOO_SMALL:${text.length}`
+    };
+  }
+
+
+  const normalized =
+    normalizeExpertSearchText(
+      text
+    );
+
+
+  const racing =
+    extraction
+      .relevanceTerms
+      .some(
+        term =>
+          normalized.includes(
+            normalizeExpertSearchText(
+              term
+            )
+          )
+      );
+
+
+  if (!racing) {
+    return {
+      ok:false,
+
+      reason:
+        "NO_EXPERT_RACING_EVIDENCE"
+    };
+  }
+
+
+  if (
+    !expertSourceConfig(
+      sourceKey
+    )
+      .preflightRequiresCity
+  ) {
+    return {
+      ok:true,
+      reason:null
+    };
+  }
+
+
+  const cityHit =
+    cities.some(
+      city =>
+        normalized.includes(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
+
+
+  return cityHit
+    ? {
+        ok:true,
+        reason:null
+      }
+    : {
+        ok:false,
+        reason:
+          "NO_TARGET_CITY_EVIDENCE"
+      };
+}
+
+
+function compactText(
+  text:
+    string,
+
+  cities:
+    string[]
+) {
+  const extraction =
+    EXPERT_ACQUISITION_CONFIG
+      .extraction;
+
+
+  if (
+    text.length <=
+    extraction
+      .semanticMaxCharacters
+  ) {
+    return {
+      text,
+      compacted:false
+    };
+  }
+
+
+  const lines =
+    text
+      .split(/\n+/)
+      .map(
+        value =>
+          value.trim()
+      )
+      .filter(Boolean);
+
+
+  const important =
+    new Set<number>();
+
+
+  const normalizedCities =
+    cities.map(
+      normalizeExpertSearchText
+    );
+
+
+  for (
+    let index=0;
+    index<lines.length;
+    index++
+  ) {
+    const normalized =
+      normalizeExpertSearchText(
+        lines[index]
+      );
+
+
+    const relevant =
+      normalizedCities.some(
+        city =>
+          normalized.includes(
+            city
+          )
+      ) ||
+      extraction
+        .relevanceTerms
+        .some(
+          term =>
+            normalized.includes(
+              normalizeExpertSearchText(
+                term
+              )
+            )
+        );
+
+
+    if (!relevant) {
+      continue;
+    }
+
+
+    const window =
+      extraction
+        .relevanceWindowLines;
+
+
+    for (
+      let offset=-window;
+      offset<=window;
+      offset++
+    ) {
+      const target =
+        index + offset;
+
+
+      if (
+        target >= 0 &&
+        target <
+          lines.length
+      ) {
+        important.add(
+          target
+        );
+      }
+    }
+  }
+
+
+  const compacted =
+    [
+      ...important
+    ]
+      .sort(
+        (
+          first,
+          second
+        ) =>
+          first-second
+      )
+      .map(
+        index =>
+          lines[index]
+      )
+      .join("\n");
+
+
+  if (
+    compacted.length >=
+    800
+  ) {
+    return {
+      text:
+        compacted.slice(
+          0,
+          extraction
+            .semanticMaxCharacters
+        ),
+
+      compacted:true
+    };
+  }
+
+
+  const max =
+    extraction
+      .semanticMaxCharacters;
+
+
+  const head =
+    Math.floor(
+      max *
+      0.67
+    );
+
+
+  return {
+    text:[
+      text.slice(
+        0,
+        head
+      ),
+
+      "",
+      "[MIDDLE COMPACTED]",
+      "",
+
+      text.slice(
+        -(
+          max -
+          head
+        )
+      )
+    ].join("\n"),
+
+    compacted:true
+  };
+}
+
+
+async function acquireDocument(
   env:
     Env,
 
   url:
-    string
-): Promise<AcquiredExpertArticle> {
-  /*
-   * CONTENT gives us the rendered source used for semantic
-   * extraction without also invoking Workers AI.
-   */
-  try {
-    const content =
-      await acquireCfContentHtml(
-        env,
-        url
-      );
+    string,
+
+  sourceKey:
+    string,
+
+  cities:
+    string[]
+) {
+  const failures:
+    any[] = [];
 
 
-    return {
-      html:
-        content.html,
-
-      method:
-        "cf-content",
-
-      bodyLength:
-        content.bodyLength,
-
-      contentError:
-        null
-    };
-
-  } catch (contentError) {
-    /*
-     * Browser rendering is an acquisition dependency, not
-     * semantic truth.
-     *
-     * If CONTENT fails technically, ordinary HTTP gets one
-     * AI-free chance before the source is declared failed.
-     */
+  for (
+    const stage of
+    EXPERT_ACQUISITION_CONFIG
+      .extraction
+      .acquisitionOrder
+  ) {
     try {
-      const http =
-        await acquireHttpHtml(
+      const acquired =
+        await acquireExpertHtmlStage(
+          env,
           url,
-          {
-            timeoutMs:
-              12_000,
-
-            minimumBytes:
-              500
-          }
+          stage
         );
 
 
+      const normalized =
+        expertArticleTextFromHtml(
+          acquired.html
+        );
+
+
+      const compacted =
+        compactText(
+          normalized.text,
+          cities
+        );
+
+
+      const quality =
+        preflight(
+          sourceKey,
+          compacted.text,
+          cities
+        );
+
+
+      if (!quality.ok) {
+        failures.push({
+          stage,
+
+          bodyLength:
+            acquired.bodyLength,
+
+          normalizedCharacters:
+            normalized.outputCharacters,
+
+          reason:
+            quality.reason
+        });
+
+        continue;
+      }
+
+
       return {
-        html:
-          http.html,
+        stage,
+        acquired,
+        normalized,
 
-        method:
-          "http-fallback",
+        semanticText:
+          compacted.text,
 
-        bodyLength:
-          http.bodyLength,
+        compacted:
+          compacted.compacted,
 
-        contentError:
-          errorMessage(
-            contentError
-          )
+        failures
       };
 
-    } catch (httpError) {
-      throw new Error(
-        "EXPERT_ARTICLE_ACQUISITION_FAILED:" +
-        JSON.stringify({
-          content:
-            errorMessage(
-              contentError
-            ),
+    } catch(error) {
+      failures.push({
+        stage,
 
-          http:
-            errorMessage(
-              httpError
-            )
-        })
-      );
+        error:
+          errorMessage(
+            error
+          )
+      });
     }
   }
+
+
+  throw new Error(
+    "EXPERT_DOCUMENT_ACQUISITION_FAILED:" +
+    JSON.stringify(
+      failures
+    )
+  );
 }
 
 
@@ -197,22 +474,19 @@ function finalizeExtraction(
     extraction,
 
     status:
-      extraction.picks.length > 0
+      extraction.picks.length
         ? "success"
         : "semantic-empty",
 
     method,
 
-    diagnostics: {
+    diagnostics:{
       ...(
         diagnostics &&
         typeof diagnostics ===
           "object"
           ? diagnostics
-          : {
-              semantic:
-                diagnostics
-            }
+          : {}
       ),
 
       rawRaceCount:
@@ -233,9 +507,16 @@ export async function extractExperts(
     string,
 
   sourceName:
+    string,
+
+  sourceKey =
+    "",
+
+  raceDateOverride?:
     string
 ): Promise<ExtractedExperts> {
   const raceDate =
+    raceDateOverride ??
     turkeyDate();
 
 
@@ -258,14 +539,12 @@ export async function extractExperts(
       []
     )
       .map(
-        (
-          row:
-            any
-        ) =>
+        row =>
           String(
             row.city
           )
-      );
+      )
+      .filter(Boolean);
 
 
   if (!cities.length) {
@@ -275,52 +554,127 @@ export async function extractExperts(
   }
 
 
-  const article =
-    await acquireExpertArticle(
-      env,
-      url
-    );
+  const raceRows =
+    await env.DB.prepare(`
+      SELECT
+        city,
+        race_number,
+        sixfold_start_numbers_json
+      FROM races
+      WHERE race_date = ?
+      ORDER BY city,race_number
+    `)
+      .bind(
+        raceDate
+      )
+      .all<any>();
 
 
-  const normalized =
-    expertArticleTextFromHtml(
-      article.html
-    );
+  const sixfoldStarts:
+    Array<{
+      city:string;
+      sixfoldNumber:number;
+      raceNumber:number;
+    }> = [];
 
 
-  if (
-    normalized.text.length <
-    200
+  for (
+    const row of
+    raceRows.results ??
+    []
   ) {
-    throw new Error(
-      `EXPERT_ARTICLE_TEXT_TOO_SMALL:${normalized.text.length}`
-    );
+    let values:
+      unknown = [];
+
+
+    try {
+      values =
+        JSON.parse(
+          String(
+            row.sixfold_start_numbers_json ??
+            "[]"
+          )
+        );
+
+    } catch {
+      values=[];
+    }
+
+
+    if (!Array.isArray(values)) {
+      continue;
+    }
+
+
+    for (const value of values) {
+      const sixfoldNumber =
+        Number(value);
+
+
+      const raceNumber =
+        Number(
+          row.race_number
+        );
+
+
+      if (
+        Number.isInteger(
+          sixfoldNumber
+        ) &&
+        sixfoldNumber > 0 &&
+        Number.isInteger(
+          raceNumber
+        ) &&
+        raceNumber > 0
+      ) {
+        sixfoldStarts.push({
+          city:
+            String(
+              row.city
+            ),
+
+          sixfoldNumber,
+          raceNumber
+        });
+      }
+    }
   }
+
+
+  const document =
+    await acquireDocument(
+      env,
+      url,
+      sourceKey,
+      cities
+    );
 
 
   const prompt =
     expertExtractionPrompt(
       sourceName,
       raceDate,
-      cities
+      cities,
+      sourceKey,
+      sixfoldStarts
     );
 
 
   const liderformMode =
+    expertSourceConfig(
+      sourceKey
+    )
+      .promptProfile ===
+      "liderform" ||
     isLiderformSourceName(
       sourceName
     );
 
 
-  /*
-   * Exactly ONE semantic extraction call.
-   *
-   * max_tokens is controlled by our Workers AI request.
-   */
   const semantic =
     await extractExpertJsonWithWorkersAi(
       env,
-      normalized.text,
+      document.semanticText,
       prompt,
       {
         requireSelectionPerRace:
@@ -333,23 +687,12 @@ export async function extractExperts(
     liderformMode
       ? inspectLiderformCompleteness(
           semantic.value,
-          normalized.text,
+          document.normalized.text,
           cities
         )
       : null;
 
 
-  /*
-   * A structured response can be syntactically perfect yet
-   * semantically partial.
-   *
-   * Liderform is verified to expose one explicit main
-   * horse per analysis paragraph.
-   *
-   * Do not silently accept:
-   *
-   * race + rivals + missing main.
-   */
   if (
     completeness &&
     !completeness.complete
@@ -365,31 +708,45 @@ export async function extractExperts(
 
   return finalizeExtraction(
     semantic.value,
-    "cf-content-workers-ai-json",
+
+    `${document.stage}-workers-ai-json`,
+
     {
-      acquisition: {
-        method:
-          article.method,
+      acquisition:{
+        stage:
+          document.stage,
 
         bodyLength:
-          article.bodyLength,
+          document.acquired
+            .bodyLength,
 
-        contentError:
-          article.contentError
+        previousFailures:
+          document.failures
       },
 
-      articleText: {
+      articleText:{
         selectedRoot:
-          normalized.selectedRoot,
+          document.normalized
+            .selectedRoot,
 
         originalCharacters:
-          normalized.originalCharacters,
+          document.normalized
+            .originalCharacters,
 
-        outputCharacters:
-          normalized.outputCharacters,
+        normalizedCharacters:
+          document.normalized
+            .outputCharacters,
 
-        truncated:
-          normalized.truncated
+        semanticCharacters:
+          document.semanticText
+            .length,
+
+        compacted:
+          document.compacted,
+
+        hardTruncated:
+          document.normalized
+            .truncated
       },
 
       semantic:

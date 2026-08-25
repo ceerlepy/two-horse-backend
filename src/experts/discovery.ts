@@ -1,30 +1,85 @@
+import {
+  load
+} from "cheerio";
+
 import type {
   Env
 } from "../env";
 
 import {
-  extractSemanticJson,
   extractSemanticJsonFromHtml
 } from "../acquisition/semantic-json";
 
 import {
-  acquireCfContentHtml
-} from "../acquisition/cloudflare-html";
+  EXPERT_ACQUISITION_CONFIG,
+  expertSourceConfig
+} from "../config/expert-acquisition";
+
+import type {
+  ExpertAcquisitionStage
+} from "../config/expert-acquisition";
+
+import {
+  acquireExpertHtmlStage
+} from "./acquisition-fallback";
+
+import {
+  buildExpertRaceDateTokens
+} from "./date-evidence";
+
+import {
+  cleanExpertInlineText,
+  normalizeExpertSearchText
+} from "./text-normalization";
+
+import {
+  expertNavigationLabels,
+  expertRootIsEditorial,
+  isAllowedDiscoveredArticleUrl,
+  preferredArticlePathScore
+} from "./source-policy";
 
 import {
   turkeyDate
 } from "../shared";
 
 
+interface CandidateLink {
+  url:
+    string;
+
+  text:
+    string;
+
+  score:
+    number;
+
+  hasCity:
+    boolean;
+
+  hasDate:
+    boolean;
+
+  hasPredictionLanguage:
+    boolean;
+
+  deterministic:
+    boolean;
+}
+
+
 const discoverySchema = {
-  type: "object",
+  type:
+    "object",
 
   properties: {
     urls: {
-      type: "array",
+      type:
+        "array",
 
       items: {
-        type: "string"
+        type:
+          "string"
       }
     }
   },
@@ -35,35 +90,51 @@ const discoverySchema = {
 } as const;
 
 
-interface CandidateLink {
-  url: string;
-  text: string;
-}
-
-
-function sameHost(
-  a: string,
-  b: string
-): boolean {
+function normalizedHost(
+  value:
+    string
+): string | null {
   try {
-    return (
-      new URL(a).hostname
-        .replace(/^www\./,"")
-        .toLowerCase() ===
+    return new URL(value)
+      .hostname
+      .replace(/^www\./,"")
+      .toLowerCase();
 
-      new URL(b).hostname
-        .replace(/^www\./,"")
-        .toLowerCase()
-    );
   } catch {
-    return false;
+    return null;
   }
 }
 
 
+function sameHost(
+  first:
+    string,
+
+  second:
+    string
+): boolean {
+  const firstHost =
+    normalizedHost(first);
+
+  const secondHost =
+    normalizedHost(second);
+
+
+  return Boolean(
+    firstHost &&
+    secondHost &&
+    firstHost ===
+      secondHost
+  );
+}
+
+
 function normalizeUrl(
-  base: string,
-  value: string
+  base:
+    string,
+
+  value:
+    string
 ): string | null {
   try {
     const url =
@@ -72,717 +143,802 @@ function normalizeUrl(
         base
       );
 
+
     if (
-      url.protocol !== "https:" &&
-      url.protocol !== "http:"
+      url.protocol !==
+        "http:" &&
+      url.protocol !==
+        "https:"
     ) {
       return null;
     }
 
+
     url.hash = "";
 
+
     return url.toString();
+
   } catch {
     return null;
   }
 }
 
 
-const ASSET_EXTENSIONS =
-  /\.(?:jpg|jpeg|png|gif|webp|svg|ico|pdf|zip|rar|mp4|mp3|css|js|xml)(?:\?|$)/i;
+function isRootUrl(
+  value:
+    string
+): boolean {
+  try {
+    const url =
+      new URL(value);
 
 
-/*
- * Only things that are unambiguously NOT prediction
- * articles belong here.
- *
- * Do NOT put semantic racing words here.
- */
-const OBVIOUS_NON_CONTENT_PATHS = [
-  "/login",
-  "/logout",
-  "/register",
-  "/uye-girisi",
-  "/uyelik",
-  "/account",
-  "/hesabim",
-  "/cart",
-  "/sepet",
-  "/privacy",
-  "/gizlilik",
-  "/kvkk",
-  "/terms",
-  "/kullanim-sartlari",
-  "/contact",
-  "/iletisim",
-  "/about",
-  "/hakkimizda",
+    return (
+      url.pathname === "/" &&
+      !url.search
+    );
 
-  /*
-   * Racing utility pages.
-   *
-   * These may contain today's date, city and horse numbers
-   * and can therefore look semantically relevant despite
-   * not being editorial prediction articles.
-   */
-  "/kayitlar",
-  "/program",
-  "/sonuclar",
-  "/muhtemeller",
-  "/istatistik"
-];
+  } catch {
+    return false;
+  }
+}
 
 
-function cleanText(
-  value: unknown
-): string {
-  return String(
-    value ?? ""
-  )
-    .replace(/\s+/g," ")
-    .trim()
-    .slice(0,500);
+function assetUrl(
+  value:
+    string
+): boolean {
+  try {
+    const path =
+      new URL(value)
+        .pathname
+        .toLowerCase();
+
+
+    return EXPERT_ACQUISITION_CONFIG
+      .discovery
+      .assetExtensions
+      .some(
+        extension =>
+          path.endsWith(
+            extension
+          )
+      );
+
+  } catch {
+    return true;
+  }
 }
 
 
 export function isUsableCandidate(
-  landingUrl: string,
-  url: string
+  landingUrl:
+    string,
+
+  value:
+    string
 ): boolean {
-  if (
-    !sameHost(
+  return (
+    sameHost(
       landingUrl,
-      url
-    )
-  ) {
-    return false;
-  }
-
-  if (
-    ASSET_EXTENSIONS.test(url)
-  ) {
-    return false;
-  }
-
-  try {
-    const parsed =
-      new URL(url);
-
-    const path =
-      parsed.pathname.toLowerCase();
-
-    if (
-      OBVIOUS_NON_CONTENT_PATHS.some(
-        item =>
-          path === item ||
-          path.startsWith(
-            `${item}/`
-          )
-      )
-    ) {
-      return false;
-    }
-
-    /*
-     * Homepage itself is not an article candidate.
-     */
-    if (
-      path === "/" &&
-      !parsed.search
-    ) {
-      return false;
-    }
-
-    return true;
-
-  } catch {
-    return false;
-  }
+      value
+    ) &&
+    !assetUrl(value) &&
+    !isRootUrl(value)
+  );
 }
 
 
-function dedupeCandidates(
-  landingUrl: string,
-  values: CandidateLink[]
-): CandidateLink[] {
-  const result:
-    CandidateLink[] = [];
+function hasAnyTerm(
+  material:
+    string,
 
-  const seen =
-    new Set<string>();
+  values:
+    string[]
+): boolean {
+  return values.some(
+    value =>
+      material.includes(
+        normalizeExpertSearchText(
+          value
+        )
+      )
+  );
+}
 
-  for (const item of values) {
-    const url =
-      normalizeUrl(
-        landingUrl,
-        item.url
+
+function candidateEvidence(
+  sourceKey:
+    string,
+
+  value:
+    string,
+
+  text:
+    string,
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+) {
+  const source =
+    expertSourceConfig(
+      sourceKey
+    );
+
+
+  const discovery =
+    EXPERT_ACQUISITION_CONFIG
+      .discovery;
+
+
+  const material =
+    normalizeExpertSearchText(
+      `${value} ${text}`
+    );
+
+
+  const hasCity =
+    cities.some(
+      city =>
+        material.includes(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
+
+
+  const hasDate =
+    buildExpertRaceDateTokens(
+      raceDate
+    )
+      .some(
+        token =>
+          material.includes(
+            token
+          )
       );
 
-    if (
-      !url ||
-      seen.has(url) ||
-      !isUsableCandidate(
-        landingUrl,
-        url
-      )
-    ) {
-      continue;
-    }
 
-    seen.add(url);
-
-    result.push({
-      url,
-      text:
-        cleanText(
-          item.text
-        )
-    });
-  }
-
-  /*
-   * Keep the AI input bounded, but deliberately generous.
-   * This is NOT semantic filtering.
-   */
-  return result.slice(0,480);
-}
-
-
-function unwrapQuickAction(
-  value: any
-): any {
-  if (
-    value &&
-    typeof value === "object" &&
-    "result" in value
-  ) {
-    return value.result;
-  }
-
-  return value;
-}
-
-
-function findAttribute(
-  attributes: unknown,
-  name: string
-): string | null {
-  if (
-    !Array.isArray(attributes)
-  ) {
-    return null;
-  }
-
-  for (const item of attributes) {
-    if (
-      item &&
-      typeof item === "object" &&
-      String(
-        (item as any).name ?? ""
-      ).toLowerCase() ===
-        name.toLowerCase()
-    ) {
-      const value =
-        (item as any).value;
-
-      return value === undefined ||
-        value === null
-        ? null
-        : String(value);
-    }
-  }
-
-  return null;
-}
-
-
-/*
- * Cloudflare /scrape returns:
- *
- * [
- *   {
- *     selector:"a",
- *     results:[
- *       {
- *         text:"...",
- *         html:"...",
- *         attributes:[
- *           {name:"href", value:"..."}
- *         ]
- *       }
- *     ]
- *   }
- * ]
- */
-async function scrapeAnchorCandidates(
-  env: Env,
-  landingUrl: string
-): Promise<{
-  candidates: CandidateLink[];
-  browserMs: string | null;
-}> {
-  const response =
-    await env.BROWSER.quickAction(
-      "scrape",
-      {
-        url:
-          landingUrl,
-
-        elements: [
-          {
-            selector:
-              "a"
-          }
-        ],
-
-        /*
-         * JS-heavy source pages may add article links
-         * after the initial DOM event.
-         */
-        gotoOptions: {
-          waitUntil:
-            "networkidle2",
-
-          timeout:
-            30_000
-        },
-
-        rejectResourceTypes: [
-          "image",
-          "media",
-          "font"
-        ]
-      } as any
+  const hasPredictionLanguage =
+    hasAnyTerm(
+      material,
+      discovery.predictionTerms
     );
 
 
-  if (!response.ok) {
-    throw new Error(
-      `DISCOVERY_SCRAPE_HTTP_${response.status}`
-    );
-  }
-
-
-  const browserMs =
-    response.headers.get(
-      "X-Browser-Ms-Used"
+  const hasNegativeLanguage =
+    hasAnyTerm(
+      material,
+      discovery.negativeTerms
     );
 
 
-  const raw =
-    unwrapQuickAction(
-      await response.json()
+  const pathScore =
+    preferredArticlePathScore(
+      sourceKey,
+      value
     );
 
 
-  const groups =
-    Array.isArray(raw)
-      ? raw
-      : [];
-
-
-  const found:
-    CandidateLink[] = [];
-
-
-  for (const group of groups) {
-    if (
-      !group ||
-      typeof group !== "object"
-    ) {
-      continue;
-    }
-
-    const rows =
-      Array.isArray(
-        (group as any).results
-      )
-        ? (group as any).results
-        : [];
-
-    for (const row of rows) {
-      const href =
-        findAttribute(
-          row?.attributes,
-          "href"
-        );
-
-      if (!href) {
-        continue;
-      }
-
-      found.push({
-        url:
-          href,
-
-        text:
-          cleanText(
-            row?.text ??
-            row?.html ??
-            ""
+  const contextBoost =
+    source.contextBoostTerms
+      .some(
+        term =>
+          material.includes(
+            normalizeExpertSearchText(
+              term
+            )
           )
-      });
-    }
+      )
+      ? 4
+      : 0;
+
+
+  let score =
+    pathScore +
+    contextBoost;
+
+
+  if (hasCity) {
+    score += 5;
+  }
+
+
+  if (hasDate) {
+    score += 5;
+  }
+
+
+  if (
+    hasPredictionLanguage
+  ) {
+    score += 4;
+  }
+
+
+  if (
+    hasNegativeLanguage
+  ) {
+    score -= 25;
   }
 
 
   return {
-    candidates:
-      dedupeCandidates(
-        landingUrl,
-        found
-      ),
+    score,
+    hasCity,
+    hasDate,
+    hasPredictionLanguage,
 
-    browserMs
+    deterministic:
+      !hasNegativeLanguage &&
+      hasCity &&
+      hasPredictionLanguage &&
+      (
+        hasDate ||
+        pathScore >= 5
+      ) &&
+      score >=
+        discovery
+          .deterministicMinScore
   };
 }
 
 
-function decodeEntities(
-  value: string
-): string {
-  return value
-    .replace(/&amp;/gi,"&")
-    .replace(/&quot;/gi,'"')
-    .replace(/&#39;/gi,"'")
-    .replace(/&lt;/gi,"<")
-    .replace(/&gt;/gi,">")
-    .replace(/&nbsp;/gi," ");
-}
+function candidatesFromHtml(
+  sourceKey:
+    string,
 
+  landingUrl:
+    string,
 
-function stripTags(
-  value: string
-): string {
-  return cleanText(
-    decodeEntities(
-      value.replace(
-        /<[^>]+>/g,
-        " "
-      )
-    )
-  );
-}
+  html:
+    string,
 
+  raceDate:
+    string,
 
-/*
- * CONTENT fallback:
- * fully rendered HTML -> anchors.
- */
-function anchorsFromHtml(
-  landingUrl: string,
-  html: string
+  cities:
+    string[]
 ): CandidateLink[] {
-  const found:
+  const discovery =
+    EXPERT_ACQUISITION_CONFIG
+      .discovery;
+
+
+  const $ =
+    load(html);
+
+
+  $(
+    [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "canvas",
+      "iframe"
+    ].join(",")
+  ).remove();
+
+
+  const contextSelector =
+    discovery
+      .contextContainers
+      .join(",");
+
+
+  const output:
     CandidateLink[] = [];
 
-  const regex =
-    /<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
 
-  let match:
-    RegExpExecArray | null;
-
-
-  while (
+  $("a[href]").each(
     (
-      match =
-        regex.exec(html)
-    ) !== null
-  ) {
-    found.push({
-      url:
-        match[2],
+      _index,
+      element
+    ) => {
+      const anchor =
+        $(element);
 
-      text:
-        stripTags(
-          match[3]
+
+      const href =
+        anchor.attr(
+          "href"
+        );
+
+
+      if (!href) {
+        return;
+      }
+
+
+      const url =
+        normalizeUrl(
+          landingUrl,
+          href
+        );
+
+
+      if (
+        !url ||
+        !isUsableCandidate(
+          landingUrl,
+          url
+        ) ||
+        !isAllowedDiscoveredArticleUrl(
+          sourceKey,
+          url
         )
-    });
+      ) {
+        return;
+      }
+
+
+      const context =
+        anchor.closest(
+          contextSelector
+        )
+          .first();
+
+
+      const text =
+        cleanExpertInlineText(
+          [
+            anchor.text(),
+            context.text()
+          ]
+            .filter(Boolean)
+            .join(" | "),
+
+          discovery
+            .candidateContextCharacters
+        );
+
+
+      const evidence =
+        candidateEvidence(
+          sourceKey,
+          url,
+          text,
+          raceDate,
+          cities
+        );
+
+
+      if (
+        evidence.score <
+        discovery
+          .candidateMinScore
+      ) {
+        return;
+      }
+
+
+      output.push({
+        url,
+        text,
+        ...evidence
+      });
+    }
+  );
+
+
+  const deduped =
+    new Map<
+      string,
+      CandidateLink
+    >();
+
+
+  for (const candidate of output) {
+    const old =
+      deduped.get(
+        candidate.url
+      );
+
+
+    if (
+      !old ||
+      candidate.score >
+        old.score
+    ) {
+      deduped.set(
+        candidate.url,
+        candidate
+      );
+    }
   }
 
 
-  return dedupeCandidates(
-    landingUrl,
-    found
-  );
+  return [
+    ...deduped.values()
+  ]
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        second.score -
+        first.score
+    )
+    .slice(
+      0,
+      discovery.maxCandidates
+    );
 }
 
 
-function candidateHtml(
-  candidates: CandidateLink[]
+function escapeHtml(
+  value:
+    string
 ): string {
-  const escape =
-    (value: string) =>
-      value
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;");
+  return value
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
 
 
-  const rows =
-    candidates
-      .map(
-        (
-          item,
-          index
-        ) =>
-          `<li data-index="${index}">
-             <a href="${escape(item.url)}">
-               ${escape(item.text)}
-             </a>
-           </li>`
-      )
-      .join("\n");
-
-
+function candidatesAsHtml(
+  values:
+    CandidateLink[]
+): string {
   return `
 <html>
-  <body>
-    <h1>Candidate article links</h1>
-    <ul>
-      ${rows}
-    </ul>
-  </body>
+<body>
+<ul>
+${
+  values
+    .map(
+      value =>
+        `<li data-score="${value.score}">
+          <a href="${escapeHtml(value.url)}">
+            ${escapeHtml(value.text)}
+          </a>
+        </li>`
+    )
+    .join("\n")
+}
+</ul>
+</body>
 </html>
 `.trim();
 }
 
 
 function normalizeSelectedUrls(
-  landingUrl: string,
-  raw: unknown
+  landingUrl:
+    string,
+
+  value:
+    unknown
 ): string[] {
   if (
-    !Array.isArray(raw)
+    !Array.isArray(value)
   ) {
     return [];
   }
 
-  const output:
-    string[] = [];
 
-  const seen =
-    new Set<string>();
-
-
-  for (const value of raw) {
-    const url =
-      normalizeUrl(
-        landingUrl,
-        String(value)
-      );
-
-    if (
-      !url ||
-      !sameHost(
-        landingUrl,
-        url
-      ) ||
-      seen.has(url)
-    ) {
-      continue;
-    }
-
-    seen.add(url);
-    output.push(url);
-  }
-
-
-  return output.slice(0,12);
+  return [
+    ...new Set(
+      value
+        .map(
+          item =>
+            normalizeUrl(
+              landingUrl,
+              String(item)
+            )
+        )
+        .filter(
+          (
+            item
+          ): item is string =>
+            Boolean(item)
+        )
+        .filter(
+          item =>
+            sameHost(
+              landingUrl,
+              item
+            )
+        )
+    )
+  ];
 }
 
 
-/*
- * AI does NOT enumerate the web page here.
- *
- * It receives only the deterministic candidates that
- * Cloudflare scrape/content already proved exist.
- */
-async function selectCurrentArticlesWithAi(
-  env: Env,
-  landingUrl: string,
-  sourceName: string,
-  date: string,
-  cities: string[],
-  candidates: CandidateLink[],
+async function selectCandidates(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  sourceName:
+    string,
+
+  landingUrl:
+    string,
+
+  raceDate:
+    string,
+
+  cities:
+    string[],
+
+  candidates:
+    CandidateLink[],
+
   stage:
-    "scrape" |
-    "content"
-): Promise<{
-  urls: string[];
-  method: string;
-  diagnostics: unknown;
-}> {
+    ExpertAcquisitionStage
+) {
+  const deterministic =
+    candidates
+      .filter(
+        candidate =>
+          candidate.deterministic
+      )
+      .map(
+        candidate =>
+          candidate.url
+      );
+
+
   if (!candidates.length) {
     return {
-      urls: [],
+      urls:[],
 
-      method:
-        `cf-${stage}-candidate-ai`,
-
-      diagnostics: {
-        candidates:0,
-        selected:0,
-        batches:[]
+      diagnostics:{
+        stage,
+        aiInvoked:false,
+        candidateCount:0,
+        deterministic:[]
       }
     };
   }
 
 
   const prompt = `
-Aşağıdaki linkler ${sourceName} sitesinin gerçek DOM'undan alınmış candidate linklerdir.
+${sourceName} sitesinin gerçek DOM/HTML candidate linkleri.
 
-BUGÜN:
-${date}
+HEDEF TARİH:
+${raceDate}
 
-BUGÜNKÜ TJK TÜRKİYE YARIŞ ŞEHİRLERİ:
+HEDEF TJK ŞEHİRLERİ:
 ${cities.join(", ")}
 
-Görevin yalnızca bu candidate linkler arasından BUGÜNÜN Türkiye at yarışı tahmin, analiz veya uzman yorum içeriğine götüren GERÇEK ARTICLE URL'lerini seçmektir.
+Yalnız bu listede gerçekten bulunan current Türkiye at yarışı
+TAHMİN / ANALİZ / UZMAN YORUM targetlarını seç.
 
 Kurallar:
-- Sana verilen candidate listesinde olmayan URL üretme.
-- Eski tarihli içerikleri seçme.
-- Yurt dışı yarışlarını seçme.
-- Genel haber, camia haberi, kategori, tag, uzman listesi, ana sayfa, reklam veya navigasyon linkini seçme.
-- Bir article birden fazla bugünkü TJK şehrini kapsayabilir.
-- Başlıkta açık tarih bulunmaması tek başına eleme sebebi değildir.
-- URL slug'ı bozuk veya tarih formatı alışılmadık olabilir.
-- Anchor text ile URL'yi birlikte değerlendir.
-- Emin olmadığın linki seçme.
-- Hiçbiri uygun değilse urls=[] döndür.
 
-Yalnızca gerçek current-card article URL'lerini döndür.
+- Listede olmayan URL üretme.
+- Eski tarihli article seçme.
+- Yurt dışı yarışı seçme.
+- Genel haber seçme.
+- Koşmama, sakatlık, satış, transfer ve sonuç/program haberi seçme.
+- Navigasyon/kategori sayfasını current article sanma.
+- Aynı gün birden fazla gerçek şehir/article varsa hepsini seç.
+- URL prefix'i değişmiş olabilir; eski prefix tek başına hard truth değildir.
+- Anchor/card context + hedef tarih + hedef şehir + tahmin bağlamını birlikte değerlendir.
+- Emin değilsen seçme.
+
+Yalnız JSON schema'ya uygun cevap ver.
 `.trim();
 
 
-  /*
-   * Preserve all deterministic DOM candidates but feed
-   * them into semantic AI in bounded chunks.
-   */
-  const BATCH_SIZE =
-    120;
+  try {
+    const semantic =
+      await extractSemanticJsonFromHtml<any>(
+        env,
+        candidatesAsHtml(
+          candidates
+        ),
+        prompt,
+        {
+          type:
+            "json_schema",
 
-
-  const selectedUrls:
-    string[] = [];
-
-
-  const selectedSeen =
-    new Set<string>();
-
-
-  const batches:any[] = [];
-
-
-  for (
-    let offset = 0;
-    offset < candidates.length;
-    offset += BATCH_SIZE
-  ) {
-    const batch =
-      candidates.slice(
-        offset,
-        offset + BATCH_SIZE
+          json_schema:
+            discoverySchema
+        }
       );
 
 
-    try {
-      const result =
-        await extractSemanticJsonFromHtml<any>(
-          env,
-
-          candidateHtml(
-            batch
-          ),
-
-          prompt,
-
-          {
-            type:
-              "json_schema",
-
-            json_schema:
-              discoverySchema
-          }
-        );
+    const candidateSet =
+      new Set(
+        candidates.map(
+          candidate =>
+            candidate.url
+        )
+      );
 
 
-      const proposed =
-        normalizeSelectedUrls(
-          landingUrl,
-          result.value?.urls
-        );
-
-
-      /*
-       * Hard hallucination guard:
-       * a selected URL must literally belong to the
-       * DOM-derived batch AI just received.
-       */
-      const candidateSet =
-        new Set(
-          batch
-            .map(
-              item =>
-                normalizeUrl(
-                  landingUrl,
-                  item.url
-                )
-            )
-            .filter(
-              (
-                value
-              ): value is string =>
-                Boolean(value)
-            )
-        );
-
-
-      const verified =
-        proposed.filter(
+    const selected =
+      normalizeSelectedUrls(
+        landingUrl,
+        semantic.value?.urls
+      )
+        .filter(
           url =>
             candidateSet.has(url)
+        )
+        .filter(
+          url =>
+            isAllowedDiscoveredArticleUrl(
+              sourceKey,
+              url
+            )
         );
 
 
-      for (const url of verified) {
-        if (
-          selectedSeen.has(url)
-        ) {
-          continue;
-        }
+    /*
+     * Do not let AI silently drop a second deterministic
+     * current-city/current-article target.
+     */
+    const urls =
+      [
+        ...new Set([
+          ...deterministic,
+          ...selected
+        ])
+      ];
 
-        selectedSeen.add(url);
-        selectedUrls.push(url);
-      }
 
+    return {
+      urls,
 
-      batches.push({
-        offset,
+      diagnostics:{
+        stage,
+        aiInvoked:true,
 
-        candidates:
-          batch.length,
+        candidateCount:
+          candidates.length,
+
+        candidateSample:
+          candidates.slice(
+            0,
+            20
+          ),
+
+        deterministic,
+        aiSelected:
+          selected,
 
         selected:
-          verified.length,
-
-        selectedUrls:
-          verified,
+          urls,
 
         semantic:
-          result.diagnostics
+          semantic.diagnostics
+      }
+    };
+
+  } catch(error) {
+    /*
+     * Candidate AI failure cannot destroy strong local
+     * deterministic evidence.
+     */
+    return {
+      urls:
+        deterministic,
+
+      diagnostics:{
+        stage,
+        aiInvoked:true,
+
+        candidateCount:
+          candidates.length,
+
+        deterministic,
+
+        selected:
+          deterministic,
+
+        aiError:
+          error instanceof Error
+            ? error.message
+            : String(error)
+      }
+    };
+  }
+}
+
+
+async function discoverFromLanding(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  sourceName:
+    string,
+
+  landingUrl:
+    string,
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+) {
+  const diagnostics:any = {
+    stages:[]
+  };
+
+
+  for (
+    const stage of
+    EXPERT_ACQUISITION_CONFIG
+      .discovery
+      .acquisitionOrder
+  ) {
+    try {
+      const acquired =
+        await acquireExpertHtmlStage(
+          env,
+          landingUrl,
+          stage
+        );
+
+
+      const candidates =
+        candidatesFromHtml(
+          sourceKey,
+          landingUrl,
+          acquired.html,
+          raceDate,
+          cities
+        );
+
+
+      const selected =
+        await selectCandidates(
+          env,
+          sourceKey,
+          sourceName,
+          landingUrl,
+          raceDate,
+          cities,
+          candidates,
+          stage
+        );
+
+
+      diagnostics.stages.push({
+        stage,
+
+        bodyLength:
+          acquired.bodyLength,
+
+        ...selected.diagnostics
       });
 
-    } catch (error) {
-      batches.push({
-        offset,
 
-        candidates:
-          batch.length,
+      if (
+        selected.urls.length
+      ) {
+        return {
+          urls:
+            selected.urls,
 
-        selected:0,
+          method:
+            `${stage}-anchored-candidate-selection`,
+
+          diagnostics
+        };
+      }
+
+    } catch(error) {
+      diagnostics.stages.push({
+        stage,
 
         error:
           error instanceof Error
@@ -794,328 +950,604 @@ Yalnızca gerçek current-card article URL'lerini döndür.
 
 
   return {
-    urls:
-      selectedUrls.slice(
-        0,
-        12
-      ),
-
+    urls:[],
     method:
-      `cf-${stage}-candidate-ai:cf-json-html`,
-
-    diagnostics: {
-      candidates:
-        candidates.length,
-
-      selected:
-        selectedUrls.length,
-
-      selectedUrls:
-        selectedUrls.slice(
-          0,
-          12
-        ),
-
-      batches
-    }
+      "anchored-discovery-empty",
+    diagnostics
   };
 }
 
 
-/*
- * Last-resort legacy semantic discovery.
- *
- * This is intentionally LAST now.
- */
-async function fullPageSemanticFallback(
-  env: Env,
-  landingUrl: string,
-  sourceName: string,
-  date: string,
-  cities: string[]
-): Promise<{
-  urls: string[];
-  method: string;
-  diagnostics: unknown;
-}> {
-  const prompt = `
-${sourceName} sitesinde ${date} tarihine ait Türkiye at yarışı tahmin yazılarının URL adreslerini bul.
+function navigationTargetFromHtml(
+  rootUrl:
+    string,
 
-BUGÜNKÜ TJK ŞEHİRLERİ:
-${cities.join(", ")}
+  sourceKey:
+    string,
 
-Yalnızca:
-- bugünkü Türkiye yarışlarına,
-- bu şehirlerden en az birine,
-- gerçek tahmin / analiz / uzman yorum article'ına
-
-götüren URL'leri seç.
-
-Kategori, tag, ana sayfa, genel haber, reklam, sosyal medya, yurt dışı yarış veya eski tarihli içerik seçme.
-
-Hiç uygun article yoksa urls=[] döndür.
-`.trim();
+  html:
+    string
+): string | null {
+  const wanted =
+    expertNavigationLabels(
+      sourceKey
+    )
+      .map(
+        normalizeExpertSearchText
+      );
 
 
-  const result =
-    await extractSemanticJson<any>(
-      env,
-      landingUrl,
-      prompt,
-      {
-        type:
-          "json_schema",
+  if (!wanted.length) {
+    return null;
+  }
 
-        json_schema:
-          discoverySchema
+
+  const $ =
+    load(html);
+
+
+  let winner:
+    {
+      url:string;
+      score:number;
+    } | null = null;
+
+
+  $("a[href]").each(
+    (
+      _index,
+      element
+    ) => {
+      const anchor =
+        $(element);
+
+
+      const href =
+        anchor.attr(
+          "href"
+        );
+
+
+      if (!href) {
+        return;
       }
-    );
+
+
+      const url =
+        normalizeUrl(
+          rootUrl,
+          href
+        );
+
+
+      if (
+        !url ||
+        !sameHost(
+          rootUrl,
+          url
+        ) ||
+        isRootUrl(url)
+      ) {
+        return;
+      }
+
+
+      const text =
+        normalizeExpertSearchText(
+          anchor.text()
+        );
+
+
+      let score =
+        0;
+
+
+      for (const label of wanted) {
+        if (
+          text === label
+        ) {
+          score =
+            Math.max(
+              score,
+              20
+            );
+
+        } else if (
+          label &&
+          text.includes(
+            label
+          )
+        ) {
+          score =
+            Math.max(
+              score,
+              12
+            );
+        }
+      }
+
+
+      if (
+        score &&
+        (
+          !winner ||
+          score >
+            winner.score
+        )
+      ) {
+        winner = {
+          url,
+          score
+        };
+      }
+    }
+  );
+
+
+  return winner?.url ??
+    null;
+}
+
+
+async function recoverLandingFromRoot(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  rootUrl:
+    string
+) {
+  const diagnostics:any = {
+    stages:[]
+  };
+
+
+  for (
+    const stage of
+    EXPERT_ACQUISITION_CONFIG
+      .discovery
+      .acquisitionOrder
+  ) {
+    try {
+      const acquired =
+        await acquireExpertHtmlStage(
+          env,
+          rootUrl,
+          stage
+        );
+
+
+      const recovered =
+        navigationTargetFromHtml(
+          rootUrl,
+          sourceKey,
+          acquired.html
+        );
+
+
+      diagnostics.stages.push({
+        stage,
+
+        bodyLength:
+          acquired.bodyLength,
+
+        recovered
+      });
+
+
+      if (recovered) {
+        return {
+          url:
+            recovered,
+
+          diagnostics
+        };
+      }
+
+    } catch(error) {
+      diagnostics.stages.push({
+        stage,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error)
+      });
+    }
+  }
 
 
   return {
-    urls:
-      normalizeSelectedUrls(
-        landingUrl,
-        result.value?.urls
-      ),
+    url:null,
+    diagnostics
+  };
+}
 
-    method:
-      `full-page-semantic:${result.method}`,
 
-    diagnostics:
-      result.diagnostics
+function directPageEvidence(
+  sourceKey:
+    string,
+
+  html:
+    string,
+
+  cities:
+    string[]
+): boolean {
+  const source =
+    expertSourceConfig(
+      sourceKey
+    );
+
+
+  const $ =
+    load(html);
+
+
+  $("script,style,noscript,svg,iframe")
+    .remove();
+
+
+  const text =
+    normalizeExpertSearchText(
+      $("body")
+        .text()
+    );
+
+
+  if (
+    text.length <
+    EXPERT_ACQUISITION_CONFIG
+      .extraction
+      .minimumTextCharacters
+  ) {
+    return false;
+  }
+
+
+  if (
+    !hasAnyTerm(
+      text,
+      EXPERT_ACQUISITION_CONFIG
+        .extraction
+        .relevanceTerms
+    )
+  ) {
+    return false;
+  }
+
+
+  if (
+    !source.preflightRequiresCity
+  ) {
+    return true;
+  }
+
+
+  return cities.some(
+    city =>
+      text.includes(
+        normalizeExpertSearchText(
+          city
+        )
+      )
+  );
+}
+
+
+async function probeDirectPage(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  url:
+    string,
+
+  cities:
+    string[]
+) {
+  const diagnostics:any = {
+    stages:[]
+  };
+
+
+  for (
+    const stage of
+    EXPERT_ACQUISITION_CONFIG
+      .discovery
+      .acquisitionOrder
+  ) {
+    try {
+      const acquired =
+        await acquireExpertHtmlStage(
+          env,
+          url,
+          stage
+        );
+
+
+      const usable =
+        directPageEvidence(
+          sourceKey,
+          acquired.html,
+          cities
+        );
+
+
+      diagnostics.stages.push({
+        stage,
+
+        bodyLength:
+          acquired.bodyLength,
+
+        usable
+      });
+
+
+      if (usable) {
+        return {
+          ok:true,
+          diagnostics
+        };
+      }
+
+    } catch(error) {
+      diagnostics.stages.push({
+        stage,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error)
+      });
+    }
+  }
+
+
+  return {
+    ok:false,
+    diagnostics
+  };
+}
+
+
+export async function resolveDirectCurrentPageUrl(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  entryUrls:
+    string[],
+
+  rootUrl:
+    string | null,
+
+  cities:
+    string[]
+) {
+  const diagnostics:any = {
+    directAttempts:[],
+    rootRecovery:null
+  };
+
+
+  const primary =
+    entryUrls.filter(
+      url =>
+        !rootUrl ||
+        url !== rootUrl
+    );
+
+
+  for (const url of primary) {
+    const result =
+      await probeDirectPage(
+        env,
+        sourceKey,
+        url,
+        cities
+      );
+
+
+    diagnostics.directAttempts.push({
+      url,
+      ...result
+    });
+
+
+    if (result.ok) {
+      return {
+        url,
+        diagnostics
+      };
+    }
+  }
+
+
+  /*
+   * Known direct path moved:
+   *
+   * root is used ONLY to recover the new navigation href.
+   */
+  if (rootUrl) {
+    const recovery =
+      await recoverLandingFromRoot(
+        env,
+        sourceKey,
+        rootUrl
+      );
+
+
+    diagnostics.rootRecovery =
+      recovery;
+
+
+    if (recovery.url) {
+      const probe =
+        await probeDirectPage(
+          env,
+          sourceKey,
+          recovery.url,
+          cities
+        );
+
+
+      diagnostics.recoveredProbe = {
+        url:
+          recovery.url,
+
+        ...probe
+      };
+
+
+      if (probe.ok) {
+        return {
+          url:
+            recovery.url,
+
+          diagnostics
+        };
+      }
+    }
+  }
+
+
+  return {
+    url:null,
+    diagnostics
   };
 }
 
 
 export async function discoverExpertArticleUrls(
-  env: Env,
-  landingUrl: string,
-  sourceName: string,
-  cities: string[]
-): Promise<{
-  urls: string[];
-  method: string;
-  diagnostics: unknown;
-}> {
-  const date =
+  env:
+    Env,
+
+  landingUrl:
+    string,
+
+  sourceName:
+    string,
+
+  cities:
+    string[],
+
+  sourceKey =
+    "",
+
+  raceDateOverride?:
+    string
+) {
+  const raceDate =
+    raceDateOverride ??
     turkeyDate();
 
 
-  const diagnostics:
-    any = {
-      scrape:
-        null,
-
-      content:
-        null,
-
-      fullPageSemantic:
-        null
-    };
-
-
   /*
-   * =====================================================
-   * STAGE 1
-   * Cloudflare SCRAPE -> real anchors -> AI selector
-   * =====================================================
+   * A root that is not itself the intended editorial
+   * surface first tries navigation recovery.
    */
-  try {
-    const scraped =
-      await scrapeAnchorCandidates(
+  if (
+    isRootUrl(
+      landingUrl
+    ) &&
+    !expertRootIsEditorial(
+      sourceKey
+    )
+  ) {
+    const recovery =
+      await recoverLandingFromRoot(
         env,
+        sourceKey,
         landingUrl
       );
 
 
-    const selected =
-      await selectCurrentArticlesWithAi(
-        env,
-        landingUrl,
-        sourceName,
-        date,
-        cities,
-        scraped.candidates,
-        "scrape"
-      );
-
-
-    diagnostics.scrape = {
-      browserMs:
-        scraped.browserMs,
-
-      candidateCount:
-        scraped.candidates.length,
-
-      candidateSample:
-        scraped.candidates.slice(
-          0,
-          20
-        ),
-
-      selection:
-        selected.diagnostics
-    };
-
-
     if (
-      selected.urls.length > 0
-    ) {
-      return {
-        urls:
-          selected.urls,
-
-        method:
-          selected.method,
-
-        diagnostics
-      };
-    }
-
-  } catch (error) {
-    diagnostics.scrape = {
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    };
-  }
-
-
-  /*
-   * =====================================================
-   * STAGE 2
-   * Cloudflare CONTENT -> anchors -> AI selector
-   * =====================================================
-   */
-  try {
-    const content =
-      await acquireCfContentHtml(
-        env,
+      recovery.url &&
+      recovery.url !==
         landingUrl
-      );
-
-
-    const candidates =
-      anchorsFromHtml(
-        landingUrl,
-        content.html
-      );
-
-
-    const selected =
-      await selectCurrentArticlesWithAi(
-        env,
-        landingUrl,
-        sourceName,
-        date,
-        cities,
-        candidates,
-        "content"
-      );
-
-
-    diagnostics.content = {
-      bodyLength:
-        content.bodyLength,
-
-      candidateCount:
-        candidates.length,
-
-      candidateSample:
-        candidates.slice(
-          0,
-          20
-        ),
-
-      selection:
-        selected.diagnostics
-    };
-
-
-    if (
-      selected.urls.length > 0
     ) {
-      return {
-        urls:
-          selected.urls,
+      const recovered =
+        await discoverFromLanding(
+          env,
+          sourceKey,
+          sourceName,
+          recovery.url,
+          raceDate,
+          cities
+        );
 
-        method:
-          selected.method,
 
-        diagnostics
-      };
+      if (
+        recovered.urls.length
+      ) {
+        return {
+          ...recovered,
+
+          method:
+            `root-nav-recovery:${recovered.method}`,
+
+          diagnostics:{
+            rootRecovery:
+              recovery,
+
+            recoveredLanding:
+              recovery.url,
+
+            discovery:
+              recovered.diagnostics
+          }
+        };
+      }
     }
 
-  } catch (error) {
-    diagnostics.content = {
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    };
-  }
 
-
-  /*
-   * =====================================================
-   * STAGE 3
-   * Legacy full-page AI discovery as final fallback.
-   * =====================================================
-   */
-  try {
-    const fallback =
-      await fullPageSemanticFallback(
+    /*
+     * Last structural recovery:
+     *
+     * root itself may still link directly to today's
+     * articles even if the old navigation label changed.
+     *
+     * Local date/city/prediction filtering still applies.
+     */
+    const rootFallback =
+      await discoverFromLanding(
         env,
-        landingUrl,
+        sourceKey,
         sourceName,
-        date,
+        landingUrl,
+        raceDate,
         cities
       );
 
 
-    diagnostics.fullPageSemantic = {
-      method:
-        fallback.method,
-
-      selected:
-        fallback.urls.length,
-
-      urls:
-        fallback.urls,
-
-      acquisition:
-        fallback.diagnostics
-    };
-
-
     return {
-      urls:
-        fallback.urls,
+      ...rootFallback,
 
-      method:
-        fallback.method,
+      diagnostics:{
+        rootRecovery:
+          recovery,
 
-      diagnostics
-    };
-
-  } catch (error) {
-    diagnostics.fullPageSemantic = {
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    };
-
-
-    return {
-      urls: [],
-
-      method:
-        "discovery-exhausted",
-
-      diagnostics
+        rootFallback:
+          rootFallback.diagnostics
+      }
     };
   }
+
+
+  return discoverFromLanding(
+    env,
+    sourceKey,
+    sourceName,
+    landingUrl,
+    raceDate,
+    cities
+  );
 }

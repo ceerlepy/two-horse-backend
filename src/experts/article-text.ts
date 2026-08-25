@@ -2,6 +2,10 @@ import {
   load
 } from "cheerio";
 
+import {
+  EXPERT_ACQUISITION_CONFIG
+} from "../config/expert-acquisition";
+
 
 export interface ExpertArticleText {
   text:
@@ -29,22 +33,10 @@ function cleanText(
     value ??
     ""
   )
-    .replace(
-      /\u00a0/g,
-      " "
-    )
-    .replace(
-      /[\t\r ]+/g,
-      " "
-    )
-    .replace(
-      /\n\s+/g,
-      "\n"
-    )
-    .replace(
-      /\n{3,}/g,
-      "\n\n"
-    )
+    .replace(/\u00a0/g," ")
+    .replace(/[\t\r ]+/g," ")
+    .replace(/\n\s+/g,"\n")
+    .replace(/\n{3,}/g,"\n\n")
     .trim();
 }
 
@@ -54,15 +46,9 @@ export function expertArticleTextFromHtml(
     string
 ): ExpertArticleText {
   const $ =
-    load(
-      html
-    );
+    load(html);
 
 
-  /*
-   * Remove elements that add token cost but cannot contain
-   * expert editorial analysis.
-   */
   $(
     [
       "script",
@@ -75,8 +61,7 @@ export function expertArticleTextFromHtml(
       "footer",
       "form"
     ].join(",")
-  )
-    .remove();
+  ).remove();
 
 
   const roots = [
@@ -95,19 +80,10 @@ export function expertArticleTextFromHtml(
     "";
 
 
-  /*
-   * Prefer semantic article/main containers when they have
-   * meaningful content.
-   */
-  for (
-    const selector of
-    roots
-  ) {
+  for (const selector of roots) {
     const candidate =
       cleanText(
-        $(
-          selector
-        )
+        $(selector)
           .text()
       );
 
@@ -143,17 +119,10 @@ export function expertArticleTextFromHtml(
     text.length;
 
 
-  /*
-   * The selected Workers AI model has a finite context
-   * window.
-   *
-   * Normally an article/main element is far below this.
-   *
-   * If a source gives only a huge body, retain both ends
-   * instead of blindly keeping only the beginning.
-   */
-  const MAX_CHARACTERS =
-    48_000;
+  const maximum =
+    EXPERT_ACQUISITION_CONFIG
+      .extraction
+      .sourceHardSafetyCharacters;
 
 
   let truncated =
@@ -162,42 +131,42 @@ export function expertArticleTextFromHtml(
 
   if (
     text.length >
-    MAX_CHARACTERS
+    maximum
   ) {
     truncated =
       true;
 
 
     const head =
-      text.slice(
-        0,
-        32_000
-      );
-
-
-    const tail =
-      text.slice(
-        -16_000
+      Math.floor(
+        maximum *
+        0.72
       );
 
 
     text = [
-      head,
+      text.slice(
+        0,
+        head
+      ),
+
       "",
-      "[ORTA SAYFA TOKEN LIMITI ICIN KISALTILDI]",
+      "[SOURCE HARD SAFETY CUT]",
       "",
-      tail
-    ].join(
-      "\n"
-    );
+
+      text.slice(
+        -(
+          maximum -
+          head
+        )
+      )
+    ].join("\n");
   }
 
 
   return {
     text,
-
     selectedRoot,
-
     originalCharacters,
 
     outputCharacters:

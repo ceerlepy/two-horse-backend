@@ -12,8 +12,9 @@ import {
 
 
 function normalizeCity(
-  value:string
-):string {
+  value:
+    string
+): string {
   return value
     .normalize("NFKC")
     .trim()
@@ -29,29 +30,32 @@ function normalizeCity(
 
 
 function normalizeHorseName(
-  value:string
-):string {
+  value:
+    string
+): string {
   return value
     .normalize("NFKC")
     .trim()
     .toLocaleUpperCase("tr-TR")
-
-    /*
-     * Some source text appends draw/order:
-     * HORSE NAME (3)
-     */
-    .replace(/\s*\(\d+\)\s*$/u,"")
-
+    .replace(
+      /\s*\d+\s*$/u,
+      ""
+    )
     .replace(/\s+/g,"")
     .replace(/[’'`´".,()\-_/\\]/g,"");
 }
 
 
 function identityKey(
-  city:string,
-  raceNumber:number,
-  horseNumber:number
-):string {
+  city:
+    string,
+
+  raceNumber:
+    number,
+
+  horseNumber:
+    number
+): string {
   return [
     normalizeCity(city),
     raceNumber,
@@ -61,12 +65,21 @@ function identityKey(
 
 
 async function writeMismatch(
-  env:Env,
-  date:string,
-  pick:ExpertPickInput,
-  reason:string,
-  extra:unknown = null
-):Promise<void> {
+  env:
+    Env,
+
+  raceDate:
+    string,
+
+  pick:
+    ExpertPickInput,
+
+  reason:
+    string,
+
+  extra:
+    unknown = null
+): Promise<void> {
   await env.DB.prepare(`
     INSERT INTO anomalies(
       race_id,
@@ -77,15 +90,15 @@ async function writeMismatch(
       created_at
     )
     VALUES(
-      ?,?,?,?,?,
-      CURRENT_TIMESTAMP
+      ?,?,?,?,?,CURRENT_TIMESTAMP
     )
   `)
     .bind(
-      `${date}|${pick.city}|${pick.raceNumber}`,
+      `${raceDate}|${pick.city}|${pick.raceNumber}`,
       "expert",
       "horse_mismatch",
       reason,
+
       JSON.stringify({
         pick,
         extra
@@ -96,16 +109,21 @@ async function writeMismatch(
 
 
 export async function validateExpertPicks(
-  env:Env,
-  picks:ExpertPickInput[]
-):Promise<ExpertPickInput[]> {
-  const date =
-    turkeyDate();
+  env:
+    Env,
 
+  picks:
+    ExpertPickInput[],
 
-  /*
-   * TJK is the canonical identity source.
-   */
+  raceDate =
+    turkeyDate(),
+
+  options:
+    {
+      writeAnomalies?:
+        boolean;
+    } = {}
+): Promise<ExpertPickInput[]> {
   const rows =
     await env.DB.prepare(`
       SELECT
@@ -113,12 +131,12 @@ export async function validateExpertPicks(
         race_number,
         horse_number,
         horse_name
-
       FROM runners
-
       WHERE race_date = ?
     `)
-      .bind(date)
+      .bind(
+        raceDate
+      )
       .all<any>();
 
 
@@ -134,28 +152,39 @@ export async function validateExpertPicks(
     >();
 
 
-  for (const row of rows.results ?? []) {
-    const item = {
+  for (
+    const row of
+    rows.results ??
+    []
+  ) {
+    const runner = {
       city:
         String(row.city),
 
       raceNumber:
-        Number(row.race_number),
+        Number(
+          row.race_number
+        ),
 
       horseNumber:
-        Number(row.horse_number),
+        Number(
+          row.horse_number
+        ),
 
       horseName:
-        String(row.horse_name)
+        String(
+          row.horse_name
+        )
     };
+
 
     canonical.set(
       identityKey(
-        item.city,
-        item.raceNumber,
-        item.horseNumber
+        runner.city,
+        runner.raceNumber,
+        runner.horseNumber
       ),
-      item
+      runner
     );
   }
 
@@ -164,94 +193,79 @@ export async function validateExpertPicks(
     ExpertPickInput[] = [];
 
 
+  const writeAnomalies =
+    options.writeAnomalies !==
+    false;
+
+
   for (const pick of picks) {
     const runner =
       canonical.get(
         identityKey(
           pick.city,
-          Number(pick.raceNumber),
-          Number(pick.horseNumber)
+          pick.raceNumber,
+          pick.horseNumber
         )
       );
 
 
     if (!runner) {
-      await writeMismatch(
-        env,
-        date,
-        pick,
-        "EXPERT_RUNNER_KEY_NOT_FOUND"
-      );
+      if (writeAnomalies) {
+        await writeMismatch(
+          env,
+          raceDate,
+          pick,
+          "EXPERT_RUNNER_KEY_NOT_FOUND"
+        );
+      }
 
       continue;
     }
 
 
-    /*
-     * city + race number + horse number identifies the
-     * canonical TJK runner for the current race date.
-     *
-     * If the source ALSO printed a horse name, require
-     * that name to identify the same canonical runner.
-     *
-     * Some legitimate expert formats list rivals only
-     * by horse number. In that case horseName is null
-     * and the official TJK name is filled below.
-     */
-    const sourceHorseName =
+    const suppliedName =
       String(
         pick.horseName ??
         ""
-      ).trim();
+      )
+        .trim();
 
 
-    if (sourceHorseName) {
-      const extractedName =
+    if (suppliedName) {
+      const sourceName =
         normalizeHorseName(
-          sourceHorseName
+          suppliedName
         );
 
-      const canonicalName =
+
+      const officialName =
         normalizeHorseName(
           runner.horseName
         );
 
 
       if (
-        extractedName !==
-          canonicalName
+        sourceName !==
+        officialName
       ) {
-        await writeMismatch(
-          env,
-          date,
-          pick,
-          "EXPERT_HORSE_NAME_MISMATCH",
-          {
-            canonicalCity:
-              runner.city,
-
-            canonicalHorseName:
-              runner.horseName,
-
-            normalizedExtracted:
-              extractedName,
-
-            normalizedCanonical:
-              canonicalName
-          }
-        );
+        if (writeAnomalies) {
+          await writeMismatch(
+            env,
+            raceDate,
+            pick,
+            "EXPERT_HORSE_NAME_MISMATCH",
+            {
+              canonicalHorseName:
+                runner.horseName
+            }
+          );
+        }
 
         continue;
       }
     }
 
 
-    /*
-     * Identity is canonical now.
-     *
-     * Always persist official TJK spelling, including
-     * number-only source picks whose horseName was null.
-     */
     output.push({
       ...pick,
 
