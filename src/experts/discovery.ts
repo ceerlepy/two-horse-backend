@@ -625,6 +625,132 @@ function candidateFromEvidence(
 }
 
 
+function boundedCandidateContexts(
+  anchor:
+    any,
+
+  maxCharacters:
+    number
+): string[] {
+  const output:
+    string[] = [];
+
+
+  const add =
+    (
+      value:
+        unknown
+    ) => {
+      const text =
+        cleanExpertInlineText(
+          value,
+          maxCharacters
+        );
+
+
+      if (
+        text &&
+        !output.includes(
+          text
+        )
+      ) {
+        output.push(
+          text
+        );
+      }
+    };
+
+
+  /*
+   * Prefer semantic/card containers.
+   *
+   * Critical difference from:
+   *
+   * anchor.closest("article,...,div")
+   *
+   * A tiny inner <div> must not hide the publication date
+   * stored on the real article/card parent.
+   */
+  const semantic =
+    anchor
+      .closest(
+        [
+          "article",
+          ".post",
+          ".entry",
+          ".card",
+          ".item",
+          "li",
+          "section"
+        ].join(",")
+      )
+      .first();
+
+
+  if (
+    semantic.length
+  ) {
+    add(
+      semantic.text()
+    );
+  }
+
+
+  /*
+   * Bounded parent walk for sites without semantic classes.
+   * Stop before whole-page context becomes candidate evidence.
+   */
+  let cursor =
+    anchor.parent();
+
+
+  for (
+    let depth=0;
+    depth<7 &&
+    cursor.length;
+    depth++
+  ) {
+    const raw =
+      String(
+        cursor.text() ??
+        ""
+      )
+        .replace(
+          /\s+/g,
+          " "
+        )
+        .trim();
+
+
+    if (
+      raw.length >
+      maxCharacters *
+        8
+    ) {
+      break;
+    }
+
+
+    if (
+      raw.length <=
+      maxCharacters *
+        3
+    ) {
+      add(
+        raw
+      );
+    }
+
+
+    cursor =
+      cursor.parent();
+  }
+
+
+  return output;
+}
+
+
 function candidatesFromHtml(
   sourceKey:
     string,
@@ -660,12 +786,6 @@ function candidatesFromHtml(
       "iframe"
     ].join(",")
   ).remove();
-
-
-  const contextSelector =
-    discovery
-      .contextContainers
-      .join(",");
 
 
   const output:
@@ -704,14 +824,6 @@ function candidatesFromHtml(
       }
 
 
-      const context =
-        anchor
-          .closest(
-            contextSelector
-          )
-          .first();
-
-
       const anchorText =
         cleanExpertInlineText(
           anchor.text(),
@@ -721,36 +833,67 @@ function candidatesFromHtml(
         );
 
 
-      const text =
-        cleanExpertInlineText(
-          [
-            anchorText,
-            context.text()
-          ]
-            .filter(Boolean)
-            .join(" | "),
+      const contexts =
+        boundedCandidateContexts(
+          anchor,
 
           discovery
             .candidateContextCharacters
         );
 
 
-      const candidate =
-        candidateFromEvidence(
-          sourceKey,
-          landingUrl,
-          url,
-          text,
-          raceDate,
-          cities,
-          anchorText
-        );
+      /*
+       * First try identity-only evidence. URLs such as
+       * /25-agustos-kocaeli-at-yarisi-tahminleri/
+       * can already be sufficient.
+       */
+      const materials =
+        [
+          anchorText,
+          ...contexts.map(
+            context =>
+              cleanExpertInlineText(
+                [
+                  anchorText,
+                  context
+                ]
+                  .filter(Boolean)
+                  .join(" | "),
+
+                discovery
+                  .candidateContextCharacters
+              )
+          )
+        ];
 
 
-      if (candidate) {
-        output.push(
-          candidate
-        );
+      for (
+        const material of
+        materials
+      ) {
+        const candidate =
+          candidateFromEvidence(
+            sourceKey,
+            landingUrl,
+            url,
+            material,
+            raceDate,
+            cities,
+
+            /*
+             * Hard-negative evidence stays identity-local.
+             */
+            anchorText
+          );
+
+
+        if (candidate) {
+          output.push(
+            candidate
+          );
+
+          break;
+        }
       }
     }
   );

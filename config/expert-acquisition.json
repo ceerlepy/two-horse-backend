@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -175,6 +175,10 @@
         "kombine-bahis",
         "yurt dışı",
         "yurt-disi"
+      ],
+      "feedUrls": [
+        "https://www.yarisdergisi.com/tag/yaris-tahminleri/feed/",
+        "https://www.yarisdergisi.com/feed/"
       ]
     },
     "banko_tahminler": {
@@ -211,7 +215,11 @@
         "fransa",
         "birleşik krallık"
       ],
-      "completenessProfile": "coupon-explicit"
+      "completenessProfile": "coupon-explicit",
+      "feedUrls": [
+        "https://www.bankotahminler.com/kategori/tahminler/feed/",
+        "https://www.bankotahminler.com/feed/"
+      ]
     },
     "horseturk": {
       "host": "horseturk.com",
@@ -244,7 +252,8 @@
       ],
       "allowYearlessDateEvidence": false,
       "excludedCandidateTerms": [],
-      "completenessProfile": "coupon-explicit"
+      "completenessProfile": "coupon-explicit",
+      "explicitAnchorPolicy": "allowlist"
     },
     "yaris_analizi": {
       "host": "yarisanalizi.com",
@@ -295,9 +304,14 @@
       ],
       "contextBoostTerms": [],
       "preferredPathRules": [],
-      "allowYearlessDateEvidence": false,
+      "allowYearlessDateEvidence": true,
       "excludedCandidateTerms": [],
-      "directPageDatePolicy": "target-city-heading"
+      "directPageDatePolicy": "target-city-heading",
+      "archivePolicy": "historical-only",
+      "archiveEntryUrls": [
+        "https://istinyeganyan.com/ganyan/",
+        "https://istinyeganyan.com/"
+      ]
     },
     "ganyan_canavari": {
       "host": "ganyancanavari.com.tr",
@@ -337,7 +351,11 @@
         }
       ],
       "allowYearlessDateEvidence": false,
-      "excludedCandidateTerms": []
+      "excludedCandidateTerms": [],
+      "structuredResolver": {
+        "kind": "ganyan-canavari",
+        "pathTemplate": "/site/{yyyy}/{mm}/{dd}/{venueValue}/{citySlug}/galoplar-ozet.html"
+      }
     },
     "afa": {
       "host": "atlarafisildayanadam.com",
@@ -357,7 +375,8 @@
       "preferredPathRules": [],
       "allowYearlessDateEvidence": false,
       "excludedCandidateTerms": [],
-      "directPageDatePolicy": "target-date"
+      "directPageDatePolicy": "target-date",
+      "canonicalOutputPolicy": "repair-drop-ai-noise"
     }
   }
 }

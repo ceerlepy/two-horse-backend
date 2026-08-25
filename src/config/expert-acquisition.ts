@@ -46,6 +46,30 @@ export type ExpertDirectPageDatePolicy =
   | "target-city-heading";
 
 
+export type ExpertArchivePolicy =
+  | "none"
+  | "historical-only";
+
+
+export type ExpertExplicitAnchorPolicy =
+  | "augment"
+  | "allowlist";
+
+
+export type ExpertCanonicalOutputPolicy =
+  | "strict"
+  | "repair-drop-ai-noise";
+
+
+export interface ExpertStructuredResolverConfig {
+  kind:
+    "ganyan-canavari";
+
+  pathTemplate:
+    string;
+}
+
+
 export interface ExpertPathRule {
   kind:
     | "prefix"
@@ -78,6 +102,24 @@ export interface ExpertSourceConfig {
 
   accessDeniedTerms?:
     string[];
+
+  feedUrls?:
+    string[];
+
+  archivePolicy?:
+    ExpertArchivePolicy;
+
+  archiveEntryUrls?:
+    string[];
+
+  explicitAnchorPolicy?:
+    ExpertExplicitAnchorPolicy;
+
+  canonicalOutputPolicy?:
+    ExpertCanonicalOutputPolicy;
+
+  structuredResolver?:
+    ExpertStructuredResolverConfig;
 
   rootIsEditorial:
     boolean;
@@ -272,6 +314,27 @@ function validateConfig(
       ) ||
       !Array.isArray(
         source.preferredPathRules
+      ) ||
+      (
+        source.feedUrls !== undefined &&
+        !Array.isArray(
+          source.feedUrls
+        )
+      ) ||
+      (
+        source.archiveEntryUrls !== undefined &&
+        !Array.isArray(
+          source.archiveEntryUrls
+        )
+      ) ||
+      (
+        source.structuredResolver !== undefined &&
+        (
+          source.structuredResolver.kind !==
+            "ganyan-canavari" ||
+          !source.structuredResolver
+            .pathTemplate
+        )
       )
     ) {
       throw new Error(

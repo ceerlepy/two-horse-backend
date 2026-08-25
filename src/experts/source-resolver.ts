@@ -21,6 +21,22 @@ import {
   isAllowedDiscoveredArticleUrl
 } from "./source-policy";
 
+import {
+  expertSourceConfig
+} from "../config/expert-acquisition";
+
+import {
+  turkeyDate
+} from "../shared";
+
+import {
+  discoverExpertFeedUrls
+} from "./feed-discovery";
+
+import {
+  resolveGanyanCanavariStructuredTargets
+} from "./structured-ganyan-canavari";
+
 
 export interface ExpertTargetResolution {
   status:
@@ -46,7 +62,7 @@ export interface ExpertTargetResolution {
 }
 
 
-export async function resolveExpertSourceTargets(
+async function resolveArticleTargets(
   env:
     Env,
 
@@ -57,60 +73,14 @@ export async function resolveExpertSourceTargets(
     string,
 
   cities:
-    string[]
+    string[],
+
+  landingUrls:
+    string[],
+
+  allowFeed:
+    boolean
 ): Promise<ExpertTargetResolution> {
-  const landingUrls =
-    expertLandingUrls(
-      source
-    );
-
-
-  if (
-    expertUsesDirectCurrentPage(
-      source.source_key
-    )
-  ) {
-    const resolved =
-      await resolveDirectCurrentPageUrl(
-        env,
-        source.source_key,
-        landingUrls,
-        expertRootUrl(
-          source
-        ),
-        raceDate,
-        cities
-      );
-
-
-    return {
-      status:
-        resolved.url
-          ? "ready"
-          : "unavailable",
-
-      mode:
-        "direct-current-page",
-
-      targets:
-        resolved.url
-          ? [resolved.url]
-          : [],
-
-      discoveredFromUrl:
-        resolved.url,
-
-      discoveryMethod:
-        resolved.url
-          ? "direct-page-resolver"
-          : null,
-
-      diagnostics:
-        resolved.diagnostics
-    };
-  }
-
-
   const attempts:
     any[] = [];
 
@@ -128,30 +98,18 @@ export async function resolveExpertSourceTargets(
         );
 
 
-      const discoveredUrls:
-        string[] =
-        discovery.urls;
-
-
-      const accepted:
-        string[] =
+      const accepted =
         [
           ...new Set<string>(
-            discoveredUrls
+            discovery.urls
               .filter(
-                (
-                  url:
-                    string
-                ) =>
+                url =>
                   !landingUrls.includes(
                     url
                   )
               )
               .filter(
-                (
-                  url:
-                    string
-                ) =>
+                url =>
                   isAllowedDiscoveredArticleUrl(
                     source.source_key,
                     url
@@ -213,6 +171,58 @@ export async function resolveExpertSourceTargets(
   }
 
 
+  if (allowFeed) {
+    const feed =
+      await discoverExpertFeedUrls(
+        env,
+        source.source_key,
+        source.source_name,
+        raceDate,
+        cities
+      );
+
+
+    if (feed.configured) {
+      attempts.push({
+        feed:true,
+
+        method:
+          feed.method,
+
+        selected:
+          feed.urls,
+
+        diagnostics:
+          feed.diagnostics
+      });
+    }
+
+
+    if (feed.urls.length) {
+      return {
+        status:
+          "ready",
+
+        mode:
+          "article",
+
+        targets:
+          feed.urls,
+
+        discoveredFromUrl:
+          feed.discoveredFromUrl,
+
+        discoveryMethod:
+          feed.method,
+
+        diagnostics:{
+          attempts
+        }
+      };
+    }
+  }
+
+
   return {
     status:
       "not-published",
@@ -229,4 +239,171 @@ export async function resolveExpertSourceTargets(
       attempts
     }
   };
+}
+
+
+export async function resolveExpertSourceTargets(
+  env:
+    Env,
+
+  source:
+    ExpertSource,
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+): Promise<ExpertTargetResolution> {
+  const config =
+    expertSourceConfig(
+      source.source_key
+    );
+
+
+  /*
+   * Ganyan Canavarı:
+   *
+   * Do NOT let generic root/navigation recovery accidentally
+   * promote a menu URL to an article.
+   *
+   * The site's own runtime city select provides venueValue.
+   * The generated target is then probed fail-closed.
+   */
+  if (
+    config.structuredResolver
+      ?.kind ===
+      "ganyan-canavari"
+  ) {
+    const structured =
+      await resolveGanyanCanavariStructuredTargets(
+        env,
+        source.source_key,
+        raceDate,
+        cities
+      );
+
+
+    return {
+      status:
+        structured.complete &&
+        structured.urls.length
+          ? "ready"
+          : "unavailable",
+
+      mode:
+        "article",
+
+      targets:
+        structured.complete
+          ? structured.urls
+          : [],
+
+      discoveredFromUrl:
+        structured.complete
+          ? (
+              config.entryUrls[0] ??
+              null
+            )
+          : null,
+
+      discoveryMethod:
+        structured.complete
+          ? "structured-dynamic-city-state"
+          : null,
+
+      diagnostics:
+        structured.diagnostics
+    };
+  }
+
+
+  /*
+   * Istinye:
+   *
+   * Current production date NEVER drops into archive.
+   *
+   * Historical preview/date:
+   * archive article discovery only.
+   */
+  if (
+    config.archivePolicy ===
+      "historical-only" &&
+    raceDate <
+      turkeyDate()
+  ) {
+    return resolveArticleTargets(
+      env,
+      source,
+      raceDate,
+      cities,
+      config.archiveEntryUrls ??
+        [],
+      false
+    );
+  }
+
+
+  const landingUrls =
+    expertLandingUrls(
+      source
+    );
+
+
+  if (
+    expertUsesDirectCurrentPage(
+      source.source_key
+    )
+  ) {
+    const resolved =
+      await resolveDirectCurrentPageUrl(
+        env,
+        source.source_key,
+        landingUrls,
+        expertRootUrl(
+          source
+        ),
+        raceDate,
+        cities
+      );
+
+
+    return {
+      status:
+        resolved.url
+          ? "ready"
+          : "unavailable",
+
+      mode:
+        "direct-current-page",
+
+      targets:
+        resolved.url
+          ? [
+              resolved.url
+            ]
+          : [],
+
+      discoveredFromUrl:
+        resolved.url,
+
+      discoveryMethod:
+        resolved.url
+          ? "direct-page-resolver"
+          : null,
+
+      diagnostics:
+        resolved.diagnostics
+    };
+  }
+
+
+  return resolveArticleTargets(
+    env,
+    source,
+    raceDate,
+    cities,
+    landingUrls,
+    true
+  );
 }

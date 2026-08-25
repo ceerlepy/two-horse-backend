@@ -54,6 +54,14 @@ import {
   inspectExplicitCouponCompleteness
 } from "./coupon-completeness";
 
+import {
+  filterRawToExplicitAnchors
+} from "./explicit-anchor-filter";
+
+import {
+  sanitizeRawAgainstCanonical
+} from "./canonical-raw-sanitizer";
+
 
 export interface ExtractedExperts {
   extraction:
@@ -829,8 +837,129 @@ export async function extractExperts(
   }
 
 
+  let acceptedSemantic:
+    RawExpertExtraction =
+    semantic.value;
+
+
+  let explicitAnchorFilter:
+    any =
+    null;
+
+
+  /*
+   * HorseTurk-style explicit coupon sources:
+   *
+   * AI is still responsible for JSON extraction, but bare
+   * coupon grid numbers are not allowed to become semantic
+   * picks unless they match a deterministic explicit
+   * BANKO/TEK source anchor.
+   */
+  if (
+    sourceConfig
+      .explicitAnchorPolicy ===
+      "allowlist" &&
+    couponExpected.length
+  ) {
+    const filtered =
+      filterRawToExplicitAnchors(
+        acceptedSemantic,
+        couponExpected
+      );
+
+
+    acceptedSemantic =
+      filtered.value;
+
+
+    explicitAnchorFilter =
+      filtered.diagnostics;
+  }
+
+
+  let canonicalSanitation:
+    any =
+    null;
+
+
+  /*
+   * Some structured pages (currently AFA) occasionally cause
+   * Workers AI to emit one extra canonical-invalid identity.
+   *
+   * Never invent a runner:
+   * - exact canonical identity -> keep
+   * - unique city + horseNumber + horseName -> repair race
+   * - otherwise -> drop AI noise
+   */
+  if (
+    sourceConfig
+      .canonicalOutputPolicy ===
+      "repair-drop-ai-noise"
+  ) {
+    const runnerRows =
+      await env.DB.prepare(`
+        SELECT
+          city,
+          race_number,
+          horse_number,
+          horse_name
+        FROM runners
+        WHERE race_date = ?
+        ORDER BY
+          city,
+          race_number,
+          horse_number
+      `)
+        .bind(
+          raceDate
+        )
+        .all<any>();
+
+
+    const sanitized =
+      sanitizeRawAgainstCanonical(
+        acceptedSemantic,
+
+        (
+          runnerRows.results ??
+          []
+        ).map(
+          row => ({
+            city:
+              String(
+                row.city
+              ),
+
+            raceNumber:
+              Number(
+                row.race_number
+              ),
+
+            horseNumber:
+              Number(
+                row.horse_number
+              ),
+
+            horseName:
+              String(
+                row.horse_name
+              )
+          })
+        )
+      );
+
+
+    acceptedSemantic =
+      sanitized.value;
+
+
+    canonicalSanitation =
+      sanitized.diagnostics;
+  }
+
+
   return finalizeExtraction(
-    semantic.value,
+    acceptedSemantic,
 
     `${document.stage}-workers-ai-json`,
 
@@ -873,6 +1002,31 @@ export async function extractExperts(
       },
 
       sixfoldStarts,
+
+      postProcessing:{
+        explicitAnchorPolicy:
+          sourceConfig
+            .explicitAnchorPolicy ??
+          "augment",
+
+        canonicalOutputPolicy:
+          sourceConfig
+            .canonicalOutputPolicy ??
+          "strict",
+
+        semanticRawRaceCount:
+          semantic.value
+            .races
+            .length,
+
+        acceptedRaceCount:
+          acceptedSemantic
+            .races
+            .length,
+
+        explicitAnchorFilter,
+        canonicalSanitation
+      },
 
       /*
        * Admin preview/root-cause evidence.
