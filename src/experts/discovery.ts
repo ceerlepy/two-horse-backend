@@ -913,8 +913,6 @@ async function discoverFromLanding(
 
 
       diagnostics.stages.push({
-        stage,
-
         bodyLength:
           acquired.bodyLength,
 
@@ -986,11 +984,11 @@ function navigationTargetFromHtml(
     load(html);
 
 
-  let winner:
-    {
-      url:string;
-      score:number;
-    } | null = null;
+  let winnerUrl:
+    string | null = null;
+
+  let winnerScore =
+    0;
 
 
   $("a[href]").each(
@@ -1068,24 +1066,20 @@ function navigationTargetFromHtml(
 
 
       if (
-        score &&
-        (
-          !winner ||
-          score >
-            winner.score
-        )
+        score >
+        winnerScore
       ) {
-        winner = {
-          url,
-          score
-        };
+        winnerUrl =
+          url;
+
+        winnerScore =
+          score;
       }
     }
   );
 
 
-  return winner?.url ??
-    null;
+  return winnerUrl;
 }
 
 
