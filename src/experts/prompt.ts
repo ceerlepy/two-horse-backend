@@ -20,10 +20,12 @@ function profileRules(
     string
 ): string {
   const profile =
-    expertSourceConfig(
-      sourceKey
-    )
-      .promptProfile;
+    sourceKey.trim()
+      ? expertSourceConfig(
+          sourceKey
+        )
+          .promptProfile
+      : "generic";
 
 
   switch(profile) {
@@ -75,7 +77,7 @@ dönüştürme.
 
     case "generic":
       return `
-GENEL ALTILI / TAHMİN KURALI
+GENEL ALTILI GANYAN / TAHMİN KURALI
 
 Bir article'ın başlığında ALTILI, TAHMİN veya BÜLTEN yazması
 içeriği IGNORE etme sebebi DEĞİLDİR.

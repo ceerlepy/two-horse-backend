@@ -139,19 +139,113 @@ export function preferredArticlePathScore(
 }
 
 
-function excludedUtilityPath(
-  path:
+function normalizedPath(
+  value:
+    string
+): string | null {
+  try {
+    const path =
+      value.startsWith(
+        "http://"
+      ) ||
+      value.startsWith(
+        "https://"
+      )
+        ? new URL(value)
+            .pathname
+        : value;
+
+
+    const normalized =
+      (
+        path.startsWith("/")
+          ? path
+          : `/${path}`
+      )
+        .replace(
+          /\/+$/,
+          ""
+        )
+        .toLowerCase();
+
+
+    return normalized || "/";
+
+  } catch {
+    return null;
+  }
+}
+
+
+export function isExcludedExpertUtilityPath(
+  value:
     string
 ): boolean {
+  const path =
+    normalizedPath(
+      value
+    );
+
+
+  if (!path) {
+    return true;
+  }
+
+
   return EXPERT_ACQUISITION_CONFIG
     .discovery
     .excludedPathPrefixes
     .some(
-      prefix =>
-        path === prefix ||
-        path.startsWith(
-          `${prefix}/`
-        )
+      prefix => {
+        const normalizedPrefix =
+          normalizedPath(
+            prefix
+          );
+
+
+        return Boolean(
+          normalizedPrefix &&
+          (
+            path ===
+              normalizedPrefix ||
+            path.startsWith(
+              `${normalizedPrefix}/`
+            )
+          )
+        );
+      }
+    );
+}
+
+
+function isConfiguredEntryPath(
+  sourceKey:
+    string,
+
+  value:
+    string
+): boolean {
+  const candidatePath =
+    normalizedPath(
+      value
+    );
+
+
+  if (!candidatePath) {
+    return false;
+  }
+
+
+  return expertSourceConfig(
+    sourceKey
+  )
+    .entryUrls
+    .some(
+      entryUrl =>
+        normalizedPath(
+          entryUrl
+        ) ===
+        candidatePath
     );
 }
 
@@ -217,9 +311,32 @@ export function isAllowedDiscoveredArticleUrl(
     }
 
 
-    return !excludedUtilityPath(
-      path
-    );
+    if (
+      isExcludedExpertUtilityPath(
+        path
+      )
+    ) {
+      return false;
+    }
+
+
+    /*
+     * A configured entry/listing/current-index page is a
+     * discovery surface, never an article target.
+     *
+     * Generic rule: no source-specific exception required.
+     */
+    if (
+      isConfiguredEntryPath(
+        sourceKey,
+        value
+      )
+    ) {
+      return false;
+    }
+
+
+    return true;
 
   } catch {
     return false;

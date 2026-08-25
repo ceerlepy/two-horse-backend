@@ -36,6 +36,7 @@ import {
   expertNavigationLabels,
   expertRootIsEditorial,
   isAllowedDiscoveredArticleUrl,
+  isExcludedExpertUtilityPath,
   preferredArticlePathScore
 } from "./source-policy";
 
@@ -225,7 +226,10 @@ export function isUsableCandidate(
       value
     ) &&
     !assetUrl(value) &&
-    !isRootUrl(value)
+    !isRootUrl(value) &&
+    !isExcludedExpertUtilityPath(
+      value
+    )
   );
 }
 
