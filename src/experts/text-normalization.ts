@@ -22,6 +22,10 @@ export function normalizeExpertSearchText(
     .replace(/ü/g,"u")
     .replace(/ö/g,"o")
     .replace(/ç/g,"c")
+    .replace(
+      /[^\p{L}\p{N}]+/gu,
+      " "
+    )
     .replace(/\s+/g," ")
     .trim();
 }

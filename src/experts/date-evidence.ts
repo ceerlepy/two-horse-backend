@@ -9,7 +9,12 @@ const TURKEY_TIME_ZONE =
 
 export function buildExpertRaceDateTokens(
   raceDate:
-    string
+    string,
+
+  options: {
+    allowYearless?:
+      boolean;
+  } = {}
 ): string[] {
   const parts =
     raceDate
@@ -100,7 +105,12 @@ export function buildExpertRaceDateTokens(
       );
 
 
-  return [
+  const yy =
+    String(year)
+      .slice(-2);
+
+
+  const values = [
     `${year}-${mm}-${dd}`,
     `${year}/${mm}/${dd}`,
     `${dd}-${mm}-${year}`,
@@ -108,8 +118,36 @@ export function buildExpertRaceDateTokens(
     `${dd}/${mm}/${year}`,
     `${day} ${monthName} ${year}`,
     `${day}-${monthName}-${year}`,
-    `${dd}${mm}${String(year).slice(-2)}`
-  ]
+    `${dd}${mm}${yy}`,
+
+    /*
+     * Some Turkish racing sites use compact D-M-YY
+     * without zero padding:
+     *
+     * 25/8/26 -> 25826
+     */
+    `${day}${month}${yy}`
+  ];
+
+
+  if (
+    options.allowYearless ===
+      true
+  ) {
+    /*
+     * Only enabled per-source from config.
+     *
+     * Needed for article slugs such as:
+     * /25-agustos-ankara-tahminleri-.../
+     */
+    values.push(
+      `${day} ${monthName}`,
+      `${day}-${monthName}`
+    );
+  }
+
+
+  return values
     .map(
       normalizeExpertSearchText
     )

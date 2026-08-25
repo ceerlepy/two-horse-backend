@@ -17,7 +17,8 @@ export type ExpertPromptProfile =
   | "generic"
   | "liderform"
   | "istinye"
-  | "ganyan-canavari";
+  | "ganyan-canavari"
+  | "coupon-legs";
 
 
 export interface ExpertPathRule {
@@ -50,6 +51,12 @@ export interface ExpertSourceConfig {
   preflightRequiresCity:
     boolean;
 
+  allowYearlessDateEvidence:
+    boolean;
+
+  excludedCandidateTerms:
+    string[];
+
   entryUrls:
     string[];
 
@@ -71,6 +78,9 @@ interface ExpertAcquisitionConfig {
   discovery: {
     acquisitionOrder:
       ExpertAcquisitionStage[];
+
+    useLinksFallback:
+      boolean;
 
     excludedPathPrefixes:
       string[];

@@ -815,3 +815,43 @@ duplicate coupon rule and Altılı/Ayak sources' canonical six-fold mapping.
 
 Multi-document source updates are fail closed and replace source/day rows
 only after the entire resolved bundle validates.
+
+## Current-date discovery hard gates
+
+Article discovery uses this contract:
+
+1. configured editorial entry URL,
+2. rendered SCRAPE anchor discovery,
+3. Cloudflare `/links` structural fallback,
+4. rendered CONTENT fallback,
+5. ordinary HTTP fallback,
+6. same-host and utility filtering,
+7. hard race-date evidence,
+8. target TJK city evidence,
+9. expert prediction/analysis evidence,
+10. direct Workers AI candidate selection,
+11. article-body acquisition,
+12. Workers AI expert extraction,
+13. TJK canonical validation,
+14. persistence only after complete canonical validation.
+
+`preferredPathRules` are ranking hints only. They can never replace
+race-date evidence.
+
+A successful candidate-AI decision is not unioned with candidates the
+AI rejected. Safe deterministic candidates are used only when the AI
+candidate-selection call itself fails.
+
+The discovery candidate AI path does not use Browser Run `/json`.
+Workers AI is called directly.
+
+Cloudflare `/links` is structural discovery only. It never performs
+expert semantic extraction.
+
+Read-only preview evaluates every resolved target and reports
+canonical rejected picks and extraction diagnostics without persistence.
+
+Coupon/AYAK-oriented sources may map legs from the canonical TJK
+six-fold start map. Source-declared six-fold start text is secondary and
+may only assist named selections with an explicit semantic label.
+Plain coupon membership must not invent favorite/strong/rival labels.

@@ -252,7 +252,7 @@ function hasAnyTerm(
 }
 
 
-function candidateEvidence(
+export function candidateEvidence(
   sourceKey:
     string,
 

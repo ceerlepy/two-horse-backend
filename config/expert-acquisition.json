@@ -1,13 +1,11 @@
 {
-  "version": 3,
-
+  "version": 4,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
       "cf-content",
       "http"
     ],
-
     "excludedPathPrefixes": [
       "/login",
       "/logout",
@@ -31,7 +29,6 @@
       "/muhtemeller",
       "/istatistik"
     ],
-
     "assetExtensions": [
       ".jpg",
       ".jpeg",
@@ -49,7 +46,6 @@
       ".js",
       ".xml"
     ],
-
     "negativeTerms": [
       "koşmayabilir",
       "yarışmayacak",
@@ -62,7 +58,6 @@
       "transfer",
       "vefat"
     ],
-
     "predictionTerms": [
       "tahmin",
       "analiz",
@@ -78,7 +73,6 @@
       "yarış",
       "galop"
     ],
-
     "contextContainers": [
       "article",
       ".post",
@@ -89,25 +83,22 @@
       "section",
       "div"
     ],
-
     "candidateMinScore": 4,
     "deterministicMinScore": 13,
     "maxCandidates": 220,
-    "candidateContextCharacters": 1400
+    "candidateContextCharacters": 1400,
+    "useLinksFallback": true
   },
-
   "extraction": {
     "acquisitionOrder": [
       "cf-scrape",
       "cf-content",
       "http"
     ],
-
     "minimumTextCharacters": 200,
     "sourceHardSafetyCharacters": 140000,
     "semanticMaxCharacters": 42000,
     "relevanceWindowLines": 3,
-
     "relevanceTerms": [
       "koşu",
       "yarış",
@@ -123,7 +114,6 @@
       "yorum"
     ]
   },
-
   "sources": {
     "liderform": {
       "host": "liderform.com.tr",
@@ -131,21 +121,17 @@
       "promptProfile": "liderform",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://liderform.com.tr/haberler/analizler"
       ],
-
       "navigationLabels": [
         "Analizler",
         "Koşuların Analizi"
       ],
-
       "contextBoostTerms": [
         "analizler",
         "koşuların analizi"
       ],
-
       "preferredPathRules": [
         {
           "kind": "prefix",
@@ -157,82 +143,89 @@
           "value": ".html",
           "score": 2
         }
+      ],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": [
+        "takip edilmesi gereken safkanlar"
       ]
     },
-
     "yaris_dergisi": {
       "host": "yarisdergisi.com",
       "mode": "article",
       "promptProfile": "generic",
       "rootIsEditorial": true,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://www.yarisdergisi.com/"
       ],
-
       "navigationLabels": [
         "Yurt İçi Tahminler",
         "Tahminler"
       ],
-
       "contextBoostTerms": [
         "Yurt İçi Tahminler"
       ],
-
-      "preferredPathRules": []
+      "preferredPathRules": [],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": [
+        "kombine bahis",
+        "kombine-bahis",
+        "yurt dışı",
+        "yurt-disi"
+      ]
     },
-
     "banko_tahminler": {
       "host": "bankotahminler.com",
       "mode": "article",
-      "promptProfile": "generic",
+      "promptProfile": "coupon-legs",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://www.bankotahminler.com/kategori/tahminler/"
       ],
-
       "navigationLabels": [
         "Tahminler",
         "Günlük Tahminler"
       ],
-
       "contextBoostTerms": [
         "Tahminler"
       ],
-
       "preferredPathRules": [
         {
           "kind": "prefix",
           "value": "/tahminler/",
           "score": 5
         }
+      ],
+      "allowYearlessDateEvidence": true,
+      "excludedCandidateTerms": [
+        "ai tahmin",
+        "ai-tahmin",
+        "yurt dışı",
+        "yurt-disi",
+        "abd",
+        "şili",
+        "fransa",
+        "birleşik krallık"
       ]
     },
-
     "horseturk": {
       "host": "horseturk.com",
       "mode": "article",
-      "promptProfile": "generic",
+      "promptProfile": "coupon-legs",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://www.horseturk.com/cat/at-yarisi-tahminleri/"
       ],
-
       "navigationLabels": [
         "Günlük Tahminler",
         "At Yarışı Tahminleri",
         "Tahminler"
       ],
-
       "contextBoostTerms": [
         "Günlük Tahminler"
       ],
-
       "preferredPathRules": [
         {
           "kind": "contains",
@@ -244,77 +237,69 @@
           "value": "altili-ganyan",
           "score": 3
         }
-      ]
+      ],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": []
     },
-
     "yaris_analizi": {
       "host": "yarisanalizi.com",
       "mode": "article",
-      "promptProfile": "generic",
+      "promptProfile": "coupon-legs",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://www.yarisanalizi.com/yazarlar/yazilari/9/Yaris-Analizi.html"
       ],
-
       "navigationLabels": [
         "Yarış Analizi",
         "Güncel At Yarışı Tahminleri",
         "Tahminler"
       ],
-
       "contextBoostTerms": [
         "Yarış Analizi"
       ],
-
       "preferredPathRules": [
         {
-          "kind": "prefix",
+          "kind": "contains",
           "value": "/guncel-at-yaris-tahminleri/",
           "score": 5
         }
-      ]
+      ],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": []
     },
-
     "istinye_ganyan": {
       "host": "istinyeganyan.com",
       "mode": "direct-current-page",
       "promptProfile": "istinye",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://istinyeganyan.com/ganyan/tahminler/"
       ],
-
       "navigationLabels": [
         "Tahminler",
         "Ganyan Tahminleri"
       ],
-
       "contextBoostTerms": [],
-      "preferredPathRules": []
+      "preferredPathRules": [],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": []
     },
-
     "ganyan_canavari": {
       "host": "ganyancanavari.com.tr",
       "mode": "article",
       "promptProfile": "ganyan-canavari",
       "rootIsEditorial": true,
       "preflightRequiresCity": true,
-
       "entryUrls": [
         "https://www.ganyancanavari.com.tr/"
       ],
-
       "navigationLabels": [],
-
       "contextBoostTerms": [
         "En Son Yorumlar",
         "Banko Gösterilenler"
       ],
-
       "preferredPathRules": [
         {
           "kind": "contains",
@@ -331,28 +316,28 @@
           "value": "/galoplar.html",
           "score": 4
         }
-      ]
+      ],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": []
     },
-
     "afa": {
       "host": "atlarafisildayanadam.com",
       "mode": "direct-current-page",
       "promptProfile": "generic",
       "rootIsEditorial": false,
       "preflightRequiresCity": false,
-
       "entryUrls": [
         "https://atlarafisildayanadam.com/terminal"
       ],
-
       "navigationLabels": [
         "Bülten ve Analiz",
         "Analiz",
         "Bülten"
       ],
-
       "contextBoostTerms": [],
-      "preferredPathRules": []
+      "preferredPathRules": [],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": []
     }
   }
 }

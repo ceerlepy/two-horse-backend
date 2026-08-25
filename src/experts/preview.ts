@@ -63,23 +63,16 @@ function merge(
 
   for (const pick of picks) {
     const identity =
-      key(
-        pick
-      );
-
+      key(pick);
 
     const old =
-      result.get(
-        identity
-      );
+      result.get(identity);
 
 
     if (!old) {
       result.set(
         identity,
-        {
-          ...pick
-        }
+        {...pick}
       );
 
       continue;
@@ -191,40 +184,126 @@ function summarize(
       ).length,
 
     favorite:
-      count(
-        "isFavorite"
-      ),
+      count("isFavorite"),
 
     banko:
-      count(
-        "isBanko"
-      ),
+      count("isBanko"),
 
     strong:
-      count(
-        "isStrong"
-      ),
+      count("isStrong"),
 
     star:
-      count(
-        "isStar"
-      ),
+      count("isStar"),
 
     rival:
-      count(
-        "isRival"
-      ),
+      count("isRival"),
 
     surprise:
-      count(
-        "isSurprise"
-      ),
+      count("isSurprise"),
 
     avoid:
-      count(
-        "isAvoid"
-      )
+      count("isAvoid")
   };
+}
+
+
+function rejectedPicks(
+  raw:
+    ExpertPickInput[],
+
+  validated:
+    ExpertPickInput[]
+) {
+  const accepted =
+    new Set(
+      validated.map(key)
+    );
+
+
+  return raw
+    .filter(
+      pick =>
+        !accepted.has(
+          key(pick)
+        )
+    )
+    .map(
+      pick => ({
+        city:
+          pick.city,
+
+        raceNumber:
+          pick.raceNumber,
+
+        horseNumber:
+          pick.horseNumber,
+
+        horseName:
+          pick.horseName,
+
+        comment:
+          pick.comment
+      })
+    );
+}
+
+
+function mainPicks(
+  picks:
+    ExpertPickInput[]
+) {
+  return picks
+    .filter(
+      pick =>
+        pick.isFavorite ||
+        pick.isBanko ||
+        pick.isStrong ||
+        pick.isStar ||
+        pick.isSurprise
+    )
+    .map(
+      pick => ({
+        city:
+          pick.city,
+
+        raceNumber:
+          pick.raceNumber,
+
+        horseNumber:
+          pick.horseNumber,
+
+        horseName:
+          pick.horseName,
+
+        comment:
+          pick.comment,
+
+        labels:[
+          pick.isFavorite
+            ? "favorite"
+            : null,
+
+          pick.isBanko
+            ? "banko"
+            : null,
+
+          pick.isStrong
+            ? "strong"
+            : null,
+
+          pick.isStar
+            ? "star"
+            : null,
+
+          pick.isSurprise
+            ? "surprise"
+            : null
+        ].filter(Boolean),
+
+        confidence:
+          pick.confidence
+      })
+    );
 }
 
 
@@ -280,9 +359,7 @@ export async function previewExpertSource(
       WHERE source_key = ?
       LIMIT 1
     `)
-      .bind(
-        sourceKey
-      )
+      .bind(sourceKey)
       .first<any>();
 
 
@@ -305,9 +382,7 @@ export async function previewExpertSource(
       WHERE race_date = ?
       ORDER BY city
     `)
-      .bind(
-        raceDate
-      )
+      .bind(raceDate)
       .all<any>();
 
 
@@ -318,9 +393,7 @@ export async function previewExpertSource(
     )
       .map(
         row =>
-          String(
-            row.city
-          )
+          String(row.city)
       )
       .filter(Boolean);
 
@@ -374,7 +447,6 @@ export async function previewExpertSource(
         raceDate,
 
       cities,
-
       resolution,
 
       counts:
@@ -388,7 +460,6 @@ export async function previewExpertSource(
   const all:
     ExpertPickInput[] = [];
 
-
   const attempts:
     any[] = [];
 
@@ -398,8 +469,19 @@ export async function previewExpertSource(
   let totalTokens=0;
   let neurons=0;
 
+  let hadFailure=false;
+  let hadCanonicalIncomplete=false;
+  let hadSemanticEmpty=false;
 
-  for (const url of resolution.targets) {
+
+  /*
+   * Diagnostic preview MUST inspect every resolved document.
+   * Production persistence is still separate and fail-closed.
+   */
+  for (
+    const url of
+    resolution.targets
+  ) {
     try {
       const extracted =
         await extractExperts(
@@ -444,20 +526,17 @@ export async function previewExpertSource(
           0
         );
 
-
       completionTokens +=
         Number(
           usage.completion_tokens ??
           0
         );
 
-
       totalTokens +=
         Number(
           usage.total_tokens ??
           0
         );
-
 
       neurons +=
         Number(
@@ -466,11 +545,20 @@ export async function previewExpertSource(
         );
 
 
+      const completeCanonical =
+        raw.length > 0 &&
+        raw.length ===
+          validated.length;
+
+
       attempts.push({
         url,
 
         method:
           extracted.method,
+
+        status:
+          extracted.status,
 
         extracted:
           raw.length,
@@ -478,55 +566,41 @@ export async function previewExpertSource(
         validated:
           validated.length,
 
-        completeCanonical:
-          raw.length > 0 &&
-          raw.length ===
-            validated.length,
+        completeCanonical,
+
+        rejectedPicks:
+          rejectedPicks(
+            raw,
+            validated
+          ),
+
+        rawSample:
+          raw.slice(
+            0,
+            20
+          ),
 
         diagnostics
       });
 
 
-      if (
-        !raw.length ||
-        validated.length !==
-          raw.length
-      ) {
-        return {
-          ok:false,
-          preview:true,
-          persisted:false,
+      if (!raw.length) {
+        hadSemanticEmpty =
+          true;
 
-          status:
-            raw.length
-              ? "canonical-incomplete"
-              : "semantic-empty",
+        continue;
+      }
 
-          source:
-            sourceKey,
 
-          date:
-            raceDate,
+      if (!completeCanonical) {
+        hadCanonicalIncomplete =
+          true;
 
-          cities,
-
-          resolution,
-
-          extractionAttempts:
-            attempts,
-
-          counts:
-            summarize(
-              merge(all)
-            ),
-
-          semanticUsage:{
-            promptTokens,
-            completionTokens,
-            totalTokens,
-            neurons
-          }
-        };
+        /*
+         * Never mix a partially canonical document into
+         * preview's accepted result set.
+         */
+        continue;
       }
 
 
@@ -535,6 +609,9 @@ export async function previewExpertSource(
       );
 
     } catch(error) {
+      hadFailure =
+        true;
+
       attempts.push({
         url,
 
@@ -542,55 +619,51 @@ export async function previewExpertSource(
           "failed",
 
         error:
-          errorMessage(
-            error
-          )
+          errorMessage(error)
       });
 
-
-      return {
-        ok:false,
-        preview:true,
-        persisted:false,
-
-        status:
-          "extraction-failed",
-
-        source:
-          sourceKey,
-
-        date:
-          raceDate,
-
-        cities,
-
-        resolution,
-
-        extractionAttempts:
-          attempts,
-
-        error:
-          "EXPERT_PREVIEW_EXTRACTION_FAILED"
-      };
+      /*
+       * Preview continues to the next resolved target.
+       */
+      continue;
     }
   }
 
 
   const picks =
-    merge(
-      all
-    );
+    merge(all);
+
+
+  const status =
+    hadFailure
+      ? "extraction-failed"
+
+      : hadCanonicalIncomplete
+        ? "canonical-incomplete"
+
+        : hadSemanticEmpty
+          ? (
+              picks.length
+                ? "partial-semantic-empty"
+                : "semantic-empty"
+            )
+
+          : picks.length
+            ? "success"
+            : "semantic-empty";
+
+
+  const ok =
+    status ===
+      "success";
 
 
   return {
-    ok:true,
+    ok,
     preview:true,
     persisted:false,
 
-    status:
-      picks.length
-        ? "success"
-        : "semantic-empty",
+    status,
 
     source:
       sourceKey,
@@ -612,64 +685,10 @@ export async function previewExpertSource(
       attempts,
 
     counts:
-      summarize(
-        picks
-      ),
+      summarize(picks),
 
     mainPicks:
-      picks
-        .filter(
-          pick =>
-            pick.isFavorite ||
-            pick.isBanko ||
-            pick.isStrong ||
-            pick.isStar ||
-            pick.isSurprise
-        )
-        .map(
-          pick => ({
-            city:
-              pick.city,
-
-            raceNumber:
-              pick.raceNumber,
-
-            horseNumber:
-              pick.horseNumber,
-
-            horseName:
-              pick.horseName,
-
-            comment:
-              pick.comment,
-
-            labels:[
-              pick.isFavorite
-                ? "favorite"
-                : null,
-
-              pick.isBanko
-                ? "banko"
-                : null,
-
-              pick.isStrong
-                ? "strong"
-                : null,
-
-              pick.isStar
-                ? "star"
-                : null,
-
-              pick.isSurprise
-                ? "surprise"
-                : null
-            ]
-              .filter(Boolean),
-
-            confidence:
-              pick.confidence
-          })
-        ),
+      mainPicks(picks),
 
     semanticUsage:{
       promptTokens,
