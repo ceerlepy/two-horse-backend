@@ -96,6 +96,43 @@ describe(
 
 
     it(
+      "does not let broad card context poison a valid article",
+      () => {
+        const evidence =
+          candidateEvidence(
+            "yaris_dergisi",
+            "https://www.yarisdergisi.com/25-agustos-2026-ankara-yaris-tahminleri/",
+            "25 Ağustos 2026 Ankara Yarış Tahminleri | Kombine Bahis",
+            "2026-08-25",
+            ["Ankara"],
+            "25 Ağustos 2026 Ankara Yarış Tahminleri"
+          );
+
+
+        expect(
+          evidence.contextHasNegativeLanguage
+        ).toBe(true);
+
+        expect(
+          evidence.hasNegativeLanguage
+        ).toBe(false);
+
+        expect(
+          evidence.rejectedReason
+        ).toBe(null);
+
+        expect(
+          evidence.hasDate
+        ).toBe(true);
+
+        expect(
+          evidence.hasCity
+        ).toBe(true);
+      }
+    );
+
+
+    it(
       "normalizes canonical TJK draw suffix",
       () => {
         expect(
@@ -147,7 +184,7 @@ describe(
         expect(
           preferredArticlePathScore(
             "yaris_analizi",
-            "https://www.yarisanalizi.com/yazarlar/yazilari/9/guncel-at-yarisi-tahminleri/5674/25-08-2026-ANKARA-ve-KOCAELI-ALTILI-GANYAN-TAHMINLERI.html"
+            "https://www.yarisanalizi.com/yazarlar/yazilari/9/guncel-at-yaris-tahminleri/5674/25-08-2026-ANKARA-ve-KOCAELI-ALTILI-GANYAN-TAHMINLERI.html"
           )
         ).toBeGreaterThan(0);
       }

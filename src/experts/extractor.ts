@@ -751,6 +751,63 @@ export async function extractExperts(
 
       sixfoldStarts,
 
+      /*
+       * Admin preview/root-cause evidence.
+       * This is the exact normalized semantic input sent to AI.
+       */
+      semanticInput:{
+        excerpt:
+          document.semanticText.slice(
+            0,
+            2400
+          ),
+
+        containsBanko:
+          normalizeExpertSearchText(
+            document.semanticText
+          ).includes(
+            normalizeExpertSearchText(
+              "banko"
+            )
+          ),
+
+        containsTek:
+          normalizeExpertSearchText(
+            document.semanticText
+          ).includes(
+            normalizeExpertSearchText(
+              "tek"
+            )
+          ),
+
+        containsFavorite:
+          normalizeExpertSearchText(
+            document.semanticText
+          ).includes(
+            normalizeExpertSearchText(
+              "favori"
+            )
+          ),
+
+        containsRival:
+          normalizeExpertSearchText(
+            document.semanticText
+          ).includes(
+            normalizeExpertSearchText(
+              "rakip"
+            )
+          ),
+
+        containsSurprise:
+          normalizeExpertSearchText(
+            document.semanticText
+          ).includes(
+            normalizeExpertSearchText(
+              "sürpriz"
+            )
+          )
+      },
+
       semantic:
         semantic.diagnostics,
 

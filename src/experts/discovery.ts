@@ -348,7 +348,10 @@ export function candidateEvidence(
     string,
 
   cities:
-    string[]
+    string[],
+
+  hardNegativeText?:
+    string
 ) {
   const source =
     expertSourceConfig(
@@ -364,6 +367,20 @@ export function candidateEvidence(
   const material =
     normalizeExpertSearchText(
       `${value} ${text}`
+    );
+
+
+  /*
+   * Positive discovery evidence may use nearby card/context
+   * text, but hard-negative evidence must be identity-local.
+   *
+   * Otherwise unrelated sibling/sidebar text such as
+   * "Kombine Bahis" or "AI Tahmin" can poison a valid
+   * current article candidate.
+   */
+  const negativeMaterial =
+    normalizeExpertSearchText(
+      `${value} ${hardNegativeText ?? text}`
     );
 
 
@@ -415,6 +432,23 @@ export function candidateEvidence(
 
 
   const hasNegativeLanguage =
+    hasAnyTerm(
+      negativeMaterial,
+      discovery.negativeTerms
+    ) ||
+    hasAnyTerm(
+      negativeMaterial,
+      source
+        .excludedCandidateTerms
+    );
+
+
+  /*
+   * Diagnostic only: tells us whether the broad card context
+   * contained a negative term which was NOT part of the
+   * candidate's own URL/title identity.
+   */
+  const contextHasNegativeLanguage =
     hasAnyTerm(
       material,
       discovery.negativeTerms
@@ -486,6 +520,22 @@ export function candidateEvidence(
         .candidateMinScore;
 
 
+  const rejectedReason =
+    hasNegativeLanguage
+      ? "negative-language"
+
+      : !hasDate
+        ? "missing-date"
+
+        : !hasCity
+          ? "missing-city"
+
+          : !hasPredictionLanguage
+            ? "missing-prediction-language"
+
+            : null;
+
+
   return {
     score,
     matchedCities,
@@ -493,6 +543,8 @@ export function candidateEvidence(
     hasDate,
     hasPredictionLanguage,
     hasNegativeLanguage,
+    contextHasNegativeLanguage,
+    rejectedReason,
 
     /*
      * Compatibility diagnostic only.
@@ -525,7 +577,10 @@ function candidateFromEvidence(
     string,
 
   cities:
-    string[]
+    string[],
+
+  hardNegativeText?:
+    string
 ): CandidateLink | null {
   if (
     !isUsableCandidate(
@@ -547,7 +602,8 @@ function candidateFromEvidence(
       url,
       text,
       raceDate,
-      cities
+      cities,
+      hardNegativeText
     );
 
 
@@ -656,10 +712,19 @@ function candidatesFromHtml(
           .first();
 
 
+      const anchorText =
+        cleanExpertInlineText(
+          anchor.text(),
+
+          discovery
+            .candidateContextCharacters
+        );
+
+
       const text =
         cleanExpertInlineText(
           [
-            anchor.text(),
+            anchorText,
             context.text()
           ]
             .filter(Boolean)
@@ -677,7 +742,8 @@ function candidatesFromHtml(
           url,
           text,
           raceDate,
-          cities
+          cities,
+          anchorText
         );
 
 
