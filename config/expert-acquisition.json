@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -188,6 +188,8 @@
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
       "entryUrls": [
+        "https://www.bankotahminler.com/",
+        "https://www.bankotahminler.com/mobil/",
         "https://www.bankotahminler.com/kategori/tahminler/"
       ],
       "navigationLabels": [
@@ -309,8 +311,11 @@
       "directPageDatePolicy": "target-city-heading",
       "archivePolicy": "historical-only",
       "archiveEntryUrls": [
-        "https://istinyeganyan.com/ganyan/",
-        "https://istinyeganyan.com/"
+        "https://istinyeganyan.com/kategori/at-yarisi/"
+      ],
+      "feedUrls": [
+        "https://istinyeganyan.com/kategori/at-yarisi/feed/",
+        "https://istinyeganyan.com/feed/"
       ]
     },
     "ganyan_canavari": {
@@ -320,8 +325,8 @@
       "rootIsEditorial": true,
       "preflightRequiresCity": true,
       "entryUrls": [
-        "https://www.ganyancanavari.com.tr/site/yaris-programi.html",
-        "https://www.ganyancanavari.com.tr/site/gunluk-galoplar.html",
+        "https://www.ganyancanavari.com.tr/haberler/",
+        "https://www.ganyancanavari.com.tr/site/galoplar-ozet.html",
         "https://www.ganyancanavari.com.tr/"
       ],
       "navigationLabels": [
@@ -351,11 +356,7 @@
         }
       ],
       "allowYearlessDateEvidence": false,
-      "excludedCandidateTerms": [],
-      "structuredResolver": {
-        "kind": "ganyan-canavari",
-        "pathTemplate": "/site/{yyyy}/{mm}/{dd}/{venueValue}/{citySlug}/galoplar-ozet.html"
-      }
+      "excludedCandidateTerms": []
     },
     "afa": {
       "host": "atlarafisildayanadam.com",

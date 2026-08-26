@@ -1,7 +1,8 @@
 export type AcquisitionStage =
   | "http"
   | "cf-scrape"
-  | "cf-content";
+  | "cf-content"
+  | "browser-session";
 
 export interface AcquiredHtml {
   stage: AcquisitionStage;

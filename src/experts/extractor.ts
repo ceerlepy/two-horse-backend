@@ -62,6 +62,10 @@ import {
   sanitizeRawAgainstCanonical
 } from "./canonical-raw-sanitizer";
 
+import {
+  expertAdapterFor
+} from "./adapters/registry";
+
 
 export interface ExtractedExperts {
   extraction:
@@ -400,10 +404,121 @@ async function acquireDocument(
     string,
 
   cities:
-    string[]
+    string[],
+
+  raceDate:
+    string
 ) {
   const failures:
     any[] = [];
+
+
+  const adapter =
+    expertAdapterFor(
+      sourceKey
+    );
+
+
+  const adapterOwnsUrl =
+    Boolean(
+      adapter.acquireHtml &&
+      (
+        adapter.ownsAcquisition
+          ? adapter.ownsAcquisition(
+              url
+            )
+          : true
+      )
+    );
+
+
+  /*
+   * Interactive source acquisition is fail-closed.
+   *
+   * If historical state selection fails, never fall back to
+   * today's static HTML and ingest the wrong race date.
+   */
+  if (
+    adapterOwnsUrl &&
+    adapter.acquireHtml
+  ) {
+    try {
+      const acquired =
+        await adapter.acquireHtml({
+          env,
+          url,
+          sourceKey,
+          raceDate,
+          cities
+        });
+
+
+      const normalized =
+        expertArticleTextFromHtml(
+          acquired.html
+        );
+
+
+      const compacted =
+        compactText(
+          normalized.text,
+          cities
+        );
+
+
+      const quality =
+        preflight(
+          sourceKey,
+          compacted.text,
+          cities
+        );
+
+
+      if (!quality.ok) {
+        throw new Error(
+          String(
+            quality.reason ??
+            "ADAPTER_PREFLIGHT_FAILED"
+          )
+        );
+      }
+
+
+      return {
+        stage:
+          acquired.stage,
+
+        acquired,
+        normalized,
+
+        semanticText:
+          compacted.text,
+
+        compacted:
+          compacted.compacted,
+
+        failures:[]
+      };
+
+    } catch(error) {
+      throw new Error(
+        "EXPERT_ADAPTER_DOCUMENT_ACQUISITION_FAILED:" +
+        JSON.stringify([
+          {
+            stage:
+              "browser-session",
+
+            url,
+
+            error:
+              errorMessage(
+                error
+              )
+          }
+        ])
+      );
+    }
+  }
 
 
   for (
@@ -710,7 +825,8 @@ export async function extractExperts(
       env,
       url,
       sourceKey,
-      cities
+      cities,
+      raceDate
     );
 
 
@@ -772,9 +888,13 @@ export async function extractExperts(
       : basePrompt;
 
 
-  const explicitEvidence =
+  const requireRace =
     liderformMode ||
     couponExpected.length > 0;
+
+
+  const requireSelectionPerRace =
+    liderformMode;
 
 
   const semantic =
@@ -783,11 +903,14 @@ export async function extractExperts(
       document.semanticText,
       prompt,
       {
-        requireRace:
-          explicitEvidence,
+        requireRace,
 
-        requireSelectionPerRace:
-          explicitEvidence
+        /*
+         * Explicit coupon sources can contain bare leg grids.
+         * Do not force AI to manufacture a semantic selection
+         * in every returned race.
+         */
+        requireSelectionPerRace
       }
     );
 

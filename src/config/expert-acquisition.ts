@@ -61,15 +61,6 @@ export type ExpertCanonicalOutputPolicy =
   | "repair-drop-ai-noise";
 
 
-export interface ExpertStructuredResolverConfig {
-  kind:
-    "ganyan-canavari";
-
-  pathTemplate:
-    string;
-}
-
-
 export interface ExpertPathRule {
   kind:
     | "prefix"
@@ -117,9 +108,6 @@ export interface ExpertSourceConfig {
 
   canonicalOutputPolicy?:
     ExpertCanonicalOutputPolicy;
-
-  structuredResolver?:
-    ExpertStructuredResolverConfig;
 
   rootIsEditorial:
     boolean;
@@ -325,15 +313,6 @@ function validateConfig(
         source.archiveEntryUrls !== undefined &&
         !Array.isArray(
           source.archiveEntryUrls
-        )
-      ) ||
-      (
-        source.structuredResolver !== undefined &&
-        (
-          source.structuredResolver.kind !==
-            "ganyan-canavari" ||
-          !source.structuredResolver
-            .pathTemplate
         )
       )
     ) {
