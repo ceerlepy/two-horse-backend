@@ -75,6 +75,32 @@ dönüştürme.
 `.trim();
 
 
+    case "afa":
+      return `
+AFA ÖZEL KURALI
+
+SOURCE DATA tek bir HEDEF TJK ŞEHRİ için günlük yarış öncesi
+AFA Bülten ve Kupon Analizi makalesidir.
+
+Bu tek makale o şehir için analiz edilen tüm koşuları birlikte
+içerir.
+
+Açık "1. Koşu", "2. Koşu", "7. Koşu" gibi başlıklar gerçek
+raceNumber evidence'ıdır.
+
+Her koşuda AFA'nın açık favori, rakip, sürpriz, banko, tek,
+güçlü aday ve "bu ayağı ... yazarak geçmenizi öneriyor"
+ifadelerini horse identity ile birlikte koru.
+
+Geçmiş kupon, sonuç, ikramiye, reklam veya başka şehir
+içeriğini current prediction sayma.
+
+Aynı city + raceNumber + horse identity için duplicate üretme.
+
+Race veya horse identity uydurma.
+`.trim();
+
+
     case "coupon-legs":
       return `
 ALTILI / AYAK FORMATLI KAYNAK KURALI

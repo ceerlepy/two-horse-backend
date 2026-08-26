@@ -3,50 +3,17 @@ import {
 } from "./browser-session";
 
 import {
-  interactiveTarget,
-  resolveArticleAdapter
-} from "./common";
+  cityScopedResolution,
+  sameExternalPage
+} from "./target-scope";
 
 import type {
   ExpertAdapter
 } from "./types";
 
 
-const NEWS =
-  "https://www.ganyancanavari.com.tr/haberler/";
-
-const INTERACTIVE =
-  "https://www.ganyancanavari.com.tr/site/galoplar-ozet.html";
-
-
-function sameTarget(
-  first:
-    string,
-
-  second:
-    string
-): boolean {
-  try {
-    const a =
-      new URL(first);
-
-    const b =
-      new URL(second);
-
-    a.hash="";
-    b.hash="";
-
-    return (
-      a.origin ===
-        b.origin &&
-      a.pathname.replace(/\/+$/,"") ===
-        b.pathname.replace(/\/+$/,"")
-    );
-
-  } catch {
-    return false;
-  }
-}
+const PROGRAM =
+  "https://www.ganyancanavari.com.tr/site/yaris-programi.html";
 
 
 export const ganyanCanavariAdapter:
@@ -59,80 +26,27 @@ export const ganyanCanavariAdapter:
       context
     ) {
       /*
-       * PRIMARY:
-       * date/city-specific editorial racing analysis.
-       */
-      const article =
-        await resolveArticleAdapter(
-          context,
-          {
-            landingUrls:[
-              NEWS
-            ],
-
-            preferCards:true,
-
-            cardSelectors:[
-              "article",
-              ".post",
-              ".entry",
-              "a[href*='/haber']",
-              "[class*='post']",
-              "[class*='news']"
-            ],
-
-            verifyTargets:true,
-            requireCityCoverage:true,
-
-            allowGeneric:false,
-            allowFeed:false
-          }
-        );
-
-
-      if (
-        article.status ===
-          "ready" &&
-        article.targets.length >
-          0
-      ) {
-        return article;
-      }
-
-
-      /*
-       * SECONDARY:
-       * use the site's real runtime date/city state.
+       * Use requested-date/requested-city runtime comments.
        *
-       * No hard-coded venue IDs exist.
+       * Do not treat protected Galop Incelemesi articles or
+       * generic "dikkat edilmesi gerekenler" pages as the
+       * source's expert-selection document.
        */
-      const fallback =
-        interactiveTarget(
-          INTERACTIVE,
-          "article",
-          "browser-session-date-city-state"
-        );
-
-
-      fallback.diagnostics = {
-        articleAttempt:
-          article.diagnostics,
-
-        fallback:
-          fallback.diagnostics
-      };
-
-
-      return fallback;
+      return cityScopedResolution(
+        PROGRAM,
+        context.cities,
+        "direct-current-page",
+        "browser-session-date-city-comments"
+      );
     },
 
 
     ownsAcquisition(
       url
     ) {
-      return sameTarget(
+      return sameExternalPage(
         url,
-        INTERACTIVE
+        PROGRAM
       );
     },
 

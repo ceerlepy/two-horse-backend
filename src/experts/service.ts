@@ -50,6 +50,11 @@ import {
   mapLimit
 } from "./concurrency";
 
+import {
+  externalTargetUrl,
+  isCityScopedTarget
+} from "./adapters/target-scope";
+
 import type {
   ExpertRefreshResult,
   ExpertSource
@@ -278,6 +283,19 @@ async function bundleFingerprint(
   urls:
     string[]
 ): Promise<string | null> {
+  /*
+   * Dynamic city-scoped browser state cannot be fingerprinted
+   * with a static HTTP hash of the base page.
+   */
+  if (
+    urls.some(
+      isCityScopedTarget
+    )
+  ) {
+    return null;
+  }
+
+
   const parts:
     Array<
       [string,string]
@@ -462,7 +480,9 @@ async function processSource(
       count:0,
 
       workingUrl:
-        resolution.targets[0]
+        externalTargetUrl(
+          resolution.targets[0]
+        )
     };
   }
 
@@ -646,7 +666,9 @@ async function processSource(
     env,
     source.source_key,
     contentHash,
-    resolution.targets[0],
+    externalTargetUrl(
+      resolution.targets[0]
+    ),
     {
       discoveredFromUrl:
         resolution.discoveredFromUrl,

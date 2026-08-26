@@ -31,6 +31,7 @@ export type ExpertPromptProfile =
   | "liderform"
   | "istinye"
   | "ganyan-canavari"
+  | "afa"
   | "coupon-legs";
 
 

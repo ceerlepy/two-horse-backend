@@ -1,9 +1,5 @@
 import {
-  acquireAfaBrowserSession
-} from "./browser-session";
-
-import {
-  interactiveTarget
+  resolveArticleAdapter
 } from "./common";
 
 import type {
@@ -11,8 +7,11 @@ import type {
 } from "./types";
 
 
-const TERMINAL =
-  "https://atlarafisildayanadam.com/terminal";
+const ROOT =
+  "https://atlarafisildayanadam.com/";
+
+const NEWS =
+  "https://atlarafisildayanadam.com/haberler/";
 
 
 export const afaAdapter:
@@ -21,48 +20,40 @@ export const afaAdapter:
       "afa",
 
 
-    async resolve() {
-      /*
-       * Terminal defaults to current date.
-       * Browser acquisition explicitly changes it to the
-       * requested race date before extracting any race card.
-       */
-      return interactiveTarget(
-        TERMINAL,
-        "direct-current-page",
-        "browser-session-date-race-cards"
-      );
-    },
-
-
-    ownsAcquisition(
-      url
-    ) {
-      try {
-        const a =
-          new URL(url);
-
-        const b =
-          new URL(TERMINAL);
-
-        return (
-          a.origin ===
-            b.origin &&
-          a.pathname.replace(/\/+$/,"") ===
-            b.pathname.replace(/\/+$/,"")
-        );
-
-      } catch {
-        return false;
-      }
-    },
-
-
-    acquireHtml(
+    resolve(
       context
     ) {
-      return acquireAfaBrowserSession(
-        context
+      /*
+       * AFA publishes one daily pre-race analysis article
+       * per city.
+       *
+       * One city article -> one AI extraction.
+       * No race-by-race browser clicking.
+       */
+      return resolveArticleAdapter(
+        context,
+        {
+          landingUrls:[
+            ROOT,
+            NEWS
+          ],
+
+          preferCards:true,
+
+          cardSelectors:[
+            "a[href*='/haberler/']",
+            "article",
+            "[class*='haber']",
+            "[class*='post']",
+            "[class*='card']"
+          ],
+
+          verifyTargets:true,
+          requireCityCoverage:true,
+
+          allowGeneric:false,
+          allowFeed:false
+        }
       );
     }
   };

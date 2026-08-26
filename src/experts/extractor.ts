@@ -66,6 +66,14 @@ import {
   expertAdapterFor
 } from "./adapters/registry";
 
+import {
+  targetCitiesForUrl
+} from "./adapters/target-scope";
+
+import {
+  inspectAfaCompleteness
+} from "./afa-completeness";
+
 
 export interface ExtractedExperts {
   extraction:
@@ -733,6 +741,20 @@ export async function extractExperts(
   }
 
 
+  const targetCities =
+    targetCitiesForUrl(
+      url,
+      cities
+    );
+
+
+  if (!targetCities.length) {
+    throw new Error(
+      "EXPERT_TARGET_CITY_SCOPE_INVALID"
+    );
+  }
+
+
   const raceRows =
     await env.DB.prepare(`
       SELECT
@@ -820,12 +842,27 @@ export async function extractExperts(
   }
 
 
+  const targetSixfoldStarts =
+    sixfoldStarts.filter(
+      value =>
+        targetCities.some(
+          city =>
+            normalizeExpertSearchText(
+              city
+            ) ===
+            normalizeExpertSearchText(
+              value.city
+            )
+        )
+    );
+
+
   const document =
     await acquireDocument(
       env,
       url,
       sourceKey,
-      cities,
+      targetCities,
       raceDate
     );
 
@@ -860,8 +897,8 @@ export async function extractExperts(
       "coupon-explicit"
       ? explicitCouponExpectedSelections(
           document.semanticText,
-          cities,
-          sixfoldStarts
+          targetCities,
+          targetSixfoldStarts
         )
       : [];
 
@@ -870,9 +907,9 @@ export async function extractExperts(
     expertExtractionPrompt(
       sourceName,
       raceDate,
-      cities,
+      targetCities,
       sourceKey,
-      sixfoldStarts
+      targetSixfoldStarts
     );
 
 
@@ -890,11 +927,17 @@ export async function extractExperts(
 
   const requireRace =
     liderformMode ||
-    couponExpected.length > 0;
+    couponExpected.length > 0 ||
+    sourceKey ===
+      "afa" ||
+    sourceKey ===
+      "ganyan_canavari";
 
 
   const requireSelectionPerRace =
-    liderformMode;
+    liderformMode ||
+    sourceKey ===
+      "afa";
 
 
   const semantic =
@@ -915,6 +958,30 @@ export async function extractExperts(
     );
 
 
+  const afaCompleteness =
+    sourceKey ===
+      "afa"
+      ? inspectAfaCompleteness(
+          semantic.value,
+          document.semanticText,
+          targetCities
+        )
+      : null;
+
+
+  if (
+    afaCompleteness &&
+    !afaCompleteness.complete
+  ) {
+    throw new Error(
+      "EXPERT_INCOMPLETE_AFA_RACE_COVERAGE:" +
+      JSON.stringify(
+        afaCompleteness
+      )
+    );
+  }
+
+
   const completeness:any =
     liderformMode
       ? {
@@ -924,7 +991,7 @@ export async function extractExperts(
           ...inspectLiderformCompleteness(
             semantic.value,
             document.normalized.text,
-            cities
+            targetCities
           )
         }
 
@@ -1124,7 +1191,10 @@ export async function extractExperts(
             .truncated
       },
 
-      sixfoldStarts,
+      sixfoldStarts:
+        targetSixfoldStarts,
+
+      targetCities,
 
       postProcessing:{
         explicitAnchorPolicy:
@@ -1211,7 +1281,8 @@ export async function extractExperts(
       semantic:
         semantic.diagnostics,
 
-      completeness
+      completeness,
+      afaCompleteness
     }
   );
 }

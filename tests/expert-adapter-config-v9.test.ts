@@ -11,16 +11,25 @@ import {
 
 
 describe(
-  "expert acquisition config v8",
+  "expert acquisition config v9",
   () => {
     it(
-      "contains adapter-era source contracts",
+      "preserves verified static contracts",
       () => {
         expect(
           EXPERT_ACQUISITION_CONFIG
             .version
         ).toBe(
-          8
+          9
+        );
+
+
+        expect(
+          expertSourceConfig(
+            "banko_tahminler"
+          ).entryUrls[0]
+        ).toBe(
+          "https://www.bankotahminler.com/kategori/tahminler/"
         );
 
 
@@ -36,37 +45,33 @@ describe(
         expect(
           expertSourceConfig(
             "istinye_ganyan"
-          ).archivePolicy
-        ).toBe(
-          "historical-only"
-        );
-
-
-        expect(
-          expertSourceConfig(
-            "istinye_ganyan"
           ).archiveEntryUrls
         ).toEqual([
           "https://istinyeganyan.com/kategori/at-yarisi/"
         ]);
+      }
+    );
 
 
+    it(
+      "uses article AFA and dynamic Ganyan contracts",
+      () => {
         expect(
           expertSourceConfig(
-            "banko_tahminler"
-          ).entryUrls
-        ).toContain(
-          "https://www.bankotahminler.com/mobil/"
+            "afa"
+          ).mode
+        ).toBe(
+          "article"
         );
 
 
         expect(
-          (
-            expertSourceConfig(
-              "ganyan_canavari"
-            ) as any
-          ).structuredResolver
-        ).toBeUndefined();
+          expertSourceConfig(
+            "afa"
+          ).promptProfile
+        ).toBe(
+          "afa"
+        );
 
 
         expect(
@@ -74,8 +79,17 @@ describe(
             "afa"
           ).canonicalOutputPolicy
         ).toBe(
-          "repair-drop-ai-noise"
+          "strict"
         );
+
+
+        expect(
+          expertSourceConfig(
+            "ganyan_canavari"
+          ).entryUrls
+        ).toEqual([
+          "https://www.ganyancanavari.com.tr/site/yaris-programi.html"
+        ]);
       }
     );
   }

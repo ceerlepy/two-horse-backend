@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -320,14 +320,12 @@
     },
     "ganyan_canavari": {
       "host": "ganyancanavari.com.tr",
-      "mode": "article",
+      "mode": "direct-current-page",
       "promptProfile": "ganyan-canavari",
-      "rootIsEditorial": true,
+      "rootIsEditorial": false,
       "preflightRequiresCity": true,
       "entryUrls": [
-        "https://www.ganyancanavari.com.tr/haberler/",
-        "https://www.ganyancanavari.com.tr/site/galoplar-ozet.html",
-        "https://www.ganyancanavari.com.tr/"
+        "https://www.ganyancanavari.com.tr/site/yaris-programi.html"
       ],
       "navigationLabels": [
         "Yarış Programı",
@@ -340,19 +338,9 @@
       ],
       "preferredPathRules": [
         {
-          "kind": "contains",
-          "value": "/site/",
-          "score": 3
-        },
-        {
           "kind": "suffix",
-          "value": "/galoplar-ozet.html",
+          "value": "/yaris-programi.html",
           "score": 5
-        },
-        {
-          "kind": "suffix",
-          "value": "/galoplar.html",
-          "score": 4
         }
       ],
       "allowYearlessDateEvidence": false,
@@ -360,24 +348,30 @@
     },
     "afa": {
       "host": "atlarafisildayanadam.com",
-      "mode": "direct-current-page",
-      "promptProfile": "generic",
+      "mode": "article",
+      "promptProfile": "afa",
       "rootIsEditorial": false,
-      "preflightRequiresCity": false,
+      "preflightRequiresCity": true,
       "entryUrls": [
-        "https://atlarafisildayanadam.com/terminal"
+        "https://atlarafisildayanadam.com/",
+        "https://atlarafisildayanadam.com/haberler/"
       ],
       "navigationLabels": [
         "Bülten ve Analiz",
-        "Analiz",
-        "Bülten"
+        "Yarış Öncesi",
+        "Analizi Oku"
       ],
       "contextBoostTerms": [],
-      "preferredPathRules": [],
+      "preferredPathRules": [
+        {
+          "kind": "prefix",
+          "value": "/haberler/",
+          "score": 5
+        }
+      ],
       "allowYearlessDateEvidence": false,
       "excludedCandidateTerms": [],
-      "directPageDatePolicy": "target-date",
-      "canonicalOutputPolicy": "repair-drop-ai-noise"
+      "canonicalOutputPolicy": "strict"
     }
   }
 }

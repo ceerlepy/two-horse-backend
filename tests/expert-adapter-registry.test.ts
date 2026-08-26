@@ -44,7 +44,7 @@ describe(
 
 
     it(
-      "uses generic adapter for unknown future sources",
+      "keeps unknown future sources generic",
       () => {
         expect(
           expertAdapterFor(
@@ -52,63 +52,6 @@ describe(
           ).sourceKey
         ).toBe(
           "*"
-        );
-      }
-    );
-
-
-    it(
-      "isolates dynamic browser acquisition",
-      () => {
-        const ganyan =
-          expertAdapterFor(
-            "ganyan_canavari"
-          );
-
-        const afa =
-          expertAdapterFor(
-            "afa"
-          );
-
-
-        expect(
-          typeof ganyan.acquireHtml
-        ).toBe(
-          "function"
-        );
-
-
-        expect(
-          ganyan.ownsAcquisition?.(
-            "https://www.ganyancanavari.com.tr/site/galoplar-ozet.html"
-          )
-        ).toBe(
-          true
-        );
-
-
-        expect(
-          ganyan.ownsAcquisition?.(
-            "https://www.ganyancanavari.com.tr/haberler/example.html"
-          )
-        ).toBe(
-          false
-        );
-
-
-        expect(
-          typeof afa.acquireHtml
-        ).toBe(
-          "function"
-        );
-
-
-        expect(
-          afa.ownsAcquisition?.(
-            "https://atlarafisildayanadam.com/terminal"
-          )
-        ).toBe(
-          true
         );
       }
     );

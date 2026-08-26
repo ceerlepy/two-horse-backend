@@ -13,43 +13,30 @@ describe(
   "expert adapter boundaries",
   () => {
     it(
-      "keeps stable sources on normal acquisition",
+      "keeps article sources on normal acquisition",
       () => {
-        expect(
-          expertAdapterFor(
-            "liderform"
-          ).acquireHtml
-        ).toBeUndefined();
-
-
-        expect(
-          expertAdapterFor(
-            "horseturk"
-          ).acquireHtml
-        ).toBeUndefined();
-
-
-        expect(
-          expertAdapterFor(
-            "yaris_analizi"
-          ).acquireHtml
-        ).toBeUndefined();
+        for (
+          const source of
+          [
+            "liderform",
+            "horseturk",
+            "yaris_analizi",
+            "afa"
+          ]
+        ) {
+          expect(
+            expertAdapterFor(
+              source
+            ).acquireHtml
+          ).toBeUndefined();
+        }
       }
     );
 
 
     it(
-      "keeps dynamic sites source-owned",
+      "keeps only Ganyan runtime state browser-owned",
       () => {
-        expect(
-          typeof expertAdapterFor(
-            "afa"
-          ).acquireHtml
-        ).toBe(
-          "function"
-        );
-
-
         expect(
           typeof expertAdapterFor(
             "ganyan_canavari"
