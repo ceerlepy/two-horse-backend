@@ -24,10 +24,6 @@ export const istinyeGanyanAdapter:
     resolve(
       context
     ) {
-      /*
-       * Current production never falls into historical
-       * archive discovery.
-       */
       if (
         context.raceDate <
           turkeyDate()
@@ -39,25 +35,13 @@ export const istinyeGanyanAdapter:
               ARCHIVE
             ],
 
-            preferCards:true,
-
-            cardSelectors:[
-              "a[href]",
-              "article",
-              ".post",
-              ".entry",
-              "[class*='post']"
-            ],
-
             verifyTargets:true,
             requireCityCoverage:true,
-
-            allowGeneric:false,
+            allowGeneric:true,
             allowFeed:true
           }
         );
       }
-
 
       return resolveDirectAdapter(
         context

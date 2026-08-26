@@ -37,22 +37,11 @@ export function normalizeExpertHorseName(
     .normalize("NFKC")
     .trim()
     .toLocaleUpperCase("tr-TR")
-
-    /*
-     * TJK may append draw/order metadata:
-     *
-     * BIG HONEY (3)
-     *
-     * Character classes avoid fragile escaped
-     * parenthesis representation.
-     */
     .replace(
       /\s*[(][0-9]+[)]\s*$/u,
       ""
     )
-
     .replace(/\s+/g,"")
-
     .replace(
       /[’'`´".,()_\/\\-]/g,
       ""
@@ -71,10 +60,185 @@ function identityKey(
     number
 ): string {
   return [
-    normalizeCity(city),
+    normalizeCity(
+      city
+    ),
     raceNumber,
     horseNumber
   ].join("|");
+}
+
+
+function sameRaceNameKey(
+  city:
+    string,
+
+  raceNumber:
+    number,
+
+  horseName:
+    string
+): string {
+  return [
+    normalizeCity(
+      city
+    ),
+    raceNumber,
+    normalizeExpertHorseName(
+      horseName
+    )
+  ].join("|");
+}
+
+
+export interface CanonicalExpertRunner {
+  city:
+    string;
+
+  raceNumber:
+    number;
+
+  horseNumber:
+    number;
+
+  horseName:
+    string;
+}
+
+
+export interface ExpertPickIdentity {
+  city:
+    string;
+
+  raceNumber:
+    number;
+
+  horseNumber:
+    number;
+
+  horseName?:
+    string | null;
+}
+
+
+export function resolveCanonicalRunnerForPick(
+  runners:
+    CanonicalExpertRunner[],
+
+  pick:
+    ExpertPickIdentity
+): {
+  runner:
+    CanonicalExpertRunner;
+
+  method:
+    "exact" |
+    "same-race-name";
+} | null {
+  const exact =
+    runners.find(
+      runner =>
+        identityKey(
+          runner.city,
+          runner.raceNumber,
+          runner.horseNumber
+        ) ===
+        identityKey(
+          pick.city,
+          pick.raceNumber,
+          pick.horseNumber
+        )
+    );
+
+
+  const suppliedName =
+    String(
+      pick.horseName ??
+      ""
+    )
+      .trim();
+
+
+  if (exact) {
+    if (!suppliedName) {
+      return {
+        runner:
+          exact,
+
+        method:
+          "exact"
+      };
+    }
+
+
+    if (
+      normalizeExpertHorseName(
+        suppliedName
+      ) ===
+      normalizeExpertHorseName(
+        exact.horseName
+      )
+    ) {
+      return {
+        runner:
+          exact,
+
+        method:
+          "exact"
+      };
+    }
+  }
+
+
+  /*
+   * Deterministic fallback:
+   *
+   * - city may NOT change
+   * - raceNumber may NOT change
+   * - exact normalized horseName must uniquely match
+   *
+   * Only horseNumber can be corrected.
+   */
+  if (!suppliedName) {
+    return null;
+  }
+
+
+  const wanted =
+    sameRaceNameKey(
+      pick.city,
+      pick.raceNumber,
+      suppliedName
+    );
+
+
+  const matches =
+    runners.filter(
+      runner =>
+        sameRaceNameKey(
+          runner.city,
+          runner.raceNumber,
+          runner.horseName
+        ) ===
+        wanted
+    );
+
+
+  if (
+    matches.length !==
+      1
+  ) {
+    return null;
+  }
+
+
+  return {
+    runner:
+      matches[0],
+
+    method:
+      "same-race-name"
+  };
 }
 
 
@@ -154,53 +318,35 @@ export async function validateExpertPicks(
       .all<any>();
 
 
-  const canonical =
-    new Map<
-      string,
-      {
-        city:string;
-        raceNumber:number;
-        horseNumber:number;
-        horseName:string;
-      }
-    >();
+  const runners:
+    CanonicalExpertRunner[] =
+    (
+      rows.results ??
+      []
+    )
+      .map(
+        row => ({
+          city:
+            String(
+              row.city
+            ),
 
+          raceNumber:
+            Number(
+              row.race_number
+            ),
 
-  for (
-    const row of
-    rows.results ??
-    []
-  ) {
-    const runner = {
-      city:
-        String(row.city),
+          horseNumber:
+            Number(
+              row.horse_number
+            ),
 
-      raceNumber:
-        Number(
-          row.race_number
-        ),
-
-      horseNumber:
-        Number(
-          row.horse_number
-        ),
-
-      horseName:
-        String(
-          row.horse_name
-        )
-    };
-
-
-    canonical.set(
-      identityKey(
-        runner.city,
-        runner.raceNumber,
-        runner.horseNumber
-      ),
-      runner
-    );
-  }
+          horseName:
+            String(
+              row.horse_name
+            )
+        })
+      );
 
 
   const output:
@@ -209,75 +355,37 @@ export async function validateExpertPicks(
 
   const writeAnomalies =
     options.writeAnomalies !==
-    false;
+      false;
 
 
-  for (const pick of picks) {
-    const runner =
-      canonical.get(
-        identityKey(
-          pick.city,
-          pick.raceNumber,
-          pick.horseNumber
-        )
+  for (
+    const pick of
+    picks
+  ) {
+    const resolved =
+      resolveCanonicalRunnerForPick(
+        runners,
+        pick
       );
 
 
-    if (!runner) {
+    if (!resolved) {
       if (writeAnomalies) {
         await writeMismatch(
           env,
           raceDate,
           pick,
-          "EXPERT_RUNNER_KEY_NOT_FOUND"
+          "EXPERT_CANONICAL_IDENTITY_NOT_FOUND"
         );
       }
+
 
       continue;
     }
 
 
-    const suppliedName =
-      String(
-        pick.horseName ??
-        ""
-      )
-        .trim();
-
-
-    if (suppliedName) {
-      const sourceName =
-        normalizeExpertHorseName(
-          suppliedName
-        );
-
-
-      const officialName =
-        normalizeExpertHorseName(
-          runner.horseName
-        );
-
-
-      if (
-        sourceName !==
-        officialName
-      ) {
-        if (writeAnomalies) {
-          await writeMismatch(
-            env,
-            raceDate,
-            pick,
-            "EXPERT_HORSE_NAME_MISMATCH",
-            {
-              canonicalHorseName:
-                runner.horseName
-            }
-          );
-        }
-
-        continue;
-      }
-    }
+    const runner =
+      resolved.runner;
 
 
     output.push({

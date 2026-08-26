@@ -334,6 +334,33 @@ function hasAnyTerm(
 }
 
 
+function decodedUrlEvidence(
+  value:
+    string
+): string {
+  try {
+    const url =
+      new URL(
+        value
+      );
+
+    return decodeURIComponent(
+      `${url.pathname} ${url.search}`
+    );
+
+  } catch {
+    try {
+      return decodeURIComponent(
+        value
+      );
+
+    } catch {
+      return value;
+    }
+  }
+}
+
+
 export function candidateEvidence(
   sourceKey:
     string,
@@ -366,7 +393,7 @@ export function candidateEvidence(
 
   const material =
     normalizeExpertSearchText(
-      `${value} ${text}`
+      `${value} ${decodedUrlEvidence(value)} ${text}`
     );
 
 
@@ -380,7 +407,7 @@ export function candidateEvidence(
    */
   const negativeMaterial =
     normalizeExpertSearchText(
-      `${value} ${hardNegativeText ?? text}`
+      `${value} ${decodedUrlEvidence(value)} ${hardNegativeText ?? text}`
     );
 
 

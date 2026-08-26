@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -320,27 +320,26 @@
     },
     "ganyan_canavari": {
       "host": "ganyancanavari.com.tr",
-      "mode": "direct-current-page",
+      "mode": "article",
       "promptProfile": "ganyan-canavari",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
       "entryUrls": [
-        "https://www.ganyancanavari.com.tr/site/yaris-programi.html"
+        "https://www.ganyancanavari.com.tr/haberler/"
       ],
       "navigationLabels": [
-        "Yarış Programı",
-        "Günlük Galoplar",
-        "Galoplar (Özet)"
+        "Haberler",
+        "Galop İncelemesi"
       ],
       "contextBoostTerms": [
-        "En Son Yorumlar",
-        "Banko Gösterilenler"
+        "Galop İncelemesi",
+        "En Son Yorumlar"
       ],
       "preferredPathRules": [
         {
-          "kind": "suffix",
-          "value": "/yaris-programi.html",
-          "score": 5
+          "kind": "contains",
+          "value": "galop-incelemesi",
+          "score": 8
         }
       ],
       "allowYearlessDateEvidence": false,

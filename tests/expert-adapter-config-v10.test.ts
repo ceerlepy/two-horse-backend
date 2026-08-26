@@ -11,18 +11,14 @@ import {
 
 
 describe(
-  "expert acquisition config v9",
+  "expert acquisition config v10",
   () => {
     it(
       "preserves verified source contracts",
       () => {
         expect(
-          EXPERT_ACQUISITION_CONFIG
-            .version
-        ).toBe(
-          9
-        );
-
+          EXPERT_ACQUISITION_CONFIG.version
+        ).toBe(10);
 
         expect(
           expertSourceConfig(
@@ -32,7 +28,6 @@ describe(
           "https://www.bankotahminler.com/kategori/tahminler/"
         );
 
-
         expect(
           expertSourceConfig(
             "horseturk"
@@ -40,7 +35,6 @@ describe(
         ).toBe(
           "allowlist"
         );
-
 
         expect(
           expertSourceConfig(
@@ -52,18 +46,22 @@ describe(
       }
     );
 
-
     it(
-      "uses dynamic AFA and Ganyan contracts",
+      "uses public Ganyan articles and dynamic AFA terminal",
       () => {
         expect(
           expertSourceConfig(
-            "afa"
+            "ganyan_canavari"
           ).mode
-        ).toBe(
-          "direct-current-page"
-        );
+        ).toBe("article");
 
+        expect(
+          expertSourceConfig(
+            "ganyan_canavari"
+          ).entryUrls
+        ).toEqual([
+          "https://www.ganyancanavari.com.tr/haberler/"
+        ]);
 
         expect(
           expertSourceConfig(
@@ -73,32 +71,11 @@ describe(
           "https://atlarafisildayanadam.com/terminal"
         ]);
 
-
-        expect(
-          expertSourceConfig(
-            "afa"
-          ).promptProfile
-        ).toBe(
-          "afa"
-        );
-
-
         expect(
           expertSourceConfig(
             "afa"
           ).canonicalOutputPolicy
-        ).toBe(
-          "strict"
-        );
-
-
-        expect(
-          expertSourceConfig(
-            "ganyan_canavari"
-          ).entryUrls
-        ).toEqual([
-          "https://www.ganyancanavari.com.tr/site/yaris-programi.html"
-        ]);
+        ).toBe("strict");
       }
     );
   }

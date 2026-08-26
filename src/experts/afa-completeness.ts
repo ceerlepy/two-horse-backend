@@ -7,57 +7,93 @@ import {
 } from "./text-normalization";
 
 
-function sourceRaceNumbers(
-  text:
-    string
+function markerRaceNumbers(
+  text:string,
+  targetCities:string[]
+): number[] {
+  const wanted =
+    new Set(
+      targetCities.map(
+        normalizeExpertSearchText
+      )
+    );
+
+  const values =
+    new Set<number>();
+
+  const pattern =
+    /AFA_RACE_CONTEXT\|CITY=([^|\n]+)\|RACE=(\d{1,2})/giu;
+
+  for (
+    const match of
+    text.matchAll(pattern)
+  ) {
+    const city =
+      normalizeExpertSearchText(
+        match[1]
+      );
+
+    const raceNumber =
+      Number(match[2]);
+
+    if (
+      wanted.has(city) &&
+      Number.isInteger(raceNumber) &&
+      raceNumber > 0
+    ) {
+      values.add(raceNumber);
+    }
+  }
+
+  return [...values]
+    .sort((a,b) => a-b);
+}
+
+
+function headingRaceNumbers(
+  text:string
 ): number[] {
   const values =
     new Set<number>();
 
-
-  const pattern =
-    /\b(\d{1,2})\s*\.\s*(?:koşu|kosu)\b/giu;
-
-
   for (
     const match of
     text.matchAll(
-      pattern
+      /\b(\d{1,2})\s*\.\s*(?:koşu|kosu)\b/giu
     )
   ) {
     const value =
-      Number(
-        match[1]
-      );
-
+      Number(match[1]);
 
     if (
-      Number.isInteger(
-        value
-      ) &&
-      value >
-        0 &&
-      value <=
-        30
+      Number.isInteger(value) &&
+      value > 0 &&
+      value <= 30
     ) {
-      values.add(
-        value
-      );
+      values.add(value);
     }
   }
 
+  return [...values]
+    .sort((a,b) => a-b);
+}
 
-  return [
-    ...values
-  ]
-    .sort(
-      (
-        first,
-        second
-      ) =>
-        first -
-        second
-    );
+
+function hasHorseEvidence(
+  race:
+    RawExpertExtraction["races"][number]
+) {
+  return (
+    (race.selections ?? []).length >
+      0 ||
+    (race.numberGroups ?? [])
+      .some(
+        group =>
+          (group.horseNumbers ?? [])
+            .length >
+          0
+      )
+  );
 }
 
 
@@ -71,29 +107,38 @@ export function inspectAfaCompleteness(
   targetCities:
     string[]
 ) {
-  const expected =
-    sourceRaceNumbers(
-      sourceText
+  const markerExpected =
+    markerRaceNumbers(
+      sourceText,
+      targetCities
     );
 
+  const expected =
+    markerExpected.length
+      ? markerExpected
+      : headingRaceNumbers(
+          sourceText
+        );
 
   const normalizedCities =
-    targetCities.map(
-      normalizeExpertSearchText
+    new Set(
+      targetCities.map(
+        normalizeExpertSearchText
+      )
     );
-
 
   const actual =
     [
-      ...new Set(
+      ...new Set<number>(
         raw.races
           .filter(
             race =>
-              normalizedCities.includes(
+              normalizedCities.has(
                 normalizeExpertSearchText(
                   race.city
                 )
-              )
+              ) &&
+              hasHorseEvidence(race)
           )
           .map(
             race =>
@@ -102,24 +147,13 @@ export function inspectAfaCompleteness(
               )
           )
           .filter(
-            raceNumber =>
-              Number.isInteger(
-                raceNumber
-              ) &&
-              raceNumber >
-                0
+            value =>
+              Number.isInteger(value) &&
+              value > 0
           )
       )
     ]
-      .sort(
-        (
-          first,
-          second
-        ) =>
-          first -
-          second
-      );
-
+      .sort((a,b) => a-b);
 
   const missing =
     expected.filter(
@@ -129,13 +163,10 @@ export function inspectAfaCompleteness(
         )
     );
 
-
   return {
     complete:
-      expected.length >
-        0 &&
-      missing.length ===
-        0,
+      expected.length > 0 &&
+      missing.length === 0,
 
     expected,
     actual,

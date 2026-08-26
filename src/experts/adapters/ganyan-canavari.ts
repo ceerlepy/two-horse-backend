@@ -1,19 +1,11 @@
 import {
-  acquireGanyanBrowserSession
-} from "./browser-session";
-
-import {
-  cityScopedResolution,
-  sameExternalPage
-} from "./target-scope";
+  acquireGanyanGalopArticle,
+  resolveGanyanGalopArticles
+} from "./ganyan-article";
 
 import type {
   ExpertAdapter
 } from "./types";
-
-
-const PROGRAM =
-  "https://www.ganyancanavari.com.tr/site/yaris-programi.html";
 
 
 export const ganyanCanavariAdapter:
@@ -21,40 +13,45 @@ export const ganyanCanavariAdapter:
     sourceKey:
       "ganyan_canavari",
 
-
-    async resolve(
+    resolve(
       context
     ) {
-      /*
-       * Use requested-date/requested-city runtime comments.
-       *
-       * Do not treat protected Galop Incelemesi articles or
-       * generic "dikkat edilmesi gerekenler" pages as the
-       * source's expert-selection document.
-       */
-      return cityScopedResolution(
-        PROGRAM,
-        context.cities,
-        "direct-current-page",
-        "browser-session-date-city-comments"
+      return resolveGanyanGalopArticles(
+        context
       );
     },
-
 
     ownsAcquisition(
       url
     ) {
-      return sameExternalPage(
-        url,
-        PROGRAM
-      );
-    },
+      try {
+        const material =
+          decodeURIComponent(
+            new URL(url)
+              .pathname
+          )
+            .toLocaleLowerCase(
+              "tr-TR"
+            );
 
+        return (
+          material.includes(
+            "/haber-detay/"
+          ) &&
+          material.includes(
+            "galop-incelemesi"
+          )
+        );
+
+      } catch {
+        return false;
+      }
+    },
 
     acquireHtml(
       context
     ) {
-      return acquireGanyanBrowserSession(
+      return acquireGanyanGalopArticle(
         context
       );
     }

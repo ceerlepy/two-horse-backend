@@ -25,33 +25,18 @@ export const bankoTahminlerAdapter:
     resolve(
       context
     ) {
-      /*
-       * HTTP and RSS currently return 403.
-       * Browser-rendered /tahminler/ anchors are the source
-       * contract.
-       */
       return resolveArticleAdapter(
         context,
         {
           landingUrls:[
+            CATEGORY,
             ROOT,
-            MOBILE,
-            CATEGORY
-          ],
-
-          preferCards:true,
-
-          cardSelectors:[
-            "a[href*='/tahminler/']",
-            "article",
-            ".post",
-            "[class*='post']"
+            MOBILE
           ],
 
           verifyTargets:true,
           requireCityCoverage:true,
-
-          allowGeneric:false,
+          allowGeneric:true,
           allowFeed:false
         }
       );

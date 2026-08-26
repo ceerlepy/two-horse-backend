@@ -1,6 +1,6 @@
 import {
   acquireAfaBrowserSession
-} from "./browser-session";
+} from "./afa-browser-session";
 
 import {
   cityScopedResolution,
@@ -21,24 +21,16 @@ export const afaAdapter:
     sourceKey:
       "afa",
 
-
     async resolve(
       context
     ) {
-      /*
-       * One target represents one city's complete daily AFA
-       * bulletin.
-       *
-       * We never click 1.Kosu, 2.Kosu, ... individually.
-       */
       return cityScopedResolution(
         TERMINAL,
         context.cities,
         "direct-current-page",
-        "browser-session-city-daily-bulletin"
+        "browser-session-city-race-panels"
       );
     },
-
 
     ownsAcquisition(
       url
@@ -48,7 +40,6 @@ export const afaAdapter:
         TERMINAL
       );
     },
-
 
     acquireHtml(
       context

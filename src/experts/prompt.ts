@@ -79,25 +79,32 @@ dönüştürme.
       return `
 AFA ÖZEL KURALI
 
-SOURCE DATA tek bir HEDEF TJK ŞEHRİ için günlük yarış öncesi
-AFA Bülten ve Kupon Analizi makalesidir.
+SOURCE DATA tek bir HEDEF TJK ŞEHRİ için hazırlanmış race-panel
+context bloklarından oluşur.
 
-Bu tek makale o şehir için analiz edilen tüm koşuları birlikte
-içerir.
+Her blok şu marker ile başlar:
 
-Açık "1. Koşu", "2. Koşu", "7. Koşu" gibi başlıklar gerçek
-raceNumber evidence'ıdır.
+AFA_RACE_CONTEXT|CITY=<şehir>|RACE=<resmi koşu no>
 
-Her koşuda AFA'nın açık favori, rakip, sürpriz, banko, tek,
-güçlü aday ve "bu ayağı ... yazarak geçmenizi öneriyor"
-ifadelerini horse identity ile birlikte koru.
+ve AFA_RACE_CONTEXT_END ile biter.
 
-Geçmiş kupon, sonuç, ikramiye, reklam veya başka şehir
-içeriğini current prediction sayma.
+Marker içindeki CITY ve RACE adapter tarafından deterministik
+olarak bilinmektedir ve AUTHORITATIVE context'tir.
+
+Marker raceNumber'ını yeniden tahmin etme, değiştirme veya başka
+bir koşuya taşıma.
+
+Her blok yalnız seçili koşunun AFA analiz panelidir.
+
+Panel içindeki gerçek horseNumber + horseName + favori/rakip/
+sürpriz/banko/tek/güçlü aday ve yorum evidence'ını çıkar.
+
+Race butonlarını, başka koşu context'ini, sonuç/ikramiye/reklam
+metnini selection sayma.
+
+Bir horse identity uydurma.
 
 Aynı city + raceNumber + horse identity için duplicate üretme.
-
-Race veya horse identity uydurma.
 `.trim();
 
 
