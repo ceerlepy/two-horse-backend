@@ -1,17 +1,19 @@
 import {
-  resolveArticleAdapter
-} from "./common";
+  acquireAfaBrowserSession
+} from "./browser-session";
+
+import {
+  cityScopedResolution,
+  sameExternalPage
+} from "./target-scope";
 
 import type {
   ExpertAdapter
 } from "./types";
 
 
-const ROOT =
-  "https://atlarafisildayanadam.com/";
-
-const NEWS =
-  "https://atlarafisildayanadam.com/haberler/";
+const TERMINAL =
+  "https://atlarafisildayanadam.com/terminal";
 
 
 export const afaAdapter:
@@ -20,40 +22,39 @@ export const afaAdapter:
       "afa",
 
 
-    resolve(
+    async resolve(
       context
     ) {
       /*
-       * AFA publishes one daily pre-race analysis article
-       * per city.
+       * One target represents one city's complete daily AFA
+       * bulletin.
        *
-       * One city article -> one AI extraction.
-       * No race-by-race browser clicking.
+       * We never click 1.Kosu, 2.Kosu, ... individually.
        */
-      return resolveArticleAdapter(
-        context,
-        {
-          landingUrls:[
-            ROOT,
-            NEWS
-          ],
+      return cityScopedResolution(
+        TERMINAL,
+        context.cities,
+        "direct-current-page",
+        "browser-session-city-daily-bulletin"
+      );
+    },
 
-          preferCards:true,
 
-          cardSelectors:[
-            "a[href*='/haberler/']",
-            "article",
-            "[class*='haber']",
-            "[class*='post']",
-            "[class*='card']"
-          ],
+    ownsAcquisition(
+      url
+    ) {
+      return sameExternalPage(
+        url,
+        TERMINAL
+      );
+    },
 
-          verifyTargets:true,
-          requireCityCoverage:true,
 
-          allowGeneric:false,
-          allowFeed:false
-        }
+    acquireHtml(
+      context
+    ) {
+      return acquireAfaBrowserSession(
+        context
       );
     }
   };

@@ -5,15 +5,15 @@ import {
 } from "vitest";
 
 import {
-  extractSourceCardCandidatesFromHtml
+  extractAnchorCandidates
 } from "../src/experts/adapters/card-discovery";
 
 
 describe(
-  "source-local card discovery",
+  "bounded source anchor discovery",
   () => {
     it(
-      "keeps current Yaris Dergisi article and rejects stale sibling",
+      "rejects stale Yaris Dergisi sibling",
       () => {
         const current =
           "https://www.yarisdergisi.com/cix-life-bankom-kocaeli25826-cetin-gokduman/";
@@ -22,30 +22,13 @@ describe(
           "https://www.yarisdergisi.com/eski-bankom-kocaeli18826/";
 
 
-        const html = `
-          <article>
-            <a href="${current}">
-              CIX LIFE Bankom Kocaeli 25 Ağustos 2026
-            </a>
-          </article>
-
-          <article>
-            <a href="${stale}">
-              Eski Bankom Kocaeli 18 Ağustos 2026
-            </a>
-          </article>
-        `;
-
-
         const urls =
-          extractSourceCardCandidatesFromHtml({
+          extractAnchorCandidates({
             sourceKey:
               "yaris_dergisi",
 
             landingUrl:
-              "https://www.yarisdergisi.com/tag/yaris-tahminleri/",
-
-            html,
+              "https://www.yarisdergisi.com/",
 
             raceDate:
               "2026-08-25",
@@ -55,13 +38,26 @@ describe(
               "Kocaeli"
             ],
 
-            selectors:[
-              "article"
+            anchors:[
+              {
+                href:
+                  current,
+
+                text:
+                  "25 Ağustos 2026 CIX LIFE Bankom Kocaeli"
+              },
+              {
+                href:
+                  stale,
+
+                text:
+                  "18 Ağustos 2026 Eski Bankom Kocaeli"
+              }
             ]
           })
             .map(
-              item =>
-                item.url
+              value =>
+                value.url
             );
 
 
@@ -82,30 +78,19 @@ describe(
 
 
     it(
-      "finds rendered Banko tahmin anchor",
+      "accepts Banko target URL",
       () => {
-        const current =
+        const url =
           "https://www.bankotahminler.com/tahminler/25-agustos-ankara-tahminleri-stalingrad/";
 
 
-        const html = `
-          <article>
-            <a href="${current}">
-              25 Ağustos Ankara Tahminleri STALINGRAD
-            </a>
-          </article>
-        `;
-
-
-        const urls =
-          extractSourceCardCandidatesFromHtml({
+        const result =
+          extractAnchorCandidates({
             sourceKey:
               "banko_tahminler",
 
             landingUrl:
               "https://www.bankotahminler.com/",
-
-            html,
 
             raceDate:
               "2026-08-25",
@@ -115,21 +100,72 @@ describe(
               "Kocaeli"
             ],
 
-            selectors:[
-              "article",
-              "a[href*='/tahminler/']"
+            anchors:[
+              {
+                href:
+                  url,
+
+                text:
+                  "25 Ağustos Ankara Tahminleri STALINGRAD"
+              }
             ]
-          })
-            .map(
-              item =>
-                item.url
-            );
+          });
 
 
         expect(
-          urls
+          result.map(
+            value =>
+              value.url
+          )
         ).toContain(
-          current
+          url
+        );
+      }
+    );
+
+
+    it(
+      "accepts Istinye historical target URL",
+      () => {
+        const url =
+          "https://istinyeganyan.com/25-agustos-sali-ankara-altili-ganyan-tahminleri/";
+
+
+        const result =
+          extractAnchorCandidates({
+            sourceKey:
+              "istinye_ganyan",
+
+            landingUrl:
+              "https://istinyeganyan.com/kategori/at-yarisi/",
+
+            raceDate:
+              "2026-08-25",
+
+            cities:[
+              "Ankara",
+              "Kocaeli"
+            ],
+
+            anchors:[
+              {
+                href:
+                  url,
+
+                text:
+                  "25 Ağustos Salı Ankara Altılı Ganyan Tahminleri"
+              }
+            ]
+          });
+
+
+        expect(
+          result.map(
+            value =>
+              value.url
+          )
+        ).toContain(
+          url
         );
       }
     );

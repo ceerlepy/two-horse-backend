@@ -1,16 +1,4 @@
 import {
-  load
-} from "cheerio";
-
-import {
-  EXPERT_ACQUISITION_CONFIG
-} from "../../config/expert-acquisition";
-
-import {
-  acquireExpertHtmlStage
-} from "../acquisition-fallback";
-
-import {
   candidateEvidence
 } from "../discovery";
 
@@ -23,21 +11,30 @@ import {
   normalizeExpertSearchText
 } from "../text-normalization";
 
-import {
-  selectExpertCandidateUrlsWithWorkersAi
-} from "../workers-ai-discovery";
-
-import type {
-  DiscoveryCandidateInput
-} from "../workers-ai-discovery";
-
 import type {
   ExpertAdapterContext
 } from "./types";
 
 
-export interface SourceCardCandidate
-  extends DiscoveryCandidateInput {
+export interface RawAnchorCandidate {
+  href:
+    string;
+
+  text:
+    string;
+}
+
+
+export interface SourceCardCandidate {
+  url:
+    string;
+
+  text:
+    string;
+
+  score:
+    number;
+
   matchedCities:
     string[];
 }
@@ -123,20 +120,23 @@ function coverageComplete(
 
 
 /*
- * Positive evidence is bounded to THIS card.
- * Date + city must also exist in anchor/permalink identity.
+ * IMPORTANT:
  *
- * No page-level evidence can leak into a stale sibling link.
+ * Discovery evidence is restricted to:
+ *   - candidate href
+ *   - candidate anchor text
+ *
+ * We intentionally do not use page/global ancestor text here.
+ *
+ * This prevents a current-date page from donating its
+ * date/city evidence to an old Yaris Dergisi article.
  */
-export function extractSourceCardCandidatesFromHtml(
+export function extractAnchorCandidates(
   input:{
     sourceKey:
       string;
 
     landingUrl:
-      string;
-
-    html:
       string;
 
     raceDate:
@@ -145,16 +145,10 @@ export function extractSourceCardCandidatesFromHtml(
     cities:
       string[];
 
-    selectors:
-      string[];
+    anchors:
+      RawAnchorCandidate[];
   }
 ): SourceCardCandidate[] {
-  const $ =
-    load(
-      input.html
-    );
-
-
   const byUrl =
     new Map<
       string,
@@ -162,192 +156,84 @@ export function extractSourceCardCandidatesFromHtml(
     >();
 
 
-  const consider =
-    (
-      rawHref:
-        string | undefined,
-
-      cardText:
-        string,
-
-      identityText:
-        string
-    ) => {
-      if (!rawHref) {
-        return;
-      }
-
-
-      const url =
-        normalizeUrl(
-          input.landingUrl,
-          rawHref
-        );
-
-
-      if (
-        !url ||
-        !isAllowedDiscoveredArticleUrl(
-          input.sourceKey,
-          url
-        )
-      ) {
-        return;
-      }
-
-
-      const boundedCard =
-        cleanExpertInlineText(
-          cardText,
-          2400
-        );
-
-
-      const boundedIdentity =
-        cleanExpertInlineText(
-          identityText,
-          1000
-        );
-
-
-      const cardEvidence =
-        candidateEvidence(
-          input.sourceKey,
-          url,
-          boundedCard,
-          input.raceDate,
-          input.cities,
-          boundedIdentity
-        );
-
-
-      const identityEvidence =
-        candidateEvidence(
-          input.sourceKey,
-          url,
-          boundedIdentity,
-          input.raceDate,
-          input.cities,
-          boundedIdentity
-        );
-
-
-      if (
-        !cardEvidence.hasDate ||
-        !cardEvidence.hasCity ||
-        !cardEvidence
-          .hasPredictionLanguage ||
-        cardEvidence
-          .hasNegativeLanguage ||
-        !identityEvidence.hasDate ||
-        !identityEvidence.hasCity
-      ) {
-        return;
-      }
-
-
-      const score =
-        cardEvidence.score +
-        Math.max(
-          0,
-          identityEvidence.score
-        );
-
-
-      const previous =
-        byUrl.get(
-          url
-        );
-
-
-      if (
-        !previous ||
-        score >
-          previous.score
-      ) {
-        byUrl.set(
-          url,
-          {
-            url,
-
-            text:
-              boundedCard,
-
-            score,
-
-            matchedCities:
-              cardEvidence
-                .matchedCities
-          }
-        );
-      }
-    };
-
-
   for (
-    const selector of
-    input.selectors
+    const anchor of
+    input.anchors
   ) {
-    $(selector)
-      .each(
-        (
-          _index,
-          element
-        ) => {
-          const node =
-            $(
-              element
-            );
+    const url =
+      normalizeUrl(
+        input.landingUrl,
+        anchor.href
+      );
 
 
-          const cardText =
-            cleanExpertInlineText(
-              node.text(),
-              2400
-            );
+    if (
+      !url ||
+      !isAllowedDiscoveredArticleUrl(
+        input.sourceKey,
+        url
+      )
+    ) {
+      continue;
+    }
 
 
-          if (
-            node.is(
-              "a[href]"
-            )
-          ) {
-            consider(
-              node.attr(
-                "href"
-              ),
-              cardText,
-              node.text()
-            );
-          }
+    const text =
+      cleanExpertInlineText(
+        anchor.text,
+        1200
+      );
 
 
-          node
-            .find(
-              "a[href]"
-            )
-            .each(
-              (
-                _anchorIndex,
-                anchorElement
-              ) => {
-                const anchor =
-                  $(
-                    anchorElement
-                  );
+    const evidence =
+      candidateEvidence(
+        input.sourceKey,
+        url,
+        text,
+        input.raceDate,
+        input.cities,
+        text
+      );
 
 
-                consider(
-                  anchor.attr(
-                    "href"
-                  ),
-                  cardText,
-                  anchor.text()
-                );
-              }
-            );
+    if (
+      !evidence.hasDate ||
+      !evidence.hasCity ||
+      !evidence
+        .hasPredictionLanguage ||
+      evidence
+        .hasNegativeLanguage
+    ) {
+      continue;
+    }
+
+
+    const previous =
+      byUrl.get(
+        url
+      );
+
+
+    if (
+      !previous ||
+      evidence.score >
+        previous.score
+    ) {
+      byUrl.set(
+        url,
+        {
+          url,
+          text,
+
+          score:
+            evidence.score,
+
+          matchedCities:
+            evidence
+              .matchedCities
         }
       );
+    }
   }
 
 
@@ -364,8 +250,109 @@ export function extractSourceCardCandidatesFromHtml(
     )
     .slice(
       0,
-      50
+      80
     );
+}
+
+
+function resultGroups(
+  raw:
+    any
+): any[] {
+  const payload =
+    (
+      raw &&
+      typeof raw ===
+        "object" &&
+      "result" in raw
+    )
+      ? raw.result
+      : raw;
+
+
+  return Array.isArray(
+    payload
+  )
+    ? payload
+    : [];
+}
+
+
+function anchorsFromScrape(
+  raw:
+    any
+): RawAnchorCandidate[] {
+  const output:
+    RawAnchorCandidate[] = [];
+
+
+  for (
+    const group of
+    resultGroups(
+      raw
+    )
+  ) {
+    const values =
+      Array.isArray(
+        group?.results
+      )
+        ? group.results
+        : [];
+
+
+    for (
+      const value of
+      values
+    ) {
+      const attributes =
+        Array.isArray(
+          value?.attributes
+        )
+          ? value.attributes
+          : [];
+
+
+      const hrefAttribute =
+        attributes.find(
+          (
+            attribute:any
+          ) =>
+            String(
+              attribute?.name ??
+              ""
+            )
+              .toLowerCase() ===
+            "href"
+        );
+
+
+      const href =
+        hrefAttribute?.value
+          ? String(
+              hrefAttribute.value
+            )
+          : "";
+
+
+      if (!href) {
+        continue;
+      }
+
+
+      output.push({
+        href,
+
+        text:
+          String(
+            value?.text ??
+            ""
+          )
+      });
+    }
+  }
+
+
+  return output;
 }
 
 
@@ -379,236 +366,124 @@ export async function discoverSourceCards(
   selectors:
     string[]
 ) {
-  const byUrl =
-    new Map<
-      string,
-      SourceCardCandidate
-    >();
-
-
-  const stages:
-    any[] = [];
-
-
   /*
-   * Reuse the hardened HTML acquisition boundary.
-   * This module never decodes Browser Run scrape envelopes.
+   * Cloudflare /scrape returns the actual outer element
+   * attributes, including href.
+   *
+   * This avoids the old body-innerHTML problem where the
+   * anchor itself disappeared and Cheerio saw zero links.
    */
-  for (
-    const stage of
-    EXPERT_ACQUISITION_CONFIG
-      .extraction
-      .acquisitionOrder
-  ) {
-    try {
-      const acquired =
-        await acquireExpertHtmlStage(
-          context.env,
-          landingUrl,
-          stage
-        );
-
-
-      const found =
-        extractSourceCardCandidatesFromHtml({
-          sourceKey:
-            context
-              .source
-              .source_key,
-
+  const response =
+    await context.env.BROWSER.quickAction(
+      "scrape",
+      {
+        url:
           landingUrl,
 
-          html:
-            acquired.html,
+        elements:[
+          {
+            selector:
+              "a[href]"
+          }
+        ],
 
-          raceDate:
-            context.raceDate,
+        gotoOptions:{
+          waitUntil:
+            "networkidle2",
 
-          cities:
-            context.cities,
-
-          selectors
-        });
-
-
-      let added=0;
-
-
-      for (
-        const candidate of
-        found
-      ) {
-        const old =
-          byUrl.get(
-            candidate.url
-          );
-
-
-        if (
-          !old ||
-          candidate.score >
-            old.score
-        ) {
-          byUrl.set(
-            candidate.url,
-            candidate
-          );
-
-          added++;
+          timeout:
+            30_000
         }
-      }
+      } as any
+    );
 
 
-      const accumulated =
-        [
-          ...byUrl.values()
-        ];
-
-
-      stages.push({
-        stage,
-
-        bodyLength:
-          acquired.bodyLength,
-
-        parsedCandidates:
-          found.length,
-
-        addedCandidates:
-          added,
-
-        accumulatedCandidates:
-          accumulated.length,
-
-        coverageComplete:
-          coverageComplete(
-            accumulated,
-            context.cities
-          )
-      });
-
-
-      if (
-        coverageComplete(
-          accumulated,
-          context.cities
-        )
-      ) {
-        break;
-      }
-
-    } catch(error) {
-      stages.push({
-        stage,
-
-        error:
-          error instanceof Error
-            ? error.message
-            : String(
-                error
-              )
-      });
-    }
+  if (!response.ok) {
+    throw new Error(
+      `ADAPTER_ANCHOR_SCRAPE_HTTP_${response.status}`
+    );
   }
+
+
+  const raw:any =
+    await response.json();
+
+
+  const anchors =
+    anchorsFromScrape(
+      raw
+    );
 
 
   const candidates =
-    [
-      ...byUrl.values()
-    ]
-      .sort(
-        (
-          first,
-          second
-        ) =>
-          second.score -
-          first.score
-      )
-      .slice(
-        0,
-        50
-      );
+    extractAnchorCandidates({
+      sourceKey:
+        context
+          .source
+          .source_key,
 
+      landingUrl,
 
-  if (!candidates.length) {
-    return {
-      urls:[],
+      raceDate:
+        context.raceDate,
 
-      diagnostics:{
-        landingUrl,
-        selectors,
+      cities:
+        context.cities,
 
-        candidateCount:
-          0,
-
-        stages,
-
-        ai:null
-      }
-    };
-  }
-
-
-  const semantic =
-    await selectExpertCandidateUrlsWithWorkersAi(
-      context.env,
-      {
-        sourceName:
-          context
-            .source
-            .source_name,
-
-        raceDate:
-          context.raceDate,
-
-        cities:
-          context.cities,
-
-        candidates
-      }
-    );
-
-
-  const allowed =
-    new Set(
-      candidates.map(
-        candidate =>
-          candidate.url
-      )
-    );
-
-
-  const urls =
-    [
-      ...new Set(
-        semantic.urls
-          .filter(
-            url =>
-              allowed.has(
-                url
-              )
-          )
-      )
-    ];
+      anchors
+    });
 
 
   return {
-    urls,
+    urls:
+      candidates.map(
+        candidate =>
+          candidate.url
+      ),
 
     diagnostics:{
       landingUrl,
-      selectors,
+
+      requestedSelectors:
+        selectors,
+
+      actualSelector:
+        "a[href]",
+
+      scrapedAnchors:
+        anchors.length,
 
       candidateCount:
         candidates.length,
 
-      selected:
-        urls,
+      coverageComplete:
+        coverageComplete(
+          candidates,
+          context.cities
+        ),
 
-      stages,
+      candidates:
+        candidates.map(
+          candidate => ({
+            url:
+              candidate.url,
 
-      ai:
-        semantic.diagnostics
+            score:
+              candidate.score,
+
+            matchedCities:
+              candidate
+                .matchedCities,
+
+            text:
+              candidate
+                .text
+                .slice(
+                  0,
+                  300
+                )
+          })
+        )
     }
   };
 }

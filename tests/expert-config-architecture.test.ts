@@ -83,7 +83,7 @@ describe(
             .entryUrls[0]
         )
           .toBe(
-            "https://atlarafisildayanadam.com/"
+            "https://atlarafisildayanadam.com/terminal"
           );
       }
     );

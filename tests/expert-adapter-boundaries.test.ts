@@ -13,15 +13,14 @@ describe(
   "expert adapter boundaries",
   () => {
     it(
-      "keeps article sources on normal acquisition",
+      "keeps static article sources browser-free",
       () => {
         for (
           const source of
           [
             "liderform",
             "horseturk",
-            "yaris_analizi",
-            "afa"
+            "yaris_analizi"
           ]
         ) {
           expect(
@@ -35,11 +34,20 @@ describe(
 
 
     it(
-      "keeps only Ganyan runtime state browser-owned",
+      "keeps dynamic runtime sources browser-owned",
       () => {
         expect(
           typeof expertAdapterFor(
             "ganyan_canavari"
+          ).acquireHtml
+        ).toBe(
+          "function"
+        );
+
+
+        expect(
+          typeof expertAdapterFor(
+            "afa"
           ).acquireHtml
         ).toBe(
           "function"

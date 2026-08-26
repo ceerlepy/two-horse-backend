@@ -511,7 +511,7 @@ export async function resolveArticleAdapter(
         const ready =
           await tryAccepted(
             cards.urls,
-            "adapter-card-workers-ai-selection",
+            "adapter-card-bounded-anchor-selection",
             landingUrl,
             cards.diagnostics
           );

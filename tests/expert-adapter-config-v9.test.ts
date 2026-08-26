@@ -14,7 +14,7 @@ describe(
   "expert acquisition config v9",
   () => {
     it(
-      "preserves verified static contracts",
+      "preserves verified source contracts",
       () => {
         expect(
           EXPERT_ACQUISITION_CONFIG
@@ -54,15 +54,24 @@ describe(
 
 
     it(
-      "uses article AFA and dynamic Ganyan contracts",
+      "uses dynamic AFA and Ganyan contracts",
       () => {
         expect(
           expertSourceConfig(
             "afa"
           ).mode
         ).toBe(
-          "article"
+          "direct-current-page"
         );
+
+
+        expect(
+          expertSourceConfig(
+            "afa"
+          ).entryUrls
+        ).toEqual([
+          "https://atlarafisildayanadam.com/terminal"
+        ]);
 
 
         expect(

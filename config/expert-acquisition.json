@@ -348,30 +348,24 @@
     },
     "afa": {
       "host": "atlarafisildayanadam.com",
-      "mode": "article",
+      "mode": "direct-current-page",
       "promptProfile": "afa",
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
       "entryUrls": [
-        "https://atlarafisildayanadam.com/",
-        "https://atlarafisildayanadam.com/haberler/"
+        "https://atlarafisildayanadam.com/terminal"
       ],
       "navigationLabels": [
         "Bülten ve Analiz",
-        "Yarış Öncesi",
-        "Analizi Oku"
+        "Bülten",
+        "Analiz"
       ],
       "contextBoostTerms": [],
-      "preferredPathRules": [
-        {
-          "kind": "prefix",
-          "value": "/haberler/",
-          "score": 5
-        }
-      ],
+      "preferredPathRules": [],
       "allowYearlessDateEvidence": false,
       "excludedCandidateTerms": [],
-      "canonicalOutputPolicy": "strict"
+      "canonicalOutputPolicy": "strict",
+      "directPageDatePolicy": "target-date"
     }
   }
 }

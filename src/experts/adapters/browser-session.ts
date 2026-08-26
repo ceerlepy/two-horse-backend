@@ -44,6 +44,17 @@ function htmlEscape(
 }
 
 
+function escapeRegex(
+  value:
+    string
+): string {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
+
+
 function ddmmyyyy(
   iso:
     string
@@ -61,6 +72,31 @@ function ddmmyyyy(
     month,
     year
   ].join(".");
+}
+
+
+async function launchBrowser(
+  context:
+    ExpertAcquireContext
+) {
+  return puppeteer.launch(
+    context.env.BROWSER as any
+  );
+}
+
+
+async function bodyText(
+  page:
+    any
+): Promise<string> {
+  return String(
+    await page.evaluate(
+      () =>
+        document.body
+          ?.innerText ??
+        ""
+    )
+  );
 }
 
 
@@ -151,6 +187,7 @@ async function setDateInput(
           )
         );
 
+
         input.dispatchEvent(
           new Event(
             "change",
@@ -159,6 +196,7 @@ async function setDateInput(
             }
           )
         );
+
 
         input.blur();
 
@@ -192,7 +230,7 @@ async function setDateInput(
 }
 
 
-async function selectCity(
+async function activateCity(
   page:
     any,
 
@@ -226,6 +264,7 @@ async function selectCity(
               .replace(/Ş/g,"S")
               .replace(/Ö/g,"O")
               .replace(/Ç/g,"C")
+              .replace(/[^A-Z0-9]+/g," ")
               .replace(/\s+/g," ")
               .trim();
 
@@ -236,6 +275,9 @@ async function selectCity(
           );
 
 
+        /*
+         * First preference: actual city <select>.
+         */
         const selects =
           Array.from(
             document.querySelectorAll(
@@ -296,6 +338,7 @@ async function selectCity(
             )
           );
 
+
           select.dispatchEvent(
             new Event(
               "change",
@@ -308,14 +351,63 @@ async function selectCity(
 
           return JSON.stringify({
             ok:true,
+            method:
+              "select",
+
             text:
               option.textContent
           });
         }
 
 
+        /*
+         * AFA may expose city as a tab/button/card.
+         */
+        const clickables =
+          Array.from(
+            document.querySelectorAll(
+              [
+                "button",
+                "a",
+                "[role='button']",
+                "[role='tab']",
+                "label",
+                "li"
+              ].join(",")
+            )
+          ) as HTMLElement[];
+
+
+        const clickable =
+          clickables.find(
+            node =>
+              fold(
+                node.innerText ??
+                node.textContent
+              ) ===
+                target
+          );
+
+
+        if (clickable) {
+          clickable.click();
+
+
+          return JSON.stringify({
+            ok:true,
+            method:
+              "click",
+
+            text:
+              clickable.innerText ??
+              clickable.textContent
+          });
+        }
+
+
         return JSON.stringify({
-          ok:false
+          ok:false,
+          method:null
         });
       },
       city
@@ -330,168 +422,10 @@ async function selectCity(
 }
 
 
-async function commentsSection(
-  page:
-    any,
-
-  city:
-    string
-): Promise<string> {
-  return String(
-    await page.evaluate(
-      (
-        wantedCity:
-          string
-      ) => {
-        const fold =
-          (
-            value:
-              unknown
-          ) =>
-            String(
-              value ??
-              ""
-            )
-              .normalize(
-                "NFKC"
-              )
-              .toLocaleUpperCase(
-                "tr-TR"
-              )
-              .replace(/[İIıi]/g,"I")
-              .replace(/Ğ/g,"G")
-              .replace(/Ü/g,"U")
-              .replace(/Ş/g,"S")
-              .replace(/Ö/g,"O")
-              .replace(/Ç/g,"C")
-              .replace(/\s+/g," ")
-              .trim();
-
-
-        const cityText =
-          fold(
-            wantedCity
-          );
-
-
-        const nodes =
-          Array.from(
-            document.querySelectorAll(
-              [
-                "section",
-                "article",
-                "main",
-                "div"
-              ].join(",")
-            )
-          ) as HTMLElement[];
-
-
-        const candidates =
-          nodes
-            .map(
-              node => {
-                const text =
-                  String(
-                    node.innerText ??
-                    node.textContent ??
-                    ""
-                  )
-                    .replace(
-                      /\s+/g,
-                      " "
-                    )
-                    .trim();
-
-
-                if (
-                  text.length <
-                    180 ||
-                  text.length >
-                    18000
-                ) {
-                  return null;
-                }
-
-
-                const normalized =
-                  fold(
-                    text
-                  );
-
-
-                const commentsHeading =
-                  normalized.includes(
-                    "EN SON YORUMLAR"
-                  );
-
-
-                const cityHit =
-                  normalized.includes(
-                    cityText
-                  );
-
-
-                const commentHits =
-                  (
-                    normalized.match(
-                      /TARAFINDAN\s+\d+\s+KOSUDA/g
-                    ) ??
-                    []
-                  )
-                    .length;
-
-
-                if (
-                  !commentsHeading ||
-                  !cityHit ||
-                  commentHits <
-                    1
-                ) {
-                  return null;
-                }
-
-
-                return {
-                  text,
-                  commentHits
-                };
-              }
-            )
-            .filter(
-              (
-                value
-              ): value is {
-                text:string;
-                commentHits:number;
-              } =>
-                Boolean(
-                  value
-                )
-            )
-            .sort(
-              (
-                first,
-                second
-              ) =>
-                second.commentHits -
-                  first.commentHits ||
-                first.text.length -
-                  second.text.length
-            );
-
-
-        return candidates[0]
-          ?.text ??
-          "";
-      },
-      city
-    )
-  );
-}
-
-
 function wrapDocument(
+  source:
+    string,
+
   raceDate:
     string,
 
@@ -503,7 +437,7 @@ function wrapDocument(
 ): string {
   const payload =
     [
-      "TWOHORSE SOURCE: GANYAN CANAVARI",
+      `TWOHORSE SOURCE: ${source}`,
       `TWOHORSE TARGET DATE: ${raceDate}`,
       `TWOHORSE TARGET CITY: ${city}`,
       "",
@@ -526,6 +460,313 @@ function wrapDocument(
     "</body>",
     "</html>"
   ].join("");
+}
+
+
+/*
+ * Real public Ganyan format:
+ *
+ *   kullanıcı tarafından 8. koşuda (4)AT ADI için yazıldı
+ *
+ * The "." after race number is required source syntax and was
+ * exactly what the previous parser missed.
+ */
+export function extractGanyanCommentsSection(
+  text:
+    string,
+
+  city:
+    string
+): string | null {
+  const cityHeading =
+    new RegExp(
+      `${escapeRegex(city)}\\s+En\\s+Son\\s+Yorumlar`,
+      "iu"
+    );
+
+
+  const heading =
+    cityHeading.exec(
+      text
+    );
+
+
+  if (
+    !heading ||
+    heading.index ===
+      undefined
+  ) {
+    return null;
+  }
+
+
+  const tail =
+    text.slice(
+      heading.index
+    );
+
+
+  let end =
+    tail.length;
+
+
+  for (
+    const marker of
+    [
+      /Tüm\s+Yorumları\s+Gör/iu,
+      /Takı\s+Değişiklikleri/iu,
+      /Şehir\s+Değişiklikleri/iu
+    ]
+  ) {
+    const hit =
+      marker.exec(
+        tail
+      );
+
+
+    if (
+      hit &&
+      hit.index <
+        end
+    ) {
+      end =
+        hit.index;
+    }
+  }
+
+
+  const section =
+    tail.slice(
+      0,
+      end
+    )
+      .trim();
+
+
+  const identity =
+    /tarafından\s+\d{1,2}\s*\.\s*koşuda\s*\(\s*\d+\s*\)/iu;
+
+
+  return identity.test(
+    section
+  )
+    ? section
+    : null;
+}
+
+
+async function findAfaCityDocument(
+  page:
+    any,
+
+  city:
+    string,
+
+  activationOk:
+    boolean
+): Promise<string> {
+  return String(
+    await page.evaluate(
+      (
+        wantedCity:
+          string,
+
+        wasActivated:
+          boolean
+      ) => {
+        const fold =
+          (
+            value:
+              unknown
+          ) =>
+            String(
+              value ??
+              ""
+            )
+              .normalize(
+                "NFKC"
+              )
+              .toLocaleUpperCase(
+                "tr-TR"
+              )
+              .replace(/[İIıi]/g,"I")
+              .replace(/Ğ/g,"G")
+              .replace(/Ü/g,"U")
+              .replace(/Ş/g,"S")
+              .replace(/Ö/g,"O")
+              .replace(/Ç/g,"C")
+              .replace(/[^A-Z0-9]+/g," ")
+              .replace(/\s+/g," ")
+              .trim();
+
+
+        const cityKey =
+          fold(
+            wantedCity
+          );
+
+
+        const semanticKeys =
+          [
+            "AFA",
+            "ANALIZ",
+            "BULTEN",
+            "FAVORI",
+            "RAKIP",
+            "SURPRIZ",
+            "BANKO",
+            "TEK"
+          ];
+
+
+        const nodes =
+          Array.from(
+            document.querySelectorAll(
+              [
+                "article",
+                "section",
+                "main",
+                "[role='main']",
+                "[class*='analiz']",
+                "[class*='analysis']",
+                "[class*='bulten']",
+                "[class*='bulletin']",
+                "[class*='terminal']",
+                "[class*='content']",
+                "div"
+              ].join(",")
+            )
+          ) as HTMLElement[];
+
+
+        const candidates =
+          nodes
+            .map(
+              node => {
+                const text =
+                  String(
+                    node.innerText ??
+                    node.textContent ??
+                    ""
+                  )
+                    .replace(
+                      /\u00a0/g,
+                      " "
+                    )
+                    .replace(
+                      /\n{3,}/g,
+                      "\n\n"
+                    )
+                    .trim();
+
+
+                if (
+                  text.length <
+                    350 ||
+                  text.length >
+                    42000
+                ) {
+                  return null;
+                }
+
+
+                const normalized =
+                  fold(
+                    text
+                  );
+
+
+                const cityHit =
+                  normalized.includes(
+                    cityKey
+                  );
+
+
+                const semanticHits =
+                  semanticKeys
+                    .filter(
+                      key =>
+                        normalized.includes(
+                          key
+                        )
+                    )
+                    .length;
+
+
+                /*
+                 * fold() converts "1. Koşu" -> "1 KOSU".
+                 */
+                const raceHits =
+                  (
+                    normalized.match(
+                      /\b\d{1,2}\s+KOSU\b/g
+                    ) ??
+                    []
+                  )
+                    .length;
+
+
+                if (
+                  (
+                    !wasActivated &&
+                    !cityHit
+                  ) ||
+                  semanticHits <
+                    2 ||
+                  raceHits <
+                    2
+                ) {
+                  return null;
+                }
+
+
+                return {
+                  text,
+
+                  score:
+                    raceHits *
+                      100 +
+                    semanticHits *
+                      20 +
+                    (
+                      cityHit
+                        ? 40
+                        : 0
+                    ) -
+                    text.length /
+                      2000
+                };
+              }
+            )
+            .filter(
+              (
+                value
+              ): value is {
+                text:string;
+                score:number;
+              } =>
+                Boolean(
+                  value
+                )
+            )
+            .sort(
+              (
+                first,
+                second
+              ) =>
+                second.score -
+                first.score
+            );
+
+
+        return candidates[0]
+          ?.text ??
+          "";
+      },
+      city,
+      activationOk
+    )
+  );
 }
 
 
@@ -558,8 +799,8 @@ export async function acquireGanyanBrowserSession(
 
   try {
     browser =
-      await puppeteer.launch(
-        context.env.BROWSER as any
+      await launchBrowser(
+        context
       );
 
 
@@ -597,11 +838,11 @@ export async function acquireGanyanBrowserSession(
 
 
     await delay(
-      1200
+      1000
     );
 
 
-    let selected:any = {
+    let cityState:any = {
       ok:false
     };
 
@@ -611,15 +852,308 @@ export async function acquireGanyanBrowserSession(
       attempt<20;
       attempt++
     ) {
-      selected =
-        await selectCity(
+      cityState =
+        await activateCity(
           page,
           city
         );
 
 
+      if (cityState.ok) {
+        break;
+      }
+
+
+      await delay(
+        350
+      );
+    }
+
+
+    if (!cityState.ok) {
+      throw new Error(
+        `GANYAN_TARGET_CITY_NOT_FOUND:${city}`
+      );
+    }
+
+
+    await delay(
+      1000
+    );
+
+
+    let section:
+      string | null =
+      null;
+
+
+    for (
+      let attempt=0;
+      attempt<15;
+      attempt++
+    ) {
+      section =
+        extractGanyanCommentsSection(
+          await bodyText(
+            page
+          ),
+          city
+        );
+
+
+      if (section) {
+        break;
+      }
+
+
+      await delay(
+        400
+      );
+    }
+
+
+    if (!section) {
+      throw new Error(
+        `GANYAN_COMMENT_SECTION_NOT_FOUND:${city}`
+      );
+    }
+
+
+    const html =
+      wrapDocument(
+        "GANYAN CANAVARI",
+        context.raceDate,
+        city,
+        section
+      );
+
+
+    return {
+      stage:
+        "browser-session",
+
+      html,
+
+      requestedUrl:
+        context.url,
+
+      finalUrl:
+        String(
+          page.url()
+        ),
+
+      status:
+        200,
+
+      contentType:
+        "text/html",
+
+      bodyLength:
+        html.length
+    };
+
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+
+      } catch {
+        // Cleanup only.
+      }
+    }
+  }
+}
+
+
+export async function acquireAfaBrowserSession(
+  context:
+    ExpertAcquireContext
+): Promise<AcquiredHtml> {
+  const city =
+    cityFromTarget(
+      context.url
+    );
+
+
+  if (!city) {
+    throw new Error(
+      "AFA_CITY_SCOPE_MISSING"
+    );
+  }
+
+
+  const targetUrl =
+    externalTargetUrl(
+      context.url
+    );
+
+
+  let browser:any =
+    null;
+
+
+  try {
+    browser =
+      await launchBrowser(
+        context
+      );
+
+
+    const page:any =
+      await browser.newPage();
+
+
+    await page.goto(
+      targetUrl,
+      {
+        waitUntil:
+          "networkidle2",
+
+        timeout:
+          30_000
+      }
+    );
+
+
+    const dateState =
+      await setDateInput(
+        page,
+        context.raceDate
+      );
+
+
+    if (!dateState.ok) {
+      throw new Error(
+        "AFA_TARGET_DATE_INPUT_FAILED:" +
+        JSON.stringify(
+          dateState
+        )
+      );
+    }
+
+
+    /*
+     * Verify real page state BEFORE adding our synthetic
+     * target-date header.
+     */
+    let renderedDate =
+      false;
+
+
+    for (
+      let attempt=0;
+      attempt<15;
+      attempt++
+    ) {
+      const text =
+        await bodyText(
+          page
+        );
+
+
+      const normalized =
+        normalizeExpertSearchText(
+          text
+        );
+
+
+      renderedDate =
+        normalized.includes(
+          normalizeExpertSearchText(
+            ddmmyyyy(
+              context.raceDate
+            )
+          )
+        ) ||
+        normalized.includes(
+          normalizeExpertSearchText(
+            context.raceDate
+          )
+        );
+
+
+      if (renderedDate) {
+        break;
+      }
+
+
+      await delay(
+        400
+      );
+    }
+
+
+    if (!renderedDate) {
+      throw new Error(
+        "AFA_BROWSER_TARGET_DATE_NOT_RENDERED"
+      );
+    }
+
+
+    /*
+     * Select city if the application exposes city controls.
+     *
+     * If the application renders all city bulletin blocks
+     * simultaneously, findAfaCityDocument isolates the block
+     * containing the requested city instead.
+     */
+    let cityState:any = {
+      ok:false
+    };
+
+
+    for (
+      let attempt=0;
+      attempt<12;
+      attempt++
+    ) {
+      cityState =
+        await activateCity(
+          page,
+          city
+        );
+
+
+      if (cityState.ok) {
+        break;
+      }
+
+
+      await delay(
+        250
+      );
+    }
+
+
+    if (cityState.ok) {
+      await delay(
+        700
+      );
+    }
+
+
+    let documentText =
+      "";
+
+
+    for (
+      let attempt=0;
+      attempt<15;
+      attempt++
+    ) {
+      documentText =
+        await findAfaCityDocument(
+          page,
+          city,
+          Boolean(
+            cityState.ok
+          )
+        );
+
+
       if (
-        selected.ok
+        documentText.length >=
+          350
       ) {
         break;
       }
@@ -631,62 +1165,34 @@ export async function acquireGanyanBrowserSession(
     }
 
 
-    if (!selected.ok) {
-      throw new Error(
-        `GANYAN_TARGET_CITY_NOT_FOUND:${city}`
-      );
-    }
-
-
-    await delay(
-      1200
-    );
-
-
-    const text =
-      await commentsSection(
-        page,
-        city
-      );
-
-
     if (
-      text.length <
-        180
+      documentText.length <
+        350
     ) {
       throw new Error(
-        `GANYAN_COMMENT_SECTION_NOT_FOUND:${city}`
+        "AFA_CITY_BULLETIN_NOT_FOUND:" +
+        JSON.stringify({
+          city,
+
+          activation:
+            cityState
+        })
       );
     }
 
 
-    const normalized =
-      normalizeExpertSearchText(
-        text
-      );
-
-
-    if (
-      !normalized.includes(
-        normalizeExpertSearchText(
-          city
-        )
-      ) ||
-      !normalized.includes(
-        "en son yorumlar"
-      )
-    ) {
-      throw new Error(
-        `GANYAN_COMMENT_SECTION_IDENTITY_FAILED:${city}`
-      );
-    }
-
-
+    /*
+     * Exactly ONE city document.
+     *
+     * No loop over race buttons.
+     * No repeated whole-page snapshots.
+     */
     const html =
       wrapDocument(
+        "AFA",
         context.raceDate,
         city,
-        text
+        documentText
       );
 
 
@@ -718,7 +1224,7 @@ export async function acquireGanyanBrowserSession(
         await browser.close();
 
       } catch {
-        // Non-fatal cleanup.
+        // Cleanup only.
       }
     }
   }
