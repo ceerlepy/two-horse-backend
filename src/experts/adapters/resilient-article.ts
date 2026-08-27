@@ -1363,8 +1363,7 @@ export async function resolveResilientArticleTargets(
 
                 browser =
                   await puppeteer.launch(
-                    context.env.BROWSER
-                      as any
+                    (context.env.BROWSER as any)
                   );
 
                 diagnostics.browserLaunches++;
@@ -2167,8 +2166,7 @@ export async function acquireResilientArticleHtml(
   try {
     browser =
       await puppeteer.launch(
-        context.env.BROWSER
-          as any
+        (context.env.BROWSER as any)
       );
 
     const page =
