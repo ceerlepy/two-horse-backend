@@ -405,6 +405,184 @@ async function clickRace(
 }
 
 
+async function raceControlState(
+  page:any,
+  raceNumber:number
+) {
+  return page.evaluate(
+    (
+      wantedRace:number,
+      clickableSelector:string
+    ) => {
+      const foldLocal =
+        (value:unknown) =>
+          String(value ?? "")
+            .normalize("NFKD")
+            .toLocaleUpperCase("tr-TR")
+            .replace(/\p{M}/gu,"")
+            .replace(/[İIıi]/g,"I")
+            .replace(/Ğ/g,"G")
+            .replace(/Ü/g,"U")
+            .replace(/Ş/g,"S")
+            .replace(/Ö/g,"O")
+            .replace(/Ç/g,"C")
+            .replace(/[^A-Z0-9]+/g," ")
+            .replace(/\s+/g," ")
+            .trim();
+
+      const expected =
+        `${wantedRace} KOSU`;
+
+      const nodes =
+        Array.from(
+          document.querySelectorAll(
+            clickableSelector
+          )
+        ) as HTMLElement[];
+
+      const node =
+        nodes.find(
+          element => {
+            const visible =
+              Boolean(
+                element.offsetWidth ||
+                element.offsetHeight ||
+                element
+                  .getClientRects()
+                  .length
+              );
+
+            if (!visible)
+              return false;
+
+            const text =
+              foldLocal(
+                element.innerText ??
+                element.textContent
+              );
+
+            return (
+              text === expected ||
+              text.startsWith(
+                `${expected} `
+              )
+            );
+          }
+        );
+
+      if (!node) {
+        return {
+          found:false,
+          active:false
+        };
+      }
+
+      const chain =
+        [
+          node,
+          node.parentElement,
+          node.closest(
+            "[role='tab']"
+          ),
+          node.closest("li")
+        ]
+          .filter(Boolean) as
+            HTMLElement[];
+
+      let active=false;
+
+      for (const element of chain) {
+        const attrs =
+          [
+            element.getAttribute(
+              "aria-selected"
+            ),
+            element.getAttribute(
+              "aria-current"
+            ),
+            element.getAttribute(
+              "data-state"
+            ),
+            element.getAttribute(
+              "data-active"
+            ),
+            element.getAttribute(
+              "data-selected"
+            )
+          ]
+            .filter(Boolean)
+            .map(
+              value =>
+                String(value)
+                  .toLowerCase()
+            );
+
+        const className =
+          String(
+            element.className ??
+            ""
+          )
+            .toLowerCase();
+
+        if (
+          attrs.some(
+            value =>
+              [
+                "true",
+                "active",
+                "selected",
+                "current",
+                "page",
+                "step"
+              ].includes(value)
+          ) ||
+          /(^|\s)(active|selected|current)(\s|$)/
+            .test(className)
+        ) {
+          active=true;
+          break;
+        }
+      }
+
+      return {
+        found:true,
+        active,
+
+        text:
+          String(
+            node.innerText ??
+            node.textContent ??
+            ""
+          ),
+
+        ariaSelected:
+          node.getAttribute(
+            "aria-selected"
+          ),
+
+        ariaCurrent:
+          node.getAttribute(
+            "aria-current"
+          ),
+
+        dataState:
+          node.getAttribute(
+            "data-state"
+          ),
+
+        className:
+          String(
+            node.className ??
+            ""
+          )
+      };
+    },
+    raceNumber,
+    CLICKABLE
+  );
+}
+
+
 function changedLines(
   before:string,
   after:string
@@ -799,19 +977,42 @@ export async function acquireAfaBrowserSession(
 
       let panel="";
 
+      let lastTransitionDiagnostics:
+        any = null;
+
+      /*
+       * A click is NOT proof that the SPA changed race.
+       *
+       * Accept a panel only when:
+       * - it is semantically useful,
+       * - it is not a fingerprint already used by another race,
+       * - AND we can prove transition through:
+       *     a) new changed DOM lines, or
+       *     b) selected/active race control, or
+       *     c) explicit target race identity in panel.
+       *
+       * A stale duplicate panel is waited/re-clicked, not
+       * immediately accepted or mislabeled.
+       */
       for (
         let attempt=0;
-        attempt<15;
+        attempt<18;
         attempt++
       ) {
         await delay(
           attempt === 0
-            ? 450
-            : 250
+            ? 350
+            : 180
         );
 
         const after =
           await bodyText(page);
+
+        const control =
+          await raceControlState(
+            page,
+            raceNumber
+          );
 
         const diff =
           changedLines(
@@ -819,48 +1020,136 @@ export async function acquireAfaBrowserSession(
             after
           );
 
-        if (usefulPanel(diff)) {
-          panel=diff;
-          break;
-        }
-
         const fallback =
           await fallbackPanel(
             page,
             raceNumber
           );
 
-        if (usefulPanel(fallback)) {
-          panel=fallback;
+        const choices = [
+          {
+            kind:"diff",
+            text:diff
+          },
+          {
+            kind:"fallback",
+            text:fallback
+          }
+        ];
+
+        for (
+          const choice of
+          choices
+        ) {
+          if (
+            !usefulPanel(
+              choice.text
+            )
+          ) {
+            continue;
+          }
+
+          const candidateFingerprint =
+            fold(
+              choice.text
+            );
+
+          const duplicateRace =
+            fingerprints.get(
+              candidateFingerprint
+            );
+
+          const explicitRaceIdentity =
+            candidateFingerprint
+              .includes(
+                fold(
+                  `${raceNumber} koşu`
+                )
+              );
+
+          const transitionProof =
+            choice.kind === "diff" ||
+            control.active === true ||
+            explicitRaceIdentity;
+
+          lastTransitionDiagnostics = {
+            city,
+            raceNumber,
+            attempt,
+            source:
+              choice.kind,
+            control,
+            explicitRaceIdentity,
+            transitionProof,
+            duplicateRace:
+              duplicateRace ??
+              null,
+            beforeCharacters:
+              before.length,
+            afterCharacters:
+              after.length,
+            candidateCharacters:
+              choice.text.length
+          };
+
+          if (
+            duplicateRace !==
+              undefined &&
+            duplicateRace !==
+              raceNumber
+          ) {
+            /*
+             * SPA may still be rendering the old race.
+             * Keep waiting; do not throw yet.
+             */
+            continue;
+          }
+
+          if (!transitionProof) {
+            continue;
+          }
+
+          panel=
+            choice.text;
+
           break;
+        }
+
+        if (panel) {
+          break;
+        }
+
+        /*
+         * Re-click twice during bounded wait in case the first
+         * synthetic click was swallowed by the frontend.
+         */
+        if (
+          attempt === 5 ||
+          attempt === 11
+        ) {
+          await clickRace(
+            page,
+            raceNumber
+          );
         }
       }
 
       if (!panel) {
         throw new Error(
-          `AFA_RACE_PANEL_NOT_FOUND:${city}:R${raceNumber}`
+          "AFA_RACE_TRANSITION_NOT_CONFIRMED:" +
+          JSON.stringify(
+            lastTransitionDiagnostics ?? {
+              city,
+              raceNumber,
+              reason:
+                "NO_USEFUL_TRANSITION_PANEL"
+            }
+          )
         );
       }
 
       const fingerprint =
         fold(panel);
-
-      const duplicateRace =
-        fingerprints.get(fingerprint);
-
-      if (
-        duplicateRace !== undefined &&
-        duplicateRace !== raceNumber
-      ) {
-        throw new Error(
-          "AFA_DUPLICATE_RACE_PANEL:" +
-          JSON.stringify({
-            city,
-            raceNumber,
-            duplicateRace
-          })
-        );
-      }
 
       fingerprints.set(
         fingerprint,
@@ -895,7 +1184,31 @@ export async function acquireAfaBrowserSession(
       finalUrl:targetUrl,
       status:200,
       contentType:"text/html",
-      bodyLength:html.length
+      bodyLength:html.length,
+
+      diagnostics:{
+        traceVersion:
+          "afa-state-transition-v2",
+
+        city,
+        races,
+
+        panelCount:
+          panels.length,
+
+        panelFingerprints:
+          panels.map(
+            panel => ({
+              raceNumber:
+                panel.raceNumber,
+
+              characters:
+                panel.text.length
+            })
+          )
+      }
+    } as AcquiredHtml & {
+      diagnostics:any
     };
 
   } finally {

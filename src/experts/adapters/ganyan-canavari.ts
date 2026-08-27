@@ -1,64 +1,83 @@
-import { acquireGanyanGalopArticle, resolveGanyanGalopArticles } from "./ganyan-article";
-import { resolveResilientArticleTargets } from "./resilient-article";
-import type { ExpertAdapter, ExpertAdapterContext, ExpertTargetResolution } from "./types";
+import {
+  acquireGanyanGalopArticle
+} from "./ganyan-article";
 
-const NEWS="https://www.ganyancanavari.com.tr/haberler/";
-const LIST_READY='a[href*="haber-detay"]';
+import {
+  resolveResilientArticleTargets
+} from "./resilient-article";
 
-function isGalopArticle(value:string) {
+import type {
+  ExpertAdapter
+} from "./types";
+
+
+const NEWS =
+  "https://www.ganyancanavari.com.tr/haberler/";
+
+const LIST_READY =
+  'a[href*="haber-detay"]';
+
+
+function isGalopArticle(
+  value:string
+):boolean {
   try {
-    const path=
+    const path =
       decodeURIComponent(
-        new URL(value).pathname
+        new URL(value)
+          .pathname
       )
         .normalize("NFKC")
-        .toLocaleLowerCase("tr-TR");
+        .toLocaleLowerCase(
+          "tr-TR"
+        );
 
     return (
-      path.includes("/haber-detay/") &&
-      path.includes("galop-incelemesi")
+      path.includes(
+        "/haber-detay/"
+      ) &&
+      path.includes(
+        "galop-incelemesi"
+      )
     );
+
   } catch {
     return false;
   }
 }
 
-async function resolveGanyan(
-  context:ExpertAdapterContext
-):Promise<ExpertTargetResolution> {
-  const ladder=
-    await resolveResilientArticleTargets(
-      context,
-      {
-        landingUrls:[NEWS],
-        readySelector:LIST_READY,
-        maxPages:2,
-        urlPredicate:isGalopArticle
-      }
-    );
 
-  if (ladder.status==="ready")
-    return ladder;
+export const ganyanCanavariAdapter:
+  ExpertAdapter = {
+    sourceKey:
+      "ganyan_canavari",
 
-  const fallback=
-    await resolveGanyanGalopArticles(
-      context
-    );
+    resolve(context) {
+      return resolveResilientArticleTargets(
+        context,
+        {
+          landingUrls:[
+            NEWS
+          ],
 
-  return {
-    ...fallback,
-    diagnostics:{
-      ladder:ladder.diagnostics,
-      legacyFallback:
-        fallback.diagnostics
-    }
+          readySelector:
+            LIST_READY,
+
+          maxPages:2,
+
+          urlPredicate:
+            isGalopArticle
+        }
+      );
+    },
+
+    ownsAcquisition:
+      isGalopArticle,
+
+    /*
+     * Keep the proven source-specific
+     * "En Son Yorumlar" extractor.
+     */
+    acquireHtml:
+      acquireGanyanGalopArticle
   };
-}
-
-export const ganyanCanavariAdapter:ExpertAdapter={
-  sourceKey:"ganyan_canavari",
-  resolve:resolveGanyan,
-  ownsAcquisition:isGalopArticle,
-  acquireHtml:
-    acquireGanyanGalopArticle
-};

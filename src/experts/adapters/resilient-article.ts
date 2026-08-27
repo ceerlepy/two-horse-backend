@@ -1,14 +1,72 @@
 import puppeteer from "@cloudflare/puppeteer";
 import { load } from "cheerio";
-import type { AcquiredHtml } from "../../acquisition/types";
-import { candidateEvidence } from "../discovery";
-import { isAllowedDiscoveredArticleUrl } from "../source-policy";
-import { cleanExpertInlineText, normalizeExpertSearchText } from "../text-normalization";
-import { selectExpertCandidateUrlsWithWorkersAi } from "../workers-ai-discovery";
-import type { ExpertAcquireContext, ExpertAdapterContext, ExpertTargetResolution } from "./types";
 
-const GOTO_TIMEOUT_MS = 30_000;
-const SELECTOR_TIMEOUT_MS = 20_000;
+import type {
+  AcquiredHtml
+} from "../../acquisition/types";
+
+import {
+  candidateEvidence
+} from "../discovery";
+
+import {
+  isAllowedDiscoveredArticleUrl
+} from "../source-policy";
+
+import {
+  cleanExpertInlineText,
+  normalizeExpertSearchText
+} from "../text-normalization";
+
+import {
+  selectExpertCandidateUrlsWithWorkersAi
+} from "../workers-ai-discovery";
+
+import type {
+  ExpertAcquireContext,
+  ExpertAdapterContext,
+  ExpertTargetResolution
+} from "./types";
+
+
+/*
+ * Part 5 bounded acquisition rules:
+ *
+ * - listing page navigation must be cheap
+ * - semantic selector is the readiness condition
+ * - no networkidle2 for editorial listing discovery
+ * - fallback occurs ONLY when acquisition is unusable
+ * - a usable page with no target means NEXT PAGE
+ * - Puppeteer is last resort
+ * - maximum one browser launch per resolver execution
+ */
+const LISTING_GOTO_TIMEOUT_MS =
+  12_000;
+
+const LISTING_SELECTOR_TIMEOUT_MS =
+  7_000;
+
+const ARTICLE_GOTO_TIMEOUT_MS =
+  15_000;
+
+const ARTICLE_SELECTOR_TIMEOUT_MS =
+  9_000;
+
+
+type Stage =
+  | "cf-content"
+  | "cf-scrape"
+  | "cf-links"
+  | "puppeteer";
+
+
+const STAGES:Stage[] = [
+  "cf-content",
+  "cf-scrape",
+  "cf-links",
+  "puppeteer"
+];
+
 
 export interface ResilientArticleResolveOptions {
   landingUrls:string[];
@@ -17,86 +75,362 @@ export interface ResilientArticleResolveOptions {
   urlPredicate?:(url:string)=>boolean;
 }
 
-export interface ResilientArticleAcquireOptions { readySelector:string; }
 
-type RawAnchor = { href:string; text:string; identityText:string };
-type Candidate = {
-  url:string; text:string; score:number; matchedCities:string[];
-  stage:string; pageUrl:string;
-};
+export interface ResilientArticleAcquireOptions {
+  readySelector:string;
+}
 
-const err = (e:unknown) => e instanceof Error ? e.message : String(e);
-const unwrap = (v:any) => v && typeof v === "object" && "result" in v ? v.result : v;
 
-function findHtml(v:any):string|null {
-  if (!v) return null;
-  if (typeof v === "string" && v.length > 100) return v;
-  if (typeof v === "object" && typeof v.html === "string" && v.html.length > 100) return v.html;
-  if (Array.isArray(v)) {
-    for (const x of v) { const hit=findHtml(x); if (hit) return hit; }
+interface RawAnchor {
+  href:string;
+  text:string;
+  identityText:string;
+}
+
+
+interface Candidate {
+  url:string;
+  text:string;
+  score:number;
+  matchedCities:string[];
+  stage:string;
+  pageUrl:string;
+}
+
+
+function errorMessage(
+  value:unknown
+):string {
+  return value instanceof Error
+    ? value.message
+    : String(value);
+}
+
+
+function unwrap(
+  value:any
+):any {
+  return (
+    value &&
+    typeof value === "object" &&
+    "result" in value
+  )
+    ? value.result
+    : value;
+}
+
+
+function findHtml(
+  value:any
+):string|null {
+  if (!value)
+    return null;
+
+  if (
+    typeof value === "string" &&
+    value.length > 100
+  )
+    return value;
+
+  if (
+    typeof value === "object" &&
+    typeof value.html === "string" &&
+    value.html.length > 100
+  )
+    return value.html;
+
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found =
+        findHtml(child);
+
+      if (found)
+        return found;
+    }
+
     return null;
   }
-  if (typeof v === "object") {
-    for (const x of Object.values(v)) { const hit=findHtml(x); if (hit) return hit; }
+
+  if (typeof value === "object") {
+    for (
+      const child of
+      Object.values(value)
+    ) {
+      const found =
+        findHtml(child);
+
+      if (found)
+        return found;
+    }
   }
+
   return null;
 }
 
-function pagedUrl(base:string,page:number):string {
-  if (page <= 1) return base;
-  const u=new URL(base);
-  u.pathname=u.pathname.replace(/\/+$/g,"")+`/page/${page}/`;
-  return u.toString();
-}
 
-function normalizeUrl(base:string,value:string):string|null {
+function normalizeUrl(
+  base:string,
+  value:string
+):string|null {
   try {
-    const u=new URL(value,base);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-    u.hash="";
-    return u.toString();
-  } catch { return null; }
+    const url =
+      new URL(
+        value,
+        base
+      );
+
+    if (
+      url.protocol !== "https:" &&
+      url.protocol !== "http:"
+    )
+      return null;
+
+    url.hash="";
+
+    return url.toString();
+
+  } catch {
+    return null;
+  }
 }
 
-function key(value:string):string {
-  try { const u=new URL(value); u.hash=""; return u.toString(); }
-  catch { return value; }
+
+function urlKey(
+  value:string
+):string {
+  try {
+    const url =
+      new URL(value);
+
+    url.hash="";
+
+    return url.toString();
+
+  } catch {
+    return value;
+  }
 }
 
-function anchorsFromHtml(html:string):RawAnchor[] {
-  const $=load(html);
-  $("script,style,noscript,svg,canvas,iframe").remove();
-  const out:RawAnchor[]=[];
-  $("a[href]").each((_i:number,el:any)=>{
-    const a=$(el), href=a.attr("href");
-    if (!href) return;
-    const box=a.closest("article,.post,.entry,.card,.item,li").first();
-    const anchorText=cleanExpertInlineText(a.text(),1000);
-    const contextText=cleanExpertInlineText(box.length ? box.text() : anchorText,1800);
-    out.push({
-      href,
-      text:[anchorText,contextText].filter(Boolean).join(" | "),
-      identityText:contextText||anchorText
-    });
-  });
-  return out;
+
+function pagedUrl(
+  base:string,
+  page:number
+):string {
+  if (page <= 1)
+    return base;
+
+  const url =
+    new URL(base);
+
+  url.pathname =
+    url.pathname
+      .replace(/\/+$/g,"") +
+    `/page/${page}/`;
+
+  return url.toString();
 }
 
-function anchorsFromScrape(raw:any):RawAnchor[] {
-  const payload=unwrap(raw), groups=Array.isArray(payload)?payload:[], out:RawAnchor[]=[];
+
+function anchorsFromHtml(
+  html:string
+):RawAnchor[] {
+  const $ =
+    load(html);
+
+  $(
+    "script,style,noscript,svg,canvas,iframe"
+  ).remove();
+
+  const output:RawAnchor[] =
+    [];
+
+  $("a[href]").each(
+    (
+      _index:number,
+      element:any
+    ) => {
+      const anchor =
+        $(element);
+
+      const href =
+        anchor.attr("href");
+
+      if (!href)
+        return;
+
+      const container =
+        anchor
+          .closest(
+            [
+              "article",
+              ".post",
+              ".entry",
+              ".card",
+              ".item",
+              "li"
+            ].join(",")
+          )
+          .first();
+
+      const anchorText =
+        cleanExpertInlineText(
+          anchor.text(),
+          1000
+        );
+
+      const contextText =
+        cleanExpertInlineText(
+          container.length
+            ? container.text()
+            : anchorText,
+          1800
+        );
+
+      output.push({
+        href,
+
+        text:
+          [
+            anchorText,
+            contextText
+          ]
+            .filter(Boolean)
+            .join(" | "),
+
+        identityText:
+          contextText ||
+          anchorText
+      });
+    }
+  );
+
+  return output;
+}
+
+
+function anchorsFromScrape(
+  raw:any
+):RawAnchor[] {
+  const payload =
+    unwrap(raw);
+
+  const groups =
+    Array.isArray(payload)
+      ? payload
+      : [];
+
+  const output:RawAnchor[] =
+    [];
+
   for (const group of groups) {
-    const values=Array.isArray(group?.results)?group.results:[];
+    const values =
+      Array.isArray(
+        group?.results
+      )
+        ? group.results
+        : [];
+
     for (const value of values) {
-      const attrs=Array.isArray(value?.attributes)?value.attributes:[];
-      const hrefAttr=attrs.find((a:any)=>String(a?.name??"").toLowerCase()==="href");
-      const href=hrefAttr?.value ? String(hrefAttr.value) : "";
-      if (!href) continue;
-      const text=cleanExpertInlineText(String(value?.text??""),1200);
-      out.push({href,text,identityText:text});
+      const attributes =
+        Array.isArray(
+          value?.attributes
+        )
+          ? value.attributes
+          : [];
+
+      const hrefAttribute =
+        attributes.find(
+          (attribute:any) =>
+            String(
+              attribute?.name ??
+              ""
+            ).toLowerCase() ===
+            "href"
+        );
+
+      const href =
+        hrefAttribute?.value
+          ? String(
+              hrefAttribute.value
+            )
+          : "";
+
+      if (!href)
+        continue;
+
+      const text =
+        cleanExpertInlineText(
+          String(
+            value?.text ??
+            ""
+          ),
+          1200
+        );
+
+      output.push({
+        href,
+        text,
+        identityText:text
+      });
     }
   }
-  return out;
+
+  return output;
 }
+
+
+function allowedListingUrl(
+  context:ExpertAdapterContext,
+  pageUrl:string,
+  href:string,
+  predicate?:(url:string)=>boolean
+):string|null {
+  const url =
+    normalizeUrl(
+      pageUrl,
+      href
+    );
+
+  if (
+    !url ||
+    !isAllowedDiscoveredArticleUrl(
+      context.source.source_key,
+      url
+    ) ||
+    (
+      predicate &&
+      !predicate(url)
+    )
+  )
+    return null;
+
+  return url;
+}
+
+
+function usableAnchorCount(
+  context:ExpertAdapterContext,
+  pageUrl:string,
+  anchors:RawAnchor[],
+  predicate?:(url:string)=>boolean
+):number {
+  let count=0;
+
+  for (const anchor of anchors) {
+    if (
+      allowedListingUrl(
+        context,
+        pageUrl,
+        anchor.href,
+        predicate
+      )
+    )
+      count++;
+  }
+
+  return count;
+}
+
 
 function candidatesFromAnchors(
   context:ExpertAdapterContext,
@@ -105,193 +439,368 @@ function candidatesFromAnchors(
   stage:string,
   predicate?:(url:string)=>boolean
 ):Candidate[] {
-  const byUrl=new Map<string,Candidate>();
+  const byUrl =
+    new Map<
+      string,
+      Candidate
+    >();
 
-  for (const a of anchors) {
-    const url=normalizeUrl(pageUrl,a.href);
+  for (const anchor of anchors) {
+    const url =
+      allowedListingUrl(
+        context,
+        pageUrl,
+        anchor.href,
+        predicate
+      );
+
+    if (!url)
+      continue;
+
+    const evidence =
+      candidateEvidence(
+        context
+          .source
+          .source_key,
+
+        url,
+        anchor.text,
+        context.raceDate,
+        context.cities,
+        anchor.identityText
+      );
 
     if (
-      !url ||
-      !isAllowedDiscoveredArticleUrl(context.source.source_key,url) ||
-      (predicate && !predicate(url))
-    ) continue;
+      !evidence.hasDate ||
+      !evidence.hasCity ||
+      !evidence
+        .hasPredictionLanguage ||
+      evidence
+        .hasNegativeLanguage
+    )
+      continue;
 
-    const e=candidateEvidence(
-      context.source.source_key,
+    const candidate:Candidate = {
       url,
-      a.text,
-      context.raceDate,
-      context.cities,
-      a.identityText
-    );
+      text:anchor.text,
+      score:evidence.score,
 
-    if (
-      !e.hasDate ||
-      !e.hasCity ||
-      !e.hasPredictionLanguage ||
-      e.hasNegativeLanguage
-    ) continue;
+      matchedCities:
+        evidence.matchedCities,
 
-    const c:Candidate={
-      url,
-      text:a.text,
-      score:e.score,
-      matchedCities:e.matchedCities,
       stage,
       pageUrl
     };
 
-    const old=byUrl.get(key(url));
+    const old =
+      byUrl.get(
+        urlKey(url)
+      );
 
     if (
       !old ||
-      c.score>old.score ||
-      (c.score===old.score && c.text.length>old.text.length)
-    ) byUrl.set(key(url),c);
+      candidate.score >
+        old.score ||
+      (
+        candidate.score ===
+          old.score &&
+        candidate.text.length >
+          old.text.length
+      )
+    ) {
+      byUrl.set(
+        urlKey(url),
+        candidate
+      );
+    }
   }
 
-  return [...byUrl.values()];
+  return [
+    ...byUrl.values()
+  ];
 }
 
-function merge(pool:Map<string,Candidate>,values:Candidate[]) {
-  for (const c of values) {
-    const k=key(c.url), old=pool.get(k);
+
+function mergeCandidates(
+  pool:Map<string,Candidate>,
+  candidates:Candidate[]
+):void {
+  for (const candidate of candidates) {
+    const key =
+      urlKey(
+        candidate.url
+      );
+
+    const old =
+      pool.get(key);
+
     if (
       !old ||
-      c.score>old.score ||
-      (c.score===old.score && c.text.length>old.text.length)
-    ) pool.set(k,c);
+      candidate.score >
+        old.score ||
+      (
+        candidate.score ===
+          old.score &&
+        candidate.text.length >
+          old.text.length
+      )
+    ) {
+      pool.set(
+        key,
+        candidate
+      );
+    }
   }
 }
 
-const poolValues=(pool:Map<string,Candidate>)=>
-  [...pool.values()]
-    .sort((a,b)=>b.score-a.score)
-    .slice(0,220);
 
-function coverage(candidates:Candidate[],cities:string[]) {
-  const found=new Set<string>();
+function candidatePool(
+  pool:Map<string,Candidate>
+):Candidate[] {
+  return [
+    ...pool.values()
+  ]
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        second.score -
+        first.score
+    )
+    .slice(
+      0,
+      220
+    );
+}
 
-  for (const c of candidates)
-    for (const city of c.matchedCities)
-      found.add(normalizeExpertSearchText(city));
 
-  const matchedCities=cities.filter(
-    city=>found.has(normalizeExpertSearchText(city))
-  );
+function coverage(
+  candidates:Candidate[],
+  cities:string[]
+) {
+  const matched =
+    new Set<string>();
 
-  const missingCities=cities.filter(
-    city=>!found.has(normalizeExpertSearchText(city))
-  );
+  for (const candidate of candidates) {
+    for (
+      const city of
+      candidate.matchedCities
+    ) {
+      matched.add(
+        normalizeExpertSearchText(
+          city
+        )
+      );
+    }
+  }
+
+  const matchedCities =
+    cities.filter(
+      city =>
+        matched.has(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
+
+  const missingCities =
+    cities.filter(
+      city =>
+        !matched.has(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
 
   return {
     matchedCities,
     missingCities,
-    complete:missingCities.length===0
+
+    complete:
+      missingCities.length ===
+      0
   };
 }
 
-const fingerprint=(candidates:Candidate[])=>
-  candidates.map(c=>`${c.url}|${c.score}|${c.text}`).join("\n");
+
+function fingerprint(
+  candidates:Candidate[]
+):string {
+  return candidates
+    .map(
+      candidate =>
+        [
+          candidate.url,
+          candidate.score,
+          candidate.text
+        ].join("|")
+    )
+    .join("\n");
+}
+
 
 async function quickContent(
-  context:ExpertAdapterContext,
+  context:any,
   url:string,
-  selector:string
+  selector:string,
+  gotoTimeout:number,
+  selectorTimeout:number
 ) {
-  const r=await context.env.BROWSER.quickAction(
-    "content",
-    {
-      url,
-      gotoOptions:{
-        waitUntil:"networkidle2",
-        timeout:GOTO_TIMEOUT_MS
-      },
-      waitForSelector:{
-        selector,
-        timeout:SELECTOR_TIMEOUT_MS
-      },
-      rejectResourceTypes:[
-        "image",
-        "media",
-        "font"
-      ]
-    } as any
-  );
+  const response =
+    await context.env.BROWSER
+      .quickAction(
+        "content",
+        {
+          url,
 
-  if (!r.ok)
-    throw new Error(`CF_CONTENT_READY_HTTP_${r.status}`);
+          gotoOptions:{
+            waitUntil:
+              "domcontentloaded",
 
-  const raw:any=await r.json();
-  const payload=unwrap(raw);
+            timeout:
+              gotoTimeout
+          },
 
-  const html=
-    typeof payload === "string"
+          waitForSelector:{
+            selector,
+
+            timeout:
+              selectorTimeout
+          },
+
+          rejectResourceTypes:[
+            "image",
+            "media",
+            "font"
+          ]
+        } as any
+      );
+
+  if (!response.ok) {
+    throw new Error(
+      `CF_CONTENT_READY_HTTP_${response.status}`
+    );
+  }
+
+  const raw:any =
+    await response.json();
+
+  const payload =
+    unwrap(raw);
+
+  const html =
+    typeof payload ===
+      "string"
       ? payload
       : findHtml(payload);
 
-  if (!html)
-    throw new Error("CF_CONTENT_READY_HTML_NOT_FOUND");
+  if (!html) {
+    throw new Error(
+      "CF_CONTENT_READY_HTML_NOT_FOUND"
+    );
+  }
 
-  if (html.length<500)
-    throw new Error(`CF_CONTENT_READY_TOO_SMALL:${html.length}`);
+  if (html.length < 500) {
+    throw new Error(
+      `CF_CONTENT_READY_TOO_SMALL:${html.length}`
+    );
+  }
 
   return {
     html,
-    status:r.status
+    status:
+      response.status
   };
 }
+
 
 async function quickScrapeAnchors(
   context:ExpertAdapterContext,
   url:string,
   selector:string
 ) {
-  const r=await context.env.BROWSER.quickAction(
-    "scrape",
-    {
-      url,
-      elements:[
+  const response =
+    await context.env.BROWSER
+      .quickAction(
+        "scrape",
         {
-          selector:"a[href]"
-        }
-      ],
-      gotoOptions:{
-        waitUntil:"networkidle2",
-        timeout:GOTO_TIMEOUT_MS
-      },
-      waitForSelector:{
-        selector,
-        timeout:SELECTOR_TIMEOUT_MS
-      },
-      rejectResourceTypes:[
-        "image",
-        "media",
-        "font"
-      ]
-    } as any
-  );
+          url,
 
-  if (!r.ok)
-    throw new Error(`CF_SCRAPE_READY_HTTP_${r.status}`);
+          elements:[
+            {
+              selector:
+                "a[href]"
+            }
+          ],
 
-  const anchors=anchorsFromScrape(await r.json());
+          gotoOptions:{
+            waitUntil:
+              "domcontentloaded",
 
-  if (!anchors.length)
-    throw new Error("CF_SCRAPE_READY_ANCHORS_EMPTY");
+            timeout:
+              LISTING_GOTO_TIMEOUT_MS
+          },
+
+          waitForSelector:{
+            selector,
+
+            timeout:
+              LISTING_SELECTOR_TIMEOUT_MS
+          },
+
+          rejectResourceTypes:[
+            "image",
+            "media",
+            "font"
+          ]
+        } as any
+      );
+
+  if (!response.ok) {
+    throw new Error(
+      `CF_SCRAPE_READY_HTTP_${response.status}`
+    );
+  }
+
+  const anchors =
+    anchorsFromScrape(
+      await response.json()
+    );
+
+  if (!anchors.length) {
+    throw new Error(
+      "CF_SCRAPE_READY_ANCHORS_EMPTY"
+    );
+  }
 
   return {
     anchors,
-    status:r.status
+    status:
+      response.status
   };
 }
 
-function rawLinkValues(payload:unknown):unknown[] {
+
+function rawLinkValues(
+  payload:unknown
+):unknown[] {
   if (Array.isArray(payload))
     return payload;
 
-  if (payload && typeof payload === "object") {
-    const links=(payload as {links?:unknown}).links;
+  if (
+    payload &&
+    typeof payload === "object"
+  ) {
+    const links =
+      (
+        payload as {
+          links?:unknown
+        }
+      ).links;
+
     if (Array.isArray(links))
       return links;
   }
@@ -299,46 +808,75 @@ function rawLinkValues(payload:unknown):unknown[] {
   return [];
 }
 
+
 async function quickLinks(
   context:ExpertAdapterContext,
   url:string,
   selector:string
 ) {
-  const r=await context.env.BROWSER.quickAction(
-    "links",
-    {
-      url,
-      excludeExternalLinks:true,
-      gotoOptions:{
-        waitUntil:"networkidle2",
-        timeout:GOTO_TIMEOUT_MS
-      },
-      waitForSelector:{
-        selector,
-        timeout:SELECTOR_TIMEOUT_MS
-      }
-    } as any
-  );
+  const response =
+    await context.env.BROWSER
+      .quickAction(
+        "links",
+        {
+          url,
 
-  if (!r.ok)
-    throw new Error(`CF_LINKS_READY_HTTP_${r.status}`);
+          excludeExternalLinks:
+            true,
 
-  const links=[
-    ...new Set(
-      rawLinkValues(unwrap(await r.json()))
-        .map(v=>String(v).trim())
-        .filter(Boolean)
-    )
-  ];
+          gotoOptions:{
+            waitUntil:
+              "domcontentloaded",
 
-  if (!links.length)
-    throw new Error("CF_LINKS_READY_EMPTY");
+            timeout:
+              LISTING_GOTO_TIMEOUT_MS
+          },
+
+          waitForSelector:{
+            selector,
+
+            timeout:
+              LISTING_SELECTOR_TIMEOUT_MS
+          }
+        } as any
+      );
+
+  if (!response.ok) {
+    throw new Error(
+      `CF_LINKS_READY_HTTP_${response.status}`
+    );
+  }
+
+  const links =
+    [
+      ...new Set(
+        rawLinkValues(
+          unwrap(
+            await response.json()
+          )
+        )
+          .map(
+            value =>
+              String(value)
+                .trim()
+          )
+          .filter(Boolean)
+      )
+    ];
+
+  if (!links.length) {
+    throw new Error(
+      "CF_LINKS_READY_EMPTY"
+    );
+  }
 
   return {
     links,
-    status:r.status
+    status:
+      response.status
   };
 }
+
 
 async function browserAnchors(
   page:any,
@@ -348,446 +886,784 @@ async function browserAnchors(
   await page.goto(
     url,
     {
-      waitUntil:"networkidle2",
-      timeout:GOTO_TIMEOUT_MS
+      waitUntil:
+        "domcontentloaded",
+
+      timeout:
+        LISTING_GOTO_TIMEOUT_MS
     }
   );
 
   await page.waitForSelector(
     selector,
     {
-      timeout:SELECTOR_TIMEOUT_MS
+      timeout:
+        LISTING_SELECTOR_TIMEOUT_MS
     }
   );
 
-  const anchors=await page.evaluate(
-    ()=>
-      Array.from(
-        document.querySelectorAll("a[href]")
-      )
-        .map(element=>{
-          const a=element as HTMLAnchorElement;
+  const anchors =
+    await page.evaluate(
+      () =>
+        Array.from(
+          document.querySelectorAll(
+            "a[href]"
+          )
+        )
+          .map(
+            element => {
+              const anchor =
+                element as
+                  HTMLAnchorElement;
 
-          const box=
-            a.closest(
-              "article,.post,.entry,.card,.item,li"
-            ) as HTMLElement|null;
+              const container =
+                anchor.closest(
+                  [
+                    "article",
+                    ".post",
+                    ".entry",
+                    ".card",
+                    ".item",
+                    "li"
+                  ].join(",")
+                ) as
+                  HTMLElement |
+                  null;
 
-          const anchorText=
-            String(
-              a.innerText ??
-              a.textContent ??
-              ""
-            )
-              .replace(/\s+/g," ")
-              .trim()
-              .slice(0,1000);
+              const anchorText =
+                String(
+                  anchor.innerText ??
+                  anchor.textContent ??
+                  ""
+                )
+                  .replace(
+                    /\s+/g,
+                    " "
+                  )
+                  .trim()
+                  .slice(
+                    0,
+                    1000
+                  );
 
-          const contextText=
-            String(
-              box?.innerText ??
-              box?.textContent ??
-              anchorText
-            )
-              .replace(/\s+/g," ")
-              .trim()
-              .slice(0,1800);
+              const contextText =
+                String(
+                  container?.innerText ??
+                  container?.textContent ??
+                  anchorText
+                )
+                  .replace(
+                    /\s+/g,
+                    " "
+                  )
+                  .trim()
+                  .slice(
+                    0,
+                    1800
+                  );
 
-          return {
-            href:String(a.href??""),
-            text:[
-              anchorText,
-              contextText
-            ]
-              .filter(Boolean)
-              .join(" | "),
-            identityText:
-              contextText ||
-              anchorText
-          };
-        })
-        .filter(v=>Boolean(v.href))
-  );
+              return {
+                href:
+                  String(
+                    anchor.href ??
+                    ""
+                  ),
+
+                text:
+                  [
+                    anchorText,
+                    contextText
+                  ]
+                    .filter(Boolean)
+                    .join(" | "),
+
+                identityText:
+                  contextText ||
+                  anchorText
+              };
+            }
+          )
+          .filter(
+            value =>
+              Boolean(
+                value.href
+              )
+          )
+    );
 
   return {
-    anchors:anchors as RawAnchor[],
-    finalUrl:String(page.url())
+    anchors:
+      anchors as
+        RawAnchor[],
+
+    finalUrl:
+      String(
+        page.url()
+      )
   };
 }
 
-async function select(
+
+async function selectCandidates(
   context:ExpertAdapterContext,
   candidates:Candidate[]
 ) {
   try {
-    const semantic=
+    const semantic =
       await selectExpertCandidateUrlsWithWorkersAi(
         context.env,
         {
           sourceName:
-            context.source.source_name,
+            context
+              .source
+              .source_name,
+
           raceDate:
             context.raceDate,
+
           cities:
             context.cities,
+
           candidates:
-            candidates.map(c=>({
-              url:c.url,
-              text:c.text,
-              score:c.score
-            }))
+            candidates.map(
+              candidate => ({
+                url:
+                  candidate.url,
+
+                text:
+                  candidate.text,
+
+                score:
+                  candidate.score
+              })
+            )
         }
       );
 
-    const byKey=
-      new Map(
+    const allowed =
+      new Map<
+        string,
+        string
+      >(
         candidates.map(
-          c=>[
-            key(c.url),
-            c.url
-          ] as const
+          candidate => [
+            urlKey(
+              candidate.url
+            ),
+            candidate.url
+          ]
         )
       );
 
-    const urls:string[]=[];
+    const selected:
+      string[] = [];
 
-    for (const raw of semantic.urls) {
-      const normalized=
+    for (
+      const raw of
+      semantic.urls
+    ) {
+      const normalized =
         normalizeUrl(
-          candidates[0]?.pageUrl ?? raw,
+          candidates[0]
+            ?.pageUrl ??
+          raw,
           raw
         );
 
-      const allowed=
-        normalized
-          ? byKey.get(key(normalized))
-          : null;
+      if (!normalized)
+        continue;
+
+      const exact =
+        allowed.get(
+          urlKey(
+            normalized
+          )
+        );
 
       if (
-        allowed &&
-        !urls.includes(allowed)
-      ) urls.push(allowed);
+        exact &&
+        !selected.includes(
+          exact
+        )
+      ) {
+        selected.push(
+          exact
+        );
+      }
     }
 
     return {
-      urls,
-      aiError:null as string|null,
+      urls:selected,
+
+      aiError:
+        null as
+          string |
+          null,
+
       diagnostics:
         semantic.diagnostics
     };
 
-  } catch (e) {
+  } catch(error) {
     return {
-      urls:[] as string[],
-      aiError:err(e),
-      diagnostics:null
+      urls:
+        [] as string[],
+
+      aiError:
+        errorMessage(error),
+
+      diagnostics:
+        null
     };
   }
 }
+
 
 function selectedCoverage(
   urls:string[],
   candidates:Candidate[],
   cities:string[]
 ) {
-  const wanted=
+  const selected =
     new Set(
-      urls.map(key)
+      urls.map(
+        urlKey
+      )
     );
 
   return coverage(
     candidates.filter(
-      c=>wanted.has(key(c.url))
+      candidate =>
+        selected.has(
+          urlKey(
+            candidate.url
+          )
+        )
     ),
     cities
   );
 }
 
+
+/*
+ * TRUE FALLBACK SEMANTICS
+ *
+ * PAGE 1:
+ *   content
+ *     acquisition usable -> parse -> next page / return
+ *     acquisition unusable -> scrape
+ *       unusable -> links
+ *         unusable -> puppeteer
+ *
+ * Once one transport proves usable on a site, the same transport
+ * becomes preferred for later archive pages.
+ *
+ * If Puppeteer is required, one browser is launched and reused.
+ */
 export async function resolveResilientArticleTargets(
   context:ExpertAdapterContext,
   options:ResilientArticleResolveOptions
 ):Promise<ExpertTargetResolution> {
-  const maxPages=
+  const maxPages =
     Math.max(
       1,
       Math.min(
-        options.maxPages ?? 1,
+        options.maxPages ??
+          1,
         6
       )
     );
 
-  const diagnostics:any={
+  const diagnostics:any = {
     traceVersion:
-      "part5-resilient-v1",
+      "part5-resilient-v2",
+
     architecture:
-      "cf-content-ready>cf-scrape-ready>cf-links-ready>puppeteer",
+      "page-first-adaptive:true-fallback",
+
+    initialOrder:[
+      "cf-content",
+      "cf-scrape",
+      "cf-links",
+      "puppeteer"
+    ],
+
+    gotoWaitUntil:
+      "domcontentloaded",
+
+    listingGotoTimeoutMs:
+      LISTING_GOTO_TIMEOUT_MS,
+
+    selectorTimeoutMs:
+      LISTING_SELECTOR_TIMEOUT_MS,
+
     readySelector:
       options.readySelector,
+
     maxPages,
+
     attempts:[],
     finalPool:[],
-    finalSelection:null
+    finalSelection:null,
+
+    browserLaunches:0
   };
 
-  const pool=
-    new Map<string,Candidate>();
+  const pool =
+    new Map<
+      string,
+      Candidate
+    >();
 
-  let successfulAcquisitions=0;
-  let lastFingerprint="";
-  let lastAiError=false;
+  let successfulPages=0;
+
+  /*
+   * Adaptive stickiness:
+   *
+   * if scrape succeeds on page 1, page 2 starts from scrape.
+   * if browser is required, later pages reuse that browser.
+   */
+  let preferredStageIndex=0;
 
   let browser:any=null;
-  let page:any=null;
+  let browserPage:any=null;
+  let browserLaunchAttempted=false;
 
-  const stages=[
-    "cf-content",
-    "cf-scrape",
-    "cf-links",
-    "puppeteer"
-  ] as const;
+  let lastSelectionFingerprint="";
+  let lastAiError=false;
 
   try {
-    for (const stage of stages) {
-      for (const landingUrl of options.landingUrls) {
+    for (
+      const landingUrl of
+      options.landingUrls
+    ) {
+      for (
+        let pageNumber=1;
+        pageNumber<=maxPages;
+        pageNumber++
+      ) {
+        const pageUrl =
+          pagedUrl(
+            landingUrl,
+            pageNumber
+          );
+
+        const pageStages =
+          STAGES.slice(
+            preferredStageIndex
+          );
+
+        let pageAcquired=false;
+
         for (
-          let pageNumber=1;
-          pageNumber<=maxPages;
-          pageNumber++
+          const stage of
+          pageStages
         ) {
-          const pageUrl=
-            pagedUrl(
-              landingUrl,
-              pageNumber
-            );
-
           try {
-            let candidates:Candidate[]=[];
-            let metadata:any={};
+            let anchors:
+              RawAnchor[] = [];
 
-            if (stage==="cf-content") {
-              const a=
+            let metadata:any =
+              {};
+
+            if (
+              stage ===
+              "cf-content"
+            ) {
+              const acquired =
                 await quickContent(
                   context,
                   pageUrl,
-                  options.readySelector
+                  options.readySelector,
+                  LISTING_GOTO_TIMEOUT_MS,
+                  LISTING_SELECTOR_TIMEOUT_MS
                 );
 
-              const anchors=
-                anchorsFromHtml(a.html);
-
-              candidates=
-                candidatesFromAnchors(
-                  context,
-                  pageUrl,
-                  anchors,
-                  stage,
-                  options.urlPredicate
+              anchors =
+                anchorsFromHtml(
+                  acquired.html
                 );
 
-              metadata={
-                responseStatus:a.status,
-                bodyLength:a.html.length,
-                anchorCount:anchors.length
+              metadata = {
+                status:
+                  acquired.status,
+
+                bodyLength:
+                  acquired
+                    .html
+                    .length,
+
+                anchorCount:
+                  anchors.length
               };
 
-            } else if (stage==="cf-scrape") {
-              const a=
+            } else if (
+              stage ===
+              "cf-scrape"
+            ) {
+              const acquired =
                 await quickScrapeAnchors(
                   context,
                   pageUrl,
                   options.readySelector
                 );
 
-              candidates=
-                candidatesFromAnchors(
-                  context,
-                  pageUrl,
-                  a.anchors,
-                  stage,
-                  options.urlPredicate
-                );
+              anchors =
+                acquired.anchors;
 
-              metadata={
-                responseStatus:a.status,
-                anchorCount:a.anchors.length
+              metadata = {
+                status:
+                  acquired.status,
+
+                anchorCount:
+                  anchors.length
               };
 
-            } else if (stage==="cf-links") {
-              const a=
+            } else if (
+              stage ===
+              "cf-links"
+            ) {
+              const acquired =
                 await quickLinks(
                   context,
                   pageUrl,
                   options.readySelector
                 );
 
-              candidates=
-                candidatesFromAnchors(
-                  context,
-                  pageUrl,
-                  a.links.map(
-                    href=>({
-                      href,
-                      text:href,
-                      identityText:href
-                    })
-                  ),
-                  stage,
-                  options.urlPredicate
+              anchors =
+                acquired.links.map(
+                  href => ({
+                    href,
+                    text:href,
+                    identityText:href
+                  })
                 );
 
-              metadata={
-                responseStatus:a.status,
-                linkCount:a.links.length
+              metadata = {
+                status:
+                  acquired.status,
+
+                linkCount:
+                  acquired.links
+                    .length
               };
 
             } else {
               if (!browser) {
-                browser=
+                if (
+                  browserLaunchAttempted
+                ) {
+                  throw new Error(
+                    "PUPPETEER_LAUNCH_ALREADY_FAILED"
+                  );
+                }
+
+                browserLaunchAttempted=
+                  true;
+
+                browser =
                   await puppeteer.launch(
-                    context.env.BROWSER as any
+                    context.env.BROWSER
+                      as any
                   );
 
-                page=
+                diagnostics.browserLaunches++;
+
+                browserPage =
                   await browser.newPage();
               }
 
-              const a=
+              const acquired =
                 await browserAnchors(
-                  page,
+                  browserPage,
                   pageUrl,
                   options.readySelector
                 );
 
-              candidates=
-                candidatesFromAnchors(
-                  context,
-                  pageUrl,
-                  a.anchors,
-                  stage,
-                  options.urlPredicate
-                );
+              anchors =
+                acquired.anchors;
 
-              metadata={
-                finalUrl:a.finalUrl,
-                anchorCount:a.anchors.length
+              metadata = {
+                finalUrl:
+                  acquired.finalUrl,
+
+                anchorCount:
+                  anchors.length
               };
             }
 
-            successfulAcquisitions++;
 
-            merge(
+            /*
+             * Acquisition succeeded only if it exposed at least
+             * one real editorial/article URL for this adapter.
+             *
+             * Challenge shell / nav-only HTML is NOT success.
+             */
+            const structuralArticles =
+              usableAnchorCount(
+                context,
+                pageUrl,
+                anchors,
+                options.urlPredicate
+              );
+
+            if (
+              structuralArticles <
+              1
+            ) {
+              throw new Error(
+                "LISTING_STRUCTURALLY_UNUSABLE"
+              );
+            }
+
+
+            pageAcquired=true;
+            successfulPages++;
+
+            preferredStageIndex =
+              Math.max(
+                0,
+                STAGES.indexOf(
+                  stage
+                )
+              );
+
+
+            const candidates =
+              candidatesFromAnchors(
+                context,
+                pageUrl,
+                anchors,
+                stage,
+                options.urlPredicate
+              );
+
+            mergeCandidates(
               pool,
               candidates
             );
 
-            const accumulated=
-              poolValues(pool);
+            const accumulated =
+              candidatePool(
+                pool
+              );
 
-            const cov=
+            const currentCoverage =
               coverage(
                 accumulated,
                 context.cities
               );
 
-            diagnostics.attempts.push({
-              stage,
-              pageNumber,
-              pageUrl,
-              waitedForSelector:
-                options.readySelector,
-              ...metadata,
-              stageCandidateCount:
-                candidates.length,
-              accumulatedCandidateCount:
-                accumulated.length,
-              coverage:cov
-            });
+            diagnostics
+              .attempts
+              .push({
+                pageNumber,
+                pageUrl,
+                stage,
 
-            if (!cov.complete)
-              continue;
+                result:
+                  "usable-listing",
 
-            const fp=
-              fingerprint(accumulated);
+                structuralArticles,
+
+                ...metadata,
+
+                stageCandidateCount:
+                  candidates.length,
+
+                accumulatedCandidateCount:
+                  accumulated.length,
+
+                coverage:
+                  currentCoverage,
+
+                nextPagePreferredStage:
+                  STAGES[
+                    preferredStageIndex
+                  ]
+              });
+
+
+            /*
+             * If this page was structurally acquired but does
+             * not contain the target, DO NOT run lower transports.
+             * That is pagination, not acquisition failure.
+             */
+            if (
+              !currentCoverage
+                .complete
+            ) {
+              break;
+            }
+
+
+            const currentFingerprint =
+              fingerprint(
+                accumulated
+              );
 
             if (
-              fp===lastFingerprint &&
+              currentFingerprint ===
+                lastSelectionFingerprint &&
               !lastAiError
-            ) continue;
+            ) {
+              break;
+            }
 
-            const s=
-              await select(
+
+            const selection =
+              await selectCandidates(
                 context,
                 accumulated
               );
 
-            lastFingerprint=fp;
-            lastAiError=
-              Boolean(s.aiError);
+            lastSelectionFingerprint =
+              currentFingerprint;
 
-            const sc=
+            lastAiError =
+              Boolean(
+                selection.aiError
+              );
+
+
+            const selectionCoverage =
               selectedCoverage(
-                s.urls,
+                selection.urls,
                 accumulated,
                 context.cities
               );
 
-            diagnostics.attempts.push({
-              stage:
-                `${stage}-workers-ai-selection`,
-              pageNumber,
-              pageUrl,
-              candidateCount:
-                accumulated.length,
-              selected:s.urls,
-              aiError:s.aiError,
-              coverage:sc,
-              semantic:s.diagnostics
-            });
+
+            diagnostics
+              .attempts
+              .push({
+                pageNumber,
+                pageUrl,
+
+                stage:
+                  `${stage}-workers-ai-selection`,
+
+                candidateCount:
+                  accumulated.length,
+
+                selected:
+                  selection.urls,
+
+                aiError:
+                  selection.aiError,
+
+                coverage:
+                  selectionCoverage,
+
+                semantic:
+                  selection.diagnostics
+              });
+
 
             if (
-              s.urls.length &&
-              sc.complete
+              selection.urls.length &&
+              selectionCoverage
+                .complete
             ) {
-              diagnostics.finalPool=
-                accumulated.map(c=>({
-                  url:c.url,
-                  score:c.score,
-                  matchedCities:
-                    c.matchedCities,
-                  stage:c.stage,
-                  pageUrl:c.pageUrl,
-                  text:
-                    c.text.slice(0,500)
-                }));
+              diagnostics.finalPool =
+                accumulated.map(
+                  candidate => ({
+                    url:
+                      candidate.url,
 
-              diagnostics.finalSelection={
-                selected:s.urls,
-                coverage:sc,
+                    score:
+                      candidate.score,
+
+                    matchedCities:
+                      candidate
+                        .matchedCities,
+
+                    stage:
+                      candidate.stage,
+
+                    pageUrl:
+                      candidate.pageUrl,
+
+                    text:
+                      candidate.text
+                        .slice(
+                          0,
+                          500
+                        )
+                  })
+                );
+
+              diagnostics.finalSelection = {
+                selected:
+                  selection.urls,
+
+                coverage:
+                  selectionCoverage,
+
                 aiError:null
               };
 
               return {
                 status:"ready",
                 mode:"article",
-                targets:s.urls,
+
+                targets:
+                  selection.urls,
+
                 discoveredFromUrl:
                   pageUrl,
+
                 discoveryMethod:
-                  "resilient-article-ladder-workers-ai",
+                  `${stage}-page-first-workers-ai`,
+
                 diagnostics
               };
             }
 
-          } catch (e) {
-            diagnostics.attempts.push({
-              stage,
+
+            /*
+             * AI uncertainty is not a transport failure.
+             * Continue bounded pagination instead of burning
+             * Browser Run fallbacks on the same page.
+             */
+            break;
+
+          } catch(error) {
+            diagnostics
+              .attempts
+              .push({
+                pageNumber,
+                pageUrl,
+                stage,
+
+                result:
+                  "acquisition-failed",
+
+                error:
+                  errorMessage(
+                    error
+                  )
+              });
+
+            /*
+             * TRUE fallback:
+             * try next lower acquisition method on SAME page.
+             */
+            continue;
+          }
+        }
+
+
+        if (!pageAcquired) {
+          diagnostics
+            .attempts
+            .push({
               pageNumber,
               pageUrl,
-              waitedForSelector:
-                options.readySelector,
-              error:err(e)
+
+              result:
+                "page-unavailable-all-stages"
             });
-          }
         }
       }
     }
@@ -797,296 +1673,595 @@ export async function resolveResilientArticleTargets(
       try {
         await browser.close();
       } catch {
-        // cleanup
+        // Non-fatal cleanup.
       }
     }
   }
 
-  const finalCandidates=
-    poolValues(pool);
 
-  diagnostics.finalPool=
-    finalCandidates.map(c=>({
-      url:c.url,
-      score:c.score,
-      matchedCities:
-        c.matchedCities,
-      stage:c.stage,
-      pageUrl:c.pageUrl,
-      text:
-        c.text.slice(0,500)
-    }));
+  const finalCandidates =
+    candidatePool(
+      pool
+    );
 
+  diagnostics.finalPool =
+    finalCandidates.map(
+      candidate => ({
+        url:
+          candidate.url,
+
+        score:
+          candidate.score,
+
+        matchedCities:
+          candidate
+            .matchedCities,
+
+        stage:
+          candidate.stage,
+
+        pageUrl:
+          candidate.pageUrl,
+
+        text:
+          candidate.text
+            .slice(
+              0,
+              500
+            )
+      })
+    );
+
+
+  const finalCoverage =
+    coverage(
+      finalCandidates,
+      context.cities
+    );
+
+
+  /*
+   * One final AI retry only if structural discovery actually
+   * covers every target city. Never call AI on zero/partial
+   * discovery.
+   */
   if (
     finalCandidates.length &&
+    finalCoverage.complete &&
     (
-      fingerprint(finalCandidates)!==
-        lastFingerprint ||
+      fingerprint(
+        finalCandidates
+      ) !==
+        lastSelectionFingerprint ||
       lastAiError
     )
   ) {
-    const s=
-      await select(
+    const selection =
+      await selectCandidates(
         context,
         finalCandidates
       );
 
-    const sc=
+    const selectionCoverage =
       selectedCoverage(
-        s.urls,
+        selection.urls,
         finalCandidates,
         context.cities
       );
 
-    diagnostics.finalSelection={
-      selected:s.urls,
-      aiError:s.aiError,
-      coverage:sc,
-      semantic:s.diagnostics
+    diagnostics.finalSelection = {
+      selected:
+        selection.urls,
+
+      aiError:
+        selection.aiError,
+
+      coverage:
+        selectionCoverage,
+
+      semantic:
+        selection.diagnostics
     };
 
     if (
-      s.urls.length &&
-      sc.complete
+      selection.urls.length &&
+      selectionCoverage.complete
     ) {
       return {
         status:"ready",
         mode:"article",
-        targets:s.urls,
+
+        targets:
+          selection.urls,
+
         discoveredFromUrl:
-          options.landingUrls[0] ?? null,
+          options
+            .landingUrls[0] ??
+          null,
+
         discoveryMethod:
-          "resilient-article-ladder-final-workers-ai",
+          "page-first-final-workers-ai",
+
         diagnostics
       };
     }
   }
 
-  diagnostics.successfulAcquisitions=
-    successfulAcquisitions;
+
+  diagnostics.successfulPages =
+    successfulPages;
+
+  diagnostics.finalCoverage =
+    finalCoverage;
+
 
   return {
     status:
-      successfulAcquisitions>0
+      successfulPages > 0
         ? "not-published"
         : "unavailable",
+
     mode:"article",
     targets:[],
+
     discoveredFromUrl:
-      options.landingUrls[0] ?? null,
+      options
+        .landingUrls[0] ??
+      null,
+
     discoveryMethod:null,
+
     diagnostics
   };
 }
 
-async function scrapeArticle(
+
+function articleQuality(
   context:ExpertAcquireContext,
-  url:string,
+  html:string
+) {
+  const $ =
+    load(html);
+
+  $(
+    "script,style,noscript,svg,canvas,iframe,nav,footer,form"
+  ).remove();
+
+  const roots = [
+    "article",
+    "main",
+    "[role='main']",
+    "body"
+  ];
+
+  let text="";
+
+  for (const selector of roots) {
+    const candidate =
+      cleanExpertInlineText(
+        $(selector)
+          .text(),
+        50000
+      );
+
+    if (
+      candidate.length >
+      text.length
+    ) {
+      text=candidate;
+    }
+
+    if (
+      candidate.length >=
+      500
+    ) {
+      text=candidate;
+      break;
+    }
+  }
+
+  const material =
+    normalizeExpertSearchText(
+      text
+    );
+
+  const matchedCities =
+    context.cities.filter(
+      city =>
+        material.includes(
+          normalizeExpertSearchText(
+            city
+          )
+        )
+    );
+
+  const predictionHit =
+    [
+      "tahmin",
+      "analiz",
+      "banko",
+      "favori",
+      "rakip",
+      "sürpriz",
+      "ganyan",
+      "altılı",
+      "koşu",
+      "yarış"
+    ]
+      .some(
+        term =>
+          material.includes(
+            normalizeExpertSearchText(
+              term
+            )
+          )
+      );
+
+  return {
+    ok:
+      text.length >= 200 &&
+      matchedCities.length > 0 &&
+      predictionHit,
+
+    characters:
+      text.length,
+
+    matchedCities,
+    predictionHit
+  };
+}
+
+
+async function quickScrapeArticle(
+  context:ExpertAcquireContext,
   selector:string
 ):Promise<AcquiredHtml> {
-  const r=
-    await context.env.BROWSER.quickAction(
-      "scrape",
-      {
-        url,
-        elements:[
-          {
-            selector:"body"
-          }
-        ],
-        gotoOptions:{
-          waitUntil:"networkidle2",
-          timeout:GOTO_TIMEOUT_MS
-        },
-        waitForSelector:{
-          selector,
-          timeout:SELECTOR_TIMEOUT_MS
-        },
-        rejectResourceTypes:[
-          "image",
-          "media",
-          "font"
-        ]
-      } as any
-    );
+  const response =
+    await context.env.BROWSER
+      .quickAction(
+        "scrape",
+        {
+          url:
+            context.url,
 
-  if (!r.ok)
+          elements:[
+            {
+              selector:"body"
+            }
+          ],
+
+          gotoOptions:{
+            waitUntil:
+              "domcontentloaded",
+
+            timeout:
+              ARTICLE_GOTO_TIMEOUT_MS
+          },
+
+          waitForSelector:{
+            selector,
+
+            timeout:
+              ARTICLE_SELECTOR_TIMEOUT_MS
+          },
+
+          rejectResourceTypes:[
+            "image",
+            "media",
+            "font"
+          ]
+        } as any
+      );
+
+  if (!response.ok) {
     throw new Error(
-      `CF_SCRAPE_ARTICLE_HTTP_${r.status}`
+      `CF_SCRAPE_ARTICLE_HTTP_${response.status}`
     );
+  }
 
-  const body=
+  const body =
     findHtml(
       unwrap(
-        await r.json()
+        await response.json()
       )
     );
 
-  if (!body)
+  if (!body) {
     throw new Error(
       "CF_SCRAPE_ARTICLE_HTML_NOT_FOUND"
     );
+  }
 
-  const html=
+  const html =
     body
       .toLowerCase()
       .includes("<html")
         ? body
         : `<html><body>${body}</body></html>`;
 
-  if (html.length<500)
+  if (html.length < 500) {
     throw new Error(
       `CF_SCRAPE_ARTICLE_TOO_SMALL:${html.length}`
     );
+  }
 
   return {
     stage:"cf-scrape",
     html,
-    requestedUrl:url,
+
+    requestedUrl:
+      context.url,
+
     finalUrl:null,
-    status:r.status,
-    contentType:"text/html",
-    bodyLength:html.length
+
+    status:
+      response.status,
+
+    contentType:
+      "text/html",
+
+    bodyLength:
+      html.length
   };
 }
+
 
 export async function acquireResilientArticleHtml(
   context:ExpertAcquireContext,
   options:ResilientArticleAcquireOptions
 ):Promise<AcquiredHtml> {
-  const failures:any[]=[];
+  const failures:any[] =
+    [];
 
-  const traced=(
-    a:AcquiredHtml,
-    selectedStage:string
-  ):AcquiredHtml=>({
-    ...a,
-    diagnostics:{
-      traceVersion:
-        "part5-article-acquisition-v1",
-      architecture:
-        "cf-content-ready>cf-scrape-ready>puppeteer",
-      readySelector:
-        options.readySelector,
-      selectedStage,
-      previousFailures:[
-        ...failures
-      ]
-    }
-  } as AcquiredHtml & {diagnostics:any});
 
+  const withTrace = (
+    acquired:AcquiredHtml,
+    selectedStage:string,
+    quality:any
+  ):AcquiredHtml => {
+    return {
+      ...acquired,
+
+      diagnostics:{
+        traceVersion:
+          "part5-article-acquisition-v2",
+
+        architecture:
+          "content>scrape>puppeteer:true-fallback",
+
+        gotoWaitUntil:
+          "domcontentloaded",
+
+        selectedStage,
+
+        readySelector:
+          options.readySelector,
+
+        quality,
+
+        previousFailures:[
+          ...failures
+        ]
+      }
+    } as
+      AcquiredHtml & {
+        diagnostics:any
+      };
+  };
+
+
+  /*
+   * Article CONTENT
+   */
   try {
-    const a=
+    const acquired =
       await quickContent(
-        context as any,
+        context,
         context.url,
+        options.readySelector,
+        ARTICLE_GOTO_TIMEOUT_MS,
+        ARTICLE_SELECTOR_TIMEOUT_MS
+      );
+
+    const quality =
+      articleQuality(
+        context,
+        acquired.html
+      );
+
+    if (!quality.ok) {
+      throw new Error(
+        "CF_CONTENT_ARTICLE_QUALITY_FAILED:" +
+        JSON.stringify(
+          quality
+        )
+      );
+    }
+
+    return withTrace(
+      {
+        stage:"cf-content",
+
+        html:
+          acquired.html,
+
+        requestedUrl:
+          context.url,
+
+        finalUrl:null,
+
+        status:
+          acquired.status,
+
+        contentType:
+          "text/html",
+
+        bodyLength:
+          acquired.html.length
+      },
+      "cf-content",
+      quality
+    );
+
+  } catch(error) {
+    failures.push({
+      stage:"cf-content",
+
+      error:
+        errorMessage(
+          error
+        )
+    });
+  }
+
+
+  /*
+   * Article SCRAPE
+   */
+  try {
+    const acquired =
+      await quickScrapeArticle(
+        context,
         options.readySelector
       );
 
-    return traced(
-      {
-        stage:"cf-content",
-        html:a.html,
-        requestedUrl:
-          context.url,
-        finalUrl:null,
-        status:a.status,
-        contentType:"text/html",
-        bodyLength:a.html.length
-      },
-      "cf-content"
-    );
-
-  } catch (e) {
-    failures.push({
-      stage:"cf-content",
-      waitedForSelector:
-        options.readySelector,
-      error:err(e)
-    });
-  }
-
-  try {
-    return traced(
-      await scrapeArticle(
+    const quality =
+      articleQuality(
         context,
-        context.url,
-        options.readySelector
-      ),
-      "cf-scrape"
+        acquired.html
+      );
+
+    if (!quality.ok) {
+      throw new Error(
+        "CF_SCRAPE_ARTICLE_QUALITY_FAILED:" +
+        JSON.stringify(
+          quality
+        )
+      );
+    }
+
+    return withTrace(
+      acquired,
+      "cf-scrape",
+      quality
     );
 
-  } catch (e) {
+  } catch(error) {
     failures.push({
       stage:"cf-scrape",
-      waitedForSelector:
-        options.readySelector,
-      error:err(e)
+
+      error:
+        errorMessage(
+          error
+        )
     });
   }
 
+
+  /*
+   * Expensive last resort.
+   * ONE browser instance, one article navigation.
+   */
   let browser:any=null;
 
   try {
-    browser=
+    browser =
       await puppeteer.launch(
-        context.env.BROWSER as any
+        context.env.BROWSER
+          as any
       );
 
-    const page=
+    const page =
       await browser.newPage();
 
     await page.goto(
       context.url,
       {
-        waitUntil:"networkidle2",
-        timeout:GOTO_TIMEOUT_MS
+        waitUntil:
+          "domcontentloaded",
+
+        timeout:
+          ARTICLE_GOTO_TIMEOUT_MS
       }
     );
 
     await page.waitForSelector(
       options.readySelector,
       {
-        timeout:SELECTOR_TIMEOUT_MS
+        timeout:
+          ARTICLE_SELECTOR_TIMEOUT_MS
       }
     );
 
-    const html=
+    const html =
       String(
         await page.content()
       );
 
-    if (html.length<500)
+    if (
+      html.length <
+      500
+    ) {
       throw new Error(
-        `BROWSER_ARTICLE_TOO_SMALL:${html.length}`
+        `PUPPETEER_ARTICLE_TOO_SMALL:${html.length}`
+      );
+    }
+
+    const quality =
+      articleQuality(
+        context,
+        html
       );
 
-    return traced(
+    if (!quality.ok) {
+      throw new Error(
+        "PUPPETEER_ARTICLE_QUALITY_FAILED:" +
+        JSON.stringify(
+          quality
+        )
+      );
+    }
+
+    return withTrace(
       {
         stage:"browser-session",
         html,
+
         requestedUrl:
           context.url,
+
         finalUrl:
-          String(page.url()),
+          String(
+            page.url()
+          ),
+
         status:200,
-        contentType:"text/html",
-        bodyLength:html.length
+
+        contentType:
+          "text/html",
+
+        bodyLength:
+          html.length
       },
-      "browser-session"
+      "browser-session",
+      quality
     );
 
-  } catch (e) {
+  } catch(error) {
     failures.push({
       stage:"browser-session",
-      waitedForSelector:
-        options.readySelector,
-      error:err(e)
+
+      error:
+        errorMessage(
+          error
+        )
     });
 
     throw new Error(
-      "RESILIENT_ARTICLE_ACQUISITION_FAILED:"+
-      JSON.stringify(failures)
+      "RESILIENT_ARTICLE_ACQUISITION_FAILED:" +
+      JSON.stringify(
+        failures
+      )
     );
 
   } finally {
@@ -1094,7 +2269,7 @@ export async function acquireResilientArticleHtml(
       try {
         await browser.close();
       } catch {
-        // cleanup
+        // Non-fatal cleanup.
       }
     }
   }

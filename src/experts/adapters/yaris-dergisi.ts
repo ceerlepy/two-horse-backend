@@ -1,77 +1,144 @@
-import { resolveArticleAdapter } from "./common";
-import { acquireResilientArticleHtml, resolveResilientArticleTargets } from "./resilient-article";
-import type { ExpertAdapter, ExpertAdapterContext, ExpertTargetResolution } from "./types";
+import {
+  resolveArticleAdapter
+} from "./common";
 
-const TAG="https://www.yarisdergisi.com/tag/yaris-tahminleri/";
-const LIST_READY="article a[href],.post a[href],.entry a[href],h2 a[href],h3 a[href]";
-const ARTICLE_READY="article,main,.entry-content,.post-content,[role='main'],h1";
+import {
+  acquireResilientArticleHtml,
+  resolveResilientArticleTargets
+} from "./resilient-article";
 
-function ownsArticle(value:string) {
+import type {
+  ExpertAdapter
+} from "./types";
+
+
+const TAG =
+  "https://www.yarisdergisi.com/tag/yaris-tahminleri/";
+
+const LIST_READY =
+  "article a[href],.post a[href],.entry a[href],h2 a[href],h3 a[href]";
+
+const ARTICLE_READY =
+  "article,main,.entry-content,.post-content,[role='main'],h1";
+
+
+function ownsArticle(
+  value:string
+):boolean {
   try {
-    const u=new URL(value);
-    const host=u.hostname.replace(/^www\./,"").toLowerCase();
-    const path=u.pathname.toLowerCase();
+    const url =
+      new URL(value);
+
+    const host =
+      url.hostname
+        .replace(/^www\./,"")
+        .toLowerCase();
+
+    const path =
+      url.pathname
+        .toLowerCase();
 
     return (
-      host==="yarisdergisi.com" &&
-      path!=="/" &&
+      host ===
+        "yarisdergisi.com" &&
+      path !== "/" &&
       !path.startsWith("/tag/") &&
       !path.startsWith("/category/")
     );
+
   } catch {
     return false;
   }
 }
 
-async function resolveYD(
-  context:ExpertAdapterContext
-):Promise<ExpertTargetResolution> {
-  const ladder=
-    await resolveResilientArticleTargets(
-      context,
-      {
-        landingUrls:[TAG],
-        readySelector:LIST_READY,
-        maxPages:4,
-        urlPredicate:ownsArticle
+
+export const yarisDergisiAdapter:
+  ExpertAdapter = {
+    sourceKey:
+      "yaris_dergisi",
+
+    async resolve(context) {
+      const primary =
+        await resolveResilientArticleTargets(
+          context,
+          {
+            landingUrls:[
+              TAG
+            ],
+
+            readySelector:
+              LIST_READY,
+
+            maxPages:4,
+
+            urlPredicate:
+              ownsArticle
+          }
+        );
+
+      if (
+        primary.status ===
+        "ready"
+      )
+        return primary;
+
+
+      /*
+       * Feed is cheap HTTP fallback.
+       * Generic Browser discovery is intentionally disabled.
+       */
+      const feed =
+        await resolveArticleAdapter(
+          context,
+          {
+            landingUrls:[],
+            verifyTargets:true,
+            requireCityCoverage:true,
+            allowGeneric:false,
+            allowFeed:true
+          }
+        );
+
+      if (
+        feed.status ===
+        "ready"
+      ) {
+        return {
+          ...feed,
+
+          diagnostics:{
+            primary:
+              primary.diagnostics,
+
+            feed:
+              feed.diagnostics
+          }
+        };
       }
-    );
 
-  if (ladder.status==="ready")
-    return ladder;
+      return {
+        ...primary,
 
-  const fallback=
-    await resolveArticleAdapter(
-      context,
-      {
-        verifyTargets:true,
-        requireCityCoverage:true,
-        allowGeneric:true,
-        allowFeed:true
-      }
-    );
+        diagnostics:{
+          primary:
+            primary.diagnostics,
 
-  return {
-    ...fallback,
-    diagnostics:{
-      ladder:ladder.diagnostics,
-      legacyAndFeedFallback:
-        fallback.diagnostics
-    }
-  };
-}
+          feed:
+            feed.diagnostics
+        }
+      };
+    },
 
-export const yarisDergisiAdapter:ExpertAdapter={
-  sourceKey:"yaris_dergisi",
-  resolve:resolveYD,
-  ownsAcquisition:ownsArticle,
-  acquireHtml:
-    context=>
-      acquireResilientArticleHtml(
+    ownsAcquisition:
+      ownsArticle,
+
+    acquireHtml(context) {
+      return acquireResilientArticleHtml(
         context,
         {
           readySelector:
             ARTICLE_READY
         }
-      )
-};
+      );
+    }
+  };

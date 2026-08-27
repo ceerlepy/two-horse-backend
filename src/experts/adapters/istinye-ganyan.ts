@@ -1,88 +1,162 @@
-import { turkeyDate } from "../../shared";
-import { resolveArticleAdapter, resolveDirectAdapter } from "./common";
-import { acquireResilientArticleHtml, resolveResilientArticleTargets } from "./resilient-article";
-import type { ExpertAdapter, ExpertAdapterContext, ExpertTargetResolution } from "./types";
+import {
+  turkeyDate
+} from "../../shared";
 
-const ARCHIVE="https://istinyeganyan.com/kategori/at-yarisi/";
-const CURRENT="https://istinyeganyan.com/ganyan/tahminler/";
-const LIST_READY="article a[href],.post a[href],.entry a[href],h2 a[href],h3 a[href]";
-const ARTICLE_READY="article,main,.entry-content,.post-content,[role='main'],h1";
+import {
+  resolveArticleAdapter,
+  resolveDirectAdapter
+} from "./common";
 
-function ownsHistorical(value:string) {
+import {
+  acquireResilientArticleHtml,
+  resolveResilientArticleTargets
+} from "./resilient-article";
+
+import type {
+  ExpertAdapter
+} from "./types";
+
+
+const ARCHIVE =
+  "https://istinyeganyan.com/kategori/at-yarisi/";
+
+const CURRENT =
+  "https://istinyeganyan.com/ganyan/tahminler/";
+
+const LIST_READY =
+  "article a[href],.post a[href],.entry a[href],h2 a[href],h3 a[href]";
+
+const ARTICLE_READY =
+  "article,main,.entry-content,.post-content,[role='main'],h1";
+
+
+function ownsHistorical(
+  value:string
+):boolean {
   try {
-    const u=new URL(value);
-    const host=u.hostname.replace(/^www\./,"").toLowerCase();
+    const url =
+      new URL(value);
+
+    const host =
+      url.hostname
+        .replace(/^www\./,"")
+        .toLowerCase();
 
     return (
-      host==="istinyeganyan.com" &&
-      u.toString()!==CURRENT &&
-      !u.pathname
+      host ===
+        "istinyeganyan.com" &&
+      url.toString() !==
+        CURRENT &&
+      !url.pathname
         .toLowerCase()
-        .startsWith("/kategori/")
+        .startsWith(
+          "/kategori/"
+        )
     );
+
   } catch {
     return false;
   }
 }
 
-async function resolveHistorical(
-  context:ExpertAdapterContext
-):Promise<ExpertTargetResolution> {
-  const ladder=
-    await resolveResilientArticleTargets(
-      context,
-      {
-        landingUrls:[ARCHIVE],
-        readySelector:LIST_READY,
-        maxPages:5,
-        urlPredicate:ownsHistorical
+
+export const istinyeGanyanAdapter:
+  ExpertAdapter = {
+    sourceKey:
+      "istinye_ganyan",
+
+    async resolve(context) {
+      if (
+        context.raceDate >=
+        turkeyDate()
+      ) {
+        return resolveDirectAdapter(
+          context
+        );
       }
-    );
 
-  if (ladder.status==="ready")
-    return ladder;
 
-  const fallback=
-    await resolveArticleAdapter(
-      context,
-      {
-        landingUrls:[ARCHIVE],
-        verifyTargets:true,
-        requireCityCoverage:true,
-        allowGeneric:true,
-        allowFeed:true
+      const primary =
+        await resolveResilientArticleTargets(
+          context,
+          {
+            landingUrls:[
+              ARCHIVE
+            ],
+
+            readySelector:
+              LIST_READY,
+
+            maxPages:5,
+
+            urlPredicate:
+              ownsHistorical
+          }
+        );
+
+      if (
+        primary.status ===
+        "ready"
+      )
+        return primary;
+
+
+      /*
+       * Historical feed fallback only.
+       * Do not restart expensive generic Browser discovery.
+       */
+      const feed =
+        await resolveArticleAdapter(
+          context,
+          {
+            landingUrls:[],
+            verifyTargets:true,
+            requireCityCoverage:true,
+            allowGeneric:false,
+            allowFeed:true
+          }
+        );
+
+      if (
+        feed.status ===
+        "ready"
+      ) {
+        return {
+          ...feed,
+
+          diagnostics:{
+            primary:
+              primary.diagnostics,
+
+            feed:
+              feed.diagnostics
+          }
+        };
       }
-    );
 
-  return {
-    ...fallback,
-    diagnostics:{
-      ladder:ladder.diagnostics,
-      legacyAndFeedFallback:
-        fallback.diagnostics
-    }
-  };
-}
+      return {
+        ...primary,
 
-export const istinyeGanyanAdapter:ExpertAdapter={
-  sourceKey:"istinye_ganyan",
+        diagnostics:{
+          primary:
+            primary.diagnostics,
 
-  resolve:
-    context=>
-      context.raceDate<turkeyDate()
-        ? resolveHistorical(context)
-        : resolveDirectAdapter(context),
+          feed:
+            feed.diagnostics
+        }
+      };
+    },
 
-  ownsAcquisition:
-    ownsHistorical,
+    ownsAcquisition:
+      ownsHistorical,
 
-  acquireHtml:
-    context=>
-      acquireResilientArticleHtml(
+    acquireHtml(context) {
+      return acquireResilientArticleHtml(
         context,
         {
           readySelector:
             ARTICLE_READY
         }
-      )
-};
+      );
+    }
+  };
