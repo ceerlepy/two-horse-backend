@@ -155,6 +155,20 @@ export interface VerifiedArticlePlan {
   allowPuppeteerArticle?:
     boolean;
 
+  /*
+   * Discovery ownership and extraction ownership are
+   * intentionally separate.
+   *
+   * Default false:
+   *   shared verified discovery
+   *   + normal static extraction pipeline.
+   *
+   * True:
+   *   adapter also owns article acquisition.
+   */
+  adapterOwnedExtraction?:
+    boolean;
+
   browserNavigationBudget?:
     number;
 
@@ -2553,65 +2567,77 @@ export function createVerifiedArticleAdapter(
   plan:
     VerifiedArticlePlan
 ):ExpertAdapter {
-  return {
-    sourceKey:
-      plan.sourceKey,
+  const adapter:
+    ExpertAdapter = {
+      sourceKey:
+        plan.sourceKey,
 
-    async resolve(context) {
-      const primary =
-        await resolveVerifiedArticleTargets(
-          context,
-          plan
-        );
+      async resolve(context) {
+        const primary =
+          await resolveVerifiedArticleTargets(
+            context,
+            plan
+          );
 
-      if (
-        primary.status ===
-        "ready"
-      ) {
-        return primary;
-      }
+        if (
+          primary.status ===
+          "ready"
+        ) {
+          return primary;
+        }
 
-      const fallback =
-        plan.fallback ??
-        "none";
+        const fallback =
+          plan.fallback ??
+          "none";
 
-      if (
-        fallback ===
-        "none"
-      ) {
-        return primary;
-      }
-
-      /*
-       * Known-good old adapters retain their proven resolver
-       * only as a LAST RESCUE path.
-       *
-       * New primary path remains HTTP-first.
-       */
-      const legacy =
-        await resolveArticleAdapter(
-          context,
+        if (
           fallback ===
-            "legacy"
-            ? {
-                allowFeed:true,
-                verifyTargets:false
-              }
-            : {
-                landingUrls:[],
-                allowGeneric:false,
-                allowFeed:true,
-                verifyTargets:true,
-                requireCityCoverage:true
-              }
-        );
+          "none"
+        ) {
+          return primary;
+        }
 
-      if (
-        legacy.status ===
-        "ready"
-      ) {
+        /*
+         * Existing proven resolver remains LAST RESCUE.
+         * New primary discovery is still HTTP-first.
+         */
+        const legacy =
+          await resolveArticleAdapter(
+            context,
+            fallback ===
+              "legacy"
+              ? {
+                  allowFeed:true,
+                  verifyTargets:false
+                }
+              : {
+                  landingUrls:[],
+                  allowGeneric:false,
+                  allowFeed:true,
+                  verifyTargets:true,
+                  requireCityCoverage:true
+                }
+          );
+
+        if (
+          legacy.status ===
+          "ready"
+        ) {
+          return {
+            ...legacy,
+
+            diagnostics:{
+              primary:
+                primary.diagnostics,
+
+              fallback:
+                legacy.diagnostics
+            }
+          };
+        }
+
         return {
-          ...legacy,
+          ...primary,
 
           diagnostics:{
             primary:
@@ -2622,38 +2648,41 @@ export function createVerifiedArticleAdapter(
           }
         };
       }
+    };
 
-      return {
-        ...primary,
 
-        diagnostics:{
-          primary:
-            primary.diagnostics,
+  /*
+   * Static sources must remain browser-free /
+   * adapter-acquisition-free by contract.
+   *
+   * Only sources which explicitly request special acquisition
+   * receive acquireHtml + ownsAcquisition.
+   */
+  if (
+    plan.adapterOwnedExtraction ===
+    true
+  ) {
+    adapter.ownsAcquisition =
+      (
+        url:string
+      ) =>
+        plan.ownsArticle(
+          url
+        );
 
-          fallback:
-            legacy.diagnostics
-        }
-      };
-    },
+    adapter.acquireHtml =
+      context =>
+        acquireHttpFirstArticleHtml(
+          context,
+          {
+            allowPuppeteer:
+              plan
+                .allowPuppeteerArticle ===
+              true
+          }
+        );
+  }
 
-    ownsAcquisition(
-      url
-    ) {
-      return plan.ownsArticle(
-        url
-      );
-    },
 
-    acquireHtml(context) {
-      return acquireHttpFirstArticleHtml(
-        context,
-        {
-          allowPuppeteer:
-            plan
-              .allowPuppeteerArticle ===
-            true
-        }
-      );
-    }
-  };
+  return adapter;
 }

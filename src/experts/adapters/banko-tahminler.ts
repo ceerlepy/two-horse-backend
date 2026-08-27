@@ -109,6 +109,12 @@ export const bankoTahminlerAdapter =
     allowPuppeteerDiscovery:true,
     allowPuppeteerArticle:true,
 
+    /*
+     * This problematic source owns its bounded article
+     * acquisition path.
+     */
+    adapterOwnedExtraction:true,
+
     browserNavigationBudget:2,
 
     fallback:"feed"

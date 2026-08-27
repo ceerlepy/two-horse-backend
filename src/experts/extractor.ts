@@ -584,11 +584,31 @@ async function acquireDocument(
   }
 
 
-  for (
-    const stage of
-    EXPERT_ACQUISITION_CONFIG
+  /*
+   * Ordinary static article acquisition is HTTP-first.
+   *
+   * Browser Run Quick Actions are fallback only.
+   *
+   * Do not make static sources adapter-owned merely to
+   * achieve HTTP-first acquisition.
+   */
+  const normalArticleStages = [
+    "http" as const,
+
+    ...EXPERT_ACQUISITION_CONFIG
       .extraction
       .acquisitionOrder
+      .filter(
+        stage =>
+          stage !==
+          "http"
+      )
+  ];
+
+
+  for (
+    const stage of
+    normalArticleStages
   ) {
     try {
       const acquired =

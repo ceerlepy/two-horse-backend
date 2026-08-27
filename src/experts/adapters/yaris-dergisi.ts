@@ -98,6 +98,12 @@ export const yarisDergisiAdapter =
     allowPuppeteerArticle:true,
 
     /*
+     * This problematic source owns its bounded article
+     * acquisition path.
+     */
+    adapterOwnedExtraction:true,
+
+    /*
      * TOTAL across listing + verification.
      * Not per page.
      */
