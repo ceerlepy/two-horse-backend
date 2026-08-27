@@ -1,28 +1,21 @@
 import {
-  resolveArticleAdapter
-} from "./common";
+  createVerifiedArticleAdapter
+} from "./verified-article";
 
 import {
-  acquireResilientArticleHtml,
-  resolveResilientArticleTargets
-} from "./resilient-article";
-
-import type {
-  ExpertAdapter
-} from "./types";
+  dateSearchText,
+  wordpressSearchUrl
+} from "./article-url-utils";
 
 
-const HOME =
+const ROOT =
   "https://www.bankotahminler.com/";
 
 const CATEGORY =
   "https://www.bankotahminler.com/kategori/tahminler/";
 
-const LIST_READY =
-  "body";
-
-const ARTICLE_READY =
-  "body";
+const BULLETIN =
+  "https://www.bankotahminler.com/bulten/";
 
 
 function ownsArticle(
@@ -49,9 +42,6 @@ function ownsArticle(
       ) &&
       !path.includes(
         "/ai-tahmin/"
-      ) &&
-      !path.startsWith(
-        "/kategori/"
       )
     );
 
@@ -61,94 +51,65 @@ function ownsArticle(
 }
 
 
-export const bankoTahminlerAdapter:
-  ExpertAdapter = {
+export const bankoTahminlerAdapter =
+  createVerifiedArticleAdapter({
     sourceKey:
       "banko_tahminler",
 
-    async resolve(context) {
-      const primary =
-        await resolveResilientArticleTargets(
-          context,
-          {
-            landingUrls:[
-              HOME,
-              CATEGORY
-            ],
+    sourceName:
+      "Banko Tahminler",
 
-            readySelector:
-              LIST_READY,
+    ownsArticle,
 
-            maxPages:4,
+    discoveryUrls(
+      context
+    ) {
+      return [
+        /*
+         * Date-only search first:
+         * ideally Ankara + Kocaeli on one rendered page.
+         */
+        wordpressSearchUrl(
+          ROOT,
+          dateSearchText(
+            context.raceDate
+          )
+        ),
 
-            urlPredicate:
-              ownsArticle
-          }
-        );
+        CATEGORY,
+        BULLETIN,
 
-      if (
-        primary.status ===
-        "ready"
-      ) {
-        return primary;
-      }
-
-      /*
-       * Cheap configured feed fallback.
-       * No extra Puppeteer pagination.
-       */
-      const feed =
-        await resolveArticleAdapter(
-          context,
-          {
-            landingUrls:[],
-            verifyTargets:true,
-            requireCityCoverage:true,
-            allowGeneric:false,
-            allowFeed:true
-          }
-        );
-
-      if (
-        feed.status ===
-        "ready"
-      ) {
-        return {
-          ...feed,
-
-          diagnostics:{
-            primary:
-              primary.diagnostics,
-
-            feed:
-              feed.diagnostics
-          }
-        };
-      }
-
-      return {
-        ...primary,
-
-        diagnostics:{
-          primary:
-            primary.diagnostics,
-
-          feed:
-            feed.diagnostics
-        }
-      };
+        ...context.cities.map(
+          city =>
+            wordpressSearchUrl(
+              ROOT,
+              dateSearchText(
+                context.raceDate,
+                city
+              )
+            )
+        )
+      ];
     },
 
-    ownsAcquisition:
-      ownsArticle,
+    negativeTerms:[
+      "ai tahmin",
+      "ai-tahmin",
+      "yurt dışı",
+      "yurt-disi",
+      "abd",
+      "şili",
+      "fransa",
+      "birleşik krallık"
+    ],
 
-    acquireHtml(context) {
-      return acquireResilientArticleHtml(
-        context,
-        {
-          readySelector:
-            ARTICLE_READY
-        }
-      );
-    }
-  };
+    maxCandidates:8,
+    maxVerifiedPerCity:2,
+
+    allowPuppeteerDiscovery:true,
+    allowPuppeteerArticle:true,
+
+    browserNavigationBudget:2,
+
+    fallback:"feed"
+  });

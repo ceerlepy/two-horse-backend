@@ -7,6 +7,10 @@ import type {
 } from "../../acquisition/types";
 
 import {
+  acquireHttpHtml
+} from "../../acquisition/http";
+
+import {
   acquireCfLinks
 } from "../../acquisition/cloudflare-links";
 
@@ -676,15 +680,11 @@ export function extractGanyanCommentsSection(
     );
 
 
-  const genericHeading =
-    /En\s+Son\s+Yorumlar/iu;
-
-
+  /*
+   * Never accept another city's generic comments block.
+   */
   const heading =
     cityHeading.exec(
-      text
-    ) ??
-    genericHeading.exec(
       text
     );
 
@@ -826,6 +826,38 @@ function cityForArticle(
 }
 
 
+function mobileArticleUrl(
+  value:string
+):string {
+  const url =
+    new URL(value);
+
+  if (
+    /Mobile\.html$/i
+      .test(
+        url.pathname
+      )
+  ) {
+    return url.toString();
+  }
+
+  if (
+    /\.html$/i
+      .test(
+        url.pathname
+      )
+  ) {
+    url.pathname =
+      url.pathname.replace(
+        /\.html$/i,
+        "Mobile.html"
+      );
+  }
+
+  return url.toString();
+}
+
+
 export async function acquireGanyanGalopArticle(
   context:
     ExpertAcquireContext
@@ -835,38 +867,49 @@ export async function acquireGanyanGalopArticle(
       context
     );
 
-
   if (!city) {
     throw new Error(
       "GANYAN_ARTICLE_CITY_AMBIGUOUS"
     );
   }
 
+  const urls = [
+    ...new Set([
+      mobileArticleUrl(
+        context.url
+      ),
+      context.url
+    ])
+  ];
 
-  const failures:
-    any[] = [];
+  const failures:any[] =
+    [];
 
 
-  for (
-    const stage of
-    EXPERT_ACQUISITION_CONFIG
-      .extraction
-      .acquisitionOrder
-  ) {
+  for (const url of urls) {
+
+    /*
+     * First choice is plain HTTP.
+     * Mobile historical article is public and does not
+     * require Browser Run when available.
+     */
     try {
       const acquired =
-        await acquireExpertHtmlStage(
-          context.env,
-          context.url,
-          stage
-        );
+        await acquireHttpHtml(
+          url,
+          {
+            timeoutMs:6_000,
+            minimumBytes:200,
 
+            userAgent:
+              "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36"
+          }
+        );
 
       const text =
         bodyTextFromHtml(
           acquired.html
         );
-
 
       const section =
         extractGanyanCommentsSection(
@@ -874,72 +917,155 @@ export async function acquireGanyanGalopArticle(
           city
         );
 
+      if (section) {
+        const html =
+          wrapDocument(
+            context.raceDate,
+            city,
+            section
+          );
 
-      if (!section) {
-        failures.push({
-          stage,
+        return {
+          stage:"http",
+
+          html,
+
+          requestedUrl:
+            context.url,
+
+          finalUrl:
+            acquired.finalUrl,
+
+          status:
+            acquired.status,
+
+          contentType:
+            "text/html",
 
           bodyLength:
-            acquired.bodyLength,
-
-          textCharacters:
-            text.length,
-
-          reason:
-            "PUBLIC_COMMENTS_NOT_FOUND"
-        });
-
-        continue;
+            html.length
+        };
       }
 
-
-      const html =
-        wrapDocument(
-          context.raceDate,
-          city,
-          section
-        );
-
-
-      return {
-        stage:
-          acquired.stage,
-
-        html,
-
-        requestedUrl:
-          context.url,
-
-        finalUrl:
-          acquired.finalUrl,
-
-        status:
-          acquired.status,
-
-        contentType:
-          "text/html",
-
-        bodyLength:
-          html.length
-      };
+      failures.push({
+        url,
+        stage:"http",
+        reason:
+          "EXACT_CITY_COMMENTS_NOT_FOUND",
+        textCharacters:
+          text.length
+      });
 
     } catch(error) {
       failures.push({
-        stage,
+        url,
+        stage:"http",
 
         error:
           error instanceof Error
             ? error.message
-            : String(
-                error
-              )
+            : String(error)
       });
+    }
+
+
+    /*
+     * Quick Actions only if HTTP did not provide the exact
+     * city-specific historical comments.
+     */
+    for (
+      const stage of
+      EXPERT_ACQUISITION_CONFIG
+        .extraction
+        .acquisitionOrder
+        .filter(
+          value =>
+            value !== "http"
+        )
+    ) {
+      try {
+        const acquired =
+          await acquireExpertHtmlStage(
+            context.env,
+            url,
+            stage
+          );
+
+        const text =
+          bodyTextFromHtml(
+            acquired.html
+          );
+
+        const section =
+          extractGanyanCommentsSection(
+            text,
+            city
+          );
+
+        if (!section) {
+          failures.push({
+            url,
+            stage,
+
+            reason:
+              "EXACT_CITY_COMMENTS_NOT_FOUND",
+
+            bodyLength:
+              acquired.bodyLength,
+
+            textCharacters:
+              text.length
+          });
+
+          continue;
+        }
+
+        const html =
+          wrapDocument(
+            context.raceDate,
+            city,
+            section
+          );
+
+        return {
+          stage:
+            acquired.stage,
+
+          html,
+
+          requestedUrl:
+            context.url,
+
+          finalUrl:
+            acquired.finalUrl,
+
+          status:
+            acquired.status,
+
+          contentType:
+            "text/html",
+
+          bodyLength:
+            html.length
+        };
+
+      } catch(error) {
+        failures.push({
+          url,
+          stage,
+
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error)
+        });
+      }
     }
   }
 
 
   throw new Error(
-    "GANYAN_PUBLIC_COMMENTS_ACQUISITION_FAILED:" +
+    "GANYAN_EXACT_CITY_COMMENTS_FAILED:" +
     JSON.stringify(
       failures
     )

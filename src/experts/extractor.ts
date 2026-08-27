@@ -142,30 +142,6 @@ function preflight(
     );
 
 
-  const accessDeniedTerm =
-    (
-      source.accessDeniedTerms ??
-      []
-    ).find(
-      term =>
-        normalized.includes(
-          normalizeExpertSearchText(
-            term
-          )
-        )
-    );
-
-
-  if (accessDeniedTerm) {
-    return {
-      ok:false,
-
-      reason:
-        `ACCESS_RESTRICTED:${accessDeniedTerm}`
-    };
-  }
-
-
   const racing =
     extraction
       .relevanceTerms
@@ -177,6 +153,85 @@ function preflight(
             )
           )
       );
+
+
+  const accessDeniedHits =
+    (
+      source.accessDeniedTerms ??
+      []
+    )
+      .filter(
+        term =>
+          normalized.includes(
+            normalizeExpertSearchText(
+              term
+            )
+          )
+      );
+
+
+  const weakVipTerm =
+    accessDeniedHits.find(
+      term =>
+        normalizeExpertSearchText(
+          term
+        ) ===
+        "vip uye ol"
+    ) ??
+    null;
+
+
+  const strongAccessDeniedTerm =
+    accessDeniedHits.find(
+      term =>
+        normalizeExpertSearchText(
+          term
+        ) !==
+        "vip uye ol"
+    ) ??
+    null;
+
+
+  const substantiveSelectionEvidence =
+    text.length >=
+      800 &&
+    [
+      "1 ayak",
+      "2 ayak",
+      "banko",
+      "tek",
+      "favori",
+      "rakip",
+      "surpriz"
+    ]
+      .filter(
+        term =>
+          normalized.includes(
+            term
+          )
+      )
+      .length >=
+      2;
+
+
+  const accessDeniedTerm =
+    strongAccessDeniedTerm ??
+    (
+      weakVipTerm &&
+      !substantiveSelectionEvidence
+        ? weakVipTerm
+        : null
+    );
+
+
+  if (accessDeniedTerm) {
+    return {
+      ok:false,
+
+      reason:
+        `ACCESS_RESTRICTED:${accessDeniedTerm}`
+    };
+  }
 
 
   if (!racing) {

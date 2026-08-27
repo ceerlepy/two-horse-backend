@@ -7,7 +7,7 @@ import type {
 } from "./types";
 
 const DEFAULT_TIMEOUT_MS =
-  30_000;
+  8_000;
 
 function unwrap(
   value: any
@@ -91,7 +91,7 @@ export async function acquireCfScrapeHtml(
 
         gotoOptions: {
           waitUntil:
-            "networkidle2",
+            "domcontentloaded",
 
           timeout:
             DEFAULT_TIMEOUT_MS
@@ -163,7 +163,7 @@ export async function acquireCfContentHtml(
 
         gotoOptions: {
           waitUntil:
-            "networkidle2",
+            "domcontentloaded",
 
           timeout:
             DEFAULT_TIMEOUT_MS

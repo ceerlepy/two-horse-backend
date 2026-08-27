@@ -1,25 +1,18 @@
 import {
-  resolveArticleAdapter
-} from "./common";
+  createVerifiedArticleAdapter
+} from "./verified-article";
 
 import {
-  acquireResilientArticleHtml,
-  resolveResilientArticleTargets
-} from "./resilient-article";
+  dateSearchText,
+  wordpressSearchUrl
+} from "./article-url-utils";
 
-import type {
-  ExpertAdapter
-} from "./types";
 
+const ROOT =
+  "https://www.yarisdergisi.com/";
 
 const TAG =
   "https://www.yarisdergisi.com/tag/yaris-tahminleri/";
-
-const LIST_READY =
-  "body";
-
-const ARTICLE_READY =
-  "body";
 
 
 function ownsArticle(
@@ -42,8 +35,12 @@ function ownsArticle(
       host ===
         "yarisdergisi.com" &&
       path !== "/" &&
-      !path.startsWith("/tag/") &&
-      !path.startsWith("/category/")
+      !path.startsWith(
+        "/tag/"
+      ) &&
+      !path.startsWith(
+        "/category/"
+      )
     );
 
   } catch {
@@ -52,93 +49,59 @@ function ownsArticle(
 }
 
 
-export const yarisDergisiAdapter:
-  ExpertAdapter = {
+export const yarisDergisiAdapter =
+  createVerifiedArticleAdapter({
     sourceKey:
       "yaris_dergisi",
 
-    async resolve(context) {
-      const primary =
-        await resolveResilientArticleTargets(
-          context,
-          {
-            landingUrls:[
-              TAG
-            ],
+    sourceName:
+      "Yarış Dergisi",
 
-            readySelector:
-              LIST_READY,
+    ownsArticle,
 
-            maxPages:4,
+    discoveryUrls(
+      context
+    ) {
+      return [
+        /*
+         * First shared tag page: one page can contain both
+         * Ankara and Kocaeli articles.
+         */
+        TAG,
 
-            urlPredicate:
-              ownsArticle
-          }
-        );
+        ...context.cities.map(
+          city =>
+            wordpressSearchUrl(
+              ROOT,
+              dateSearchText(
+                context.raceDate,
+                city
+              )
+            )
+        ),
 
-      if (
-        primary.status ===
-        "ready"
-      )
-        return primary;
-
-
-      /*
-       * Feed is cheap HTTP fallback.
-       * Generic Browser discovery is intentionally disabled.
-       */
-      const feed =
-        await resolveArticleAdapter(
-          context,
-          {
-            landingUrls:[],
-            verifyTargets:true,
-            requireCityCoverage:true,
-            allowGeneric:false,
-            allowFeed:true
-          }
-        );
-
-      if (
-        feed.status ===
-        "ready"
-      ) {
-        return {
-          ...feed,
-
-          diagnostics:{
-            primary:
-              primary.diagnostics,
-
-            feed:
-              feed.diagnostics
-          }
-        };
-      }
-
-      return {
-        ...primary,
-
-        diagnostics:{
-          primary:
-            primary.diagnostics,
-
-          feed:
-            feed.diagnostics
-        }
-      };
+        ROOT
+      ];
     },
 
-    ownsAcquisition:
-      ownsArticle,
+    negativeTerms:[
+      "kombine bahis",
+      "kombine-bahis",
+      "yurt dışı",
+      "yurt-disi"
+    ],
 
-    acquireHtml(context) {
-      return acquireResilientArticleHtml(
-        context,
-        {
-          readySelector:
-            ARTICLE_READY
-        }
-      );
-    }
-  };
+    maxCandidates:8,
+    maxVerifiedPerCity:2,
+
+    allowPuppeteerDiscovery:true,
+    allowPuppeteerArticle:true,
+
+    /*
+     * TOTAL across listing + verification.
+     * Not per page.
+     */
+    browserNavigationBudget:2,
+
+    fallback:"feed"
+  });

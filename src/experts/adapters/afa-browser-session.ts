@@ -583,6 +583,43 @@ async function raceControlState(
 }
 
 
+
+function controlSignature(
+  value:any
+):string {
+  return JSON.stringify({
+    found:
+      Boolean(
+        value?.found
+      ),
+
+    text:
+      String(
+        value?.text ??
+        ""
+      ),
+
+    ariaSelected:
+      value?.ariaSelected ??
+      null,
+
+    ariaCurrent:
+      value?.ariaCurrent ??
+      null,
+
+    dataState:
+      value?.dataState ??
+      null,
+
+    className:
+      String(
+        value?.className ??
+        ""
+      )
+  });
+}
+
+
 function changedLines(
   before:string,
   after:string
@@ -950,14 +987,11 @@ export async function acquireAfaBrowserSession(
     }
 
     /*
-     * Force a different initial selected race so R1 can also
-     * be extracted through a real before/after DOM change.
+     * The SPA normally opens with race 1 already selected.
+     *
+     * Do not force an unverified synthetic pre-click.
+     * Race 1 becomes the verified baseline.
      */
-    await clickRace(
-      page,
-      races[races.length-1]
-    );
-    await delay(200);
 
     const panels:
       Array<{
@@ -973,6 +1007,12 @@ export async function acquireAfaBrowserSession(
     ) {
       const before =
         await bodyText(page);
+
+      const beforeControl =
+        await raceControlState(
+          page,
+          raceNumber
+        );
 
       const clicked =
         await clickRace(
@@ -1023,6 +1063,18 @@ export async function acquireAfaBrowserSession(
           await raceControlState(
             page,
             raceNumber
+          );
+
+        /*
+         * The frontend uses Tailwind class changes rather than
+         * a literal "active" class.
+         */
+        const controlChanged =
+          controlSignature(
+            beforeControl
+          ) !==
+          controlSignature(
+            control
           );
 
         const diff =
@@ -1078,10 +1130,20 @@ export async function acquireAfaBrowserSession(
                 )
               );
 
+          const initialBaseline =
+            panels.length === 0 &&
+            raceNumber === races[0] &&
+            choice.kind === "fallback" &&
+            control.found === true &&
+            duplicateRace ===
+              undefined;
+
           const transitionProof =
             choice.kind === "diff" ||
+            controlChanged ||
             control.active === true ||
-            explicitRaceIdentity;
+            explicitRaceIdentity ||
+            initialBaseline;
 
           lastTransitionDiagnostics = {
             city,
@@ -1089,7 +1151,10 @@ export async function acquireAfaBrowserSession(
             attempt,
             source:
               choice.kind,
+            beforeControl,
             control,
+            controlChanged,
+            initialBaseline,
             explicitRaceIdentity,
             transitionProof,
             duplicateRace:
@@ -1199,7 +1264,7 @@ export async function acquireAfaBrowserSession(
 
       diagnostics:{
         traceVersion:
-          "afa-state-transition-v3",
+          "afa-state-transition-v4",
 
         city,
         races,

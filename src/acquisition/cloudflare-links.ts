@@ -4,7 +4,7 @@ import type {
 
 
 const DEFAULT_TIMEOUT_MS =
-  30_000;
+  8_000;
 
 
 function unwrap(
@@ -131,7 +131,7 @@ export async function acquireCfLinks(
 
         gotoOptions: {
           waitUntil:
-            "networkidle2",
+            "domcontentloaded",
 
           timeout:
             DEFAULT_TIMEOUT_MS
