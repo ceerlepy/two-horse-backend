@@ -1,4 +1,8 @@
 import {
+  resolveArticleAdapter
+} from "./common";
+
+import {
   acquireResilientArticleHtml,
   resolveResilientArticleTargets
 } from "./resilient-article";
@@ -59,23 +63,76 @@ export const bankoTahminlerAdapter:
     sourceKey:
       "banko_tahminler",
 
-    resolve(context) {
-      return resolveResilientArticleTargets(
-        context,
-        {
-          landingUrls:[
-            CATEGORY
-          ],
+    async resolve(context) {
+      const primary =
+        await resolveResilientArticleTargets(
+          context,
+          {
+            landingUrls:[
+              CATEGORY
+            ],
 
-          readySelector:
-            LIST_READY,
+            readySelector:
+              LIST_READY,
 
-          maxPages:4,
+            maxPages:4,
 
-          urlPredicate:
-            ownsArticle
+            urlPredicate:
+              ownsArticle
+          }
+        );
+
+      if (
+        primary.status ===
+        "ready"
+      ) {
+        return primary;
+      }
+
+      /*
+       * Cheap configured feed fallback.
+       * No extra Puppeteer pagination.
+       */
+      const feed =
+        await resolveArticleAdapter(
+          context,
+          {
+            landingUrls:[],
+            verifyTargets:true,
+            requireCityCoverage:true,
+            allowGeneric:false,
+            allowFeed:true
+          }
+        );
+
+      if (
+        feed.status ===
+        "ready"
+      ) {
+        return {
+          ...feed,
+
+          diagnostics:{
+            primary:
+              primary.diagnostics,
+
+            feed:
+              feed.diagnostics
+          }
+        };
+      }
+
+      return {
+        ...primary,
+
+        diagnostics:{
+          primary:
+            primary.diagnostics,
+
+          feed:
+            feed.diagnostics
         }
-      );
+      };
     },
 
     ownsAcquisition:

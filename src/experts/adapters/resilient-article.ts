@@ -41,10 +41,23 @@ import type {
  * - maximum one browser launch per resolver execution
  */
 const LISTING_GOTO_TIMEOUT_MS =
-  12_000;
+  5_000;
 
 const LISTING_SELECTOR_TIMEOUT_MS =
-  7_000;
+  2_500;
+
+/*
+ * Editorial discovery must stay bounded.
+ * Expensive browser discovery gets only one listing page.
+ */
+const DISCOVERY_BUDGET_MS =
+  24_000;
+
+const PUPPETEER_DISCOVERY_PAGE_BUDGET =
+  1;
+
+const RELAXED_AI_CANDIDATE_LIMIT =
+  40;
 
 const ARTICLE_GOTO_TIMEOUT_MS =
   15_000;
@@ -258,19 +271,31 @@ function anchorsFromHtml(
       if (!href)
         return;
 
-      const container =
+      const editorial =
         anchor
           .closest(
-            [
-              "article",
-              ".post",
-              ".entry",
-              ".card",
-              ".item",
-              "li"
-            ].join(",")
+            "article,.post,.entry"
           )
           .first();
+
+      const secondary =
+        anchor
+          .closest(
+            ".card,.item"
+          )
+          .first();
+
+      const listItem =
+        anchor
+          .closest("li")
+          .first();
+
+      const container =
+        editorial.length
+          ? editorial
+          : secondary.length
+            ? secondary
+            : listItem;
 
       const anchorText =
         cleanExpertInlineText(
@@ -278,28 +303,56 @@ function anchorsFromHtml(
           1000
         );
 
+      const titleText =
+        cleanExpertInlineText(
+          anchor.attr("title") ??
+          (
+            editorial.length
+              ? editorial
+                  .find(
+                    "h1,h2,h3,h4"
+                  )
+                  .first()
+                  .text()
+              : ""
+          ),
+          1000
+        );
+
       const contextText =
         cleanExpertInlineText(
           container.length
             ? container.text()
-            : anchorText,
-          1800
+            : [
+                titleText,
+                anchorText
+              ]
+                .filter(Boolean)
+                .join(" "),
+          2200
         );
+
+      const identityText =
+        [
+          titleText,
+          anchorText
+        ]
+          .filter(Boolean)
+          .join(" | ");
 
       output.push({
         href,
 
         text:
           [
+            titleText,
             anchorText,
             contextText
           ]
             .filter(Boolean)
             .join(" | "),
 
-        identityText:
-          contextText ||
-          anchorText
+        identityText
       });
     }
   );
@@ -518,6 +571,192 @@ function candidatesFromAnchors(
   return [
     ...byUrl.values()
   ];
+}
+
+
+
+function relaxedCandidatesFromAnchors(
+  context:ExpertAdapterContext,
+  pageUrl:string,
+  anchors:RawAnchor[],
+  stage:string,
+  predicate?:(url:string)=>boolean
+):Candidate[] {
+  const byUrl =
+    new Map<
+      string,
+      Candidate
+    >();
+
+  for (const anchor of anchors) {
+    const url =
+      allowedListingUrl(
+        context,
+        pageUrl,
+        anchor.href,
+        predicate
+      );
+
+    if (!url)
+      continue;
+
+    const evidence =
+      candidateEvidence(
+        context
+          .source
+          .source_key,
+
+        url,
+        anchor.text,
+        context.raceDate,
+        context.cities,
+        anchor.identityText
+      );
+
+    if (
+      evidence.hasNegativeLanguage ||
+      !evidence.hasDate ||
+      !evidence.hasCity
+    ) {
+      continue;
+    }
+
+    const candidate:Candidate = {
+      url,
+      text:anchor.text,
+      score:evidence.score,
+
+      matchedCities:
+        evidence.matchedCities,
+
+      stage,
+      pageUrl
+    };
+
+    const old =
+      byUrl.get(
+        urlKey(url)
+      );
+
+    if (
+      !old ||
+      candidate.score >
+        old.score ||
+      (
+        candidate.score ===
+          old.score &&
+        candidate.text.length >
+          old.text.length
+      )
+    ) {
+      byUrl.set(
+        urlKey(url),
+        candidate
+      );
+    }
+  }
+
+  return [
+    ...byUrl.values()
+  ]
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        second.score -
+        first.score
+    )
+    .slice(
+      0,
+      RELAXED_AI_CANDIDATE_LIMIT
+    );
+}
+
+
+function anchorEvidenceStats(
+  context:ExpertAdapterContext,
+  pageUrl:string,
+  anchors:RawAnchor[],
+  predicate?:(url:string)=>boolean
+) {
+  const stats = {
+    allowed:0,
+    strictEligible:0,
+    relaxedEligible:0,
+    missingDate:0,
+    missingCity:0,
+    missingPredictionLanguage:0,
+    negative:0
+  };
+
+  for (const anchor of anchors) {
+    const url =
+      allowedListingUrl(
+        context,
+        pageUrl,
+        anchor.href,
+        predicate
+      );
+
+    if (!url)
+      continue;
+
+    stats.allowed++;
+
+    const evidence =
+      candidateEvidence(
+        context
+          .source
+          .source_key,
+
+        url,
+        anchor.text,
+        context.raceDate,
+        context.cities,
+        anchor.identityText
+      );
+
+    if (
+      evidence
+        .hasNegativeLanguage
+    ) {
+      stats.negative++;
+      continue;
+    }
+
+    if (!evidence.hasDate)
+      stats.missingDate++;
+
+    if (!evidence.hasCity)
+      stats.missingCity++;
+
+    if (
+      !evidence
+        .hasPredictionLanguage
+    ) {
+      stats
+        .missingPredictionLanguage++;
+    }
+
+    if (
+      evidence.hasDate &&
+      evidence.hasCity
+    ) {
+      stats.relaxedEligible++;
+    }
+
+    if (
+      evidence.hasDate &&
+      evidence.hasCity &&
+      evidence
+        .hasPredictionLanguage
+    ) {
+      stats.strictEligible++;
+    }
+  }
+
+  return stats;
 }
 
 
@@ -916,19 +1155,31 @@ async function browserAnchors(
                 element as
                   HTMLAnchorElement;
 
-              const container =
+              const editorial =
                 anchor.closest(
-                  [
-                    "article",
-                    ".post",
-                    ".entry",
-                    ".card",
-                    ".item",
-                    "li"
-                  ].join(",")
+                  "article,.post,.entry"
                 ) as
                   HTMLElement |
                   null;
+
+              const secondary =
+                anchor.closest(
+                  ".card,.item"
+                ) as
+                  HTMLElement |
+                  null;
+
+              const listItem =
+                anchor.closest(
+                  "li"
+                ) as
+                  HTMLElement |
+                  null;
+
+              const container =
+                editorial ??
+                secondary ??
+                listItem;
 
               const anchorText =
                 String(
@@ -946,11 +1197,22 @@ async function browserAnchors(
                     1000
                   );
 
-              const contextText =
+              const heading =
+                editorial
+                  ?.querySelector(
+                    "h1,h2,h3,h4"
+                  ) as
+                    HTMLElement |
+                    null;
+
+              const titleText =
                 String(
-                  container?.innerText ??
-                  container?.textContent ??
-                  anchorText
+                  anchor.getAttribute(
+                    "title"
+                  ) ??
+                  heading?.innerText ??
+                  heading?.textContent ??
+                  ""
                 )
                   .replace(
                     /\s+/g,
@@ -959,8 +1221,37 @@ async function browserAnchors(
                   .trim()
                   .slice(
                     0,
-                    1800
+                    1000
                   );
+
+              const contextText =
+                String(
+                  container?.innerText ??
+                  container?.textContent ??
+                  [
+                    titleText,
+                    anchorText
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                )
+                  .replace(
+                    /\s+/g,
+                    " "
+                  )
+                  .trim()
+                  .slice(
+                    0,
+                    2200
+                  );
+
+              const identityText =
+                [
+                  titleText,
+                  anchorText
+                ]
+                  .filter(Boolean)
+                  .join(" | ");
 
               return {
                 href:
@@ -971,15 +1262,14 @@ async function browserAnchors(
 
                 text:
                   [
+                    titleText,
                     anchorText,
                     contextText
                   ]
                     .filter(Boolean)
                     .join(" | "),
 
-                identityText:
-                  contextText ||
-                  anchorText
+                identityText
               };
             }
           )
@@ -1176,10 +1466,10 @@ export async function resolveResilientArticleTargets(
 
   const diagnostics:any = {
     traceVersion:
-      "part5-resilient-v2",
+      "part5-resilient-v3",
 
     architecture:
-      "page-first-adaptive:true-fallback",
+      "page-first:strict-then-relaxed-ai:bounded-browser",
 
     initialOrder:[
       "cf-content",
@@ -1206,7 +1496,17 @@ export async function resolveResilientArticleTargets(
     finalPool:[],
     finalSelection:null,
 
-    browserLaunches:0
+    browserLaunches:0,
+
+    browserPageBudget:
+      PUPPETEER_DISCOVERY_PAGE_BUDGET,
+
+    browserPageNavigations:0,
+
+    discoveryBudgetMs:
+      DISCOVERY_BUDGET_MS,
+
+    budgetExhausted:false
   };
 
   const pool =
@@ -1214,6 +1514,15 @@ export async function resolveResilientArticleTargets(
       string,
       Candidate
     >();
+
+  const relaxedPool =
+    new Map<
+      string,
+      Candidate
+    >();
+
+  const discoveryStartedAt =
+    Date.now();
 
   let successfulPages=0;
 
@@ -1242,6 +1551,17 @@ export async function resolveResilientArticleTargets(
         pageNumber<=maxPages;
         pageNumber++
       ) {
+        if (
+          Date.now() -
+            discoveryStartedAt >=
+          DISCOVERY_BUDGET_MS
+        ) {
+          diagnostics.budgetExhausted=
+            true;
+
+          break;
+        }
+
         const pageUrl =
           pagedUrl(
             landingUrl,
@@ -1259,6 +1579,17 @@ export async function resolveResilientArticleTargets(
           const stage of
           pageStages
         ) {
+          if (
+            Date.now() -
+              discoveryStartedAt >=
+            DISCOVERY_BUDGET_MS
+          ) {
+            diagnostics.budgetExhausted=
+              true;
+
+            break;
+          }
+
           try {
             let anchors:
               RawAnchor[] = [];
@@ -1349,6 +1680,16 @@ export async function resolveResilientArticleTargets(
               };
 
             } else {
+              if (
+                diagnostics
+                  .browserPageNavigations >=
+                PUPPETEER_DISCOVERY_PAGE_BUDGET
+              ) {
+                throw new Error(
+                  "PUPPETEER_DISCOVERY_PAGE_BUDGET_EXHAUSTED"
+                );
+              }
+
               if (!browser) {
                 if (
                   browserLaunchAttempted
@@ -1371,6 +1712,9 @@ export async function resolveResilientArticleTargets(
                 browserPage =
                   await browser.newPage();
               }
+
+              diagnostics
+                .browserPageNavigations++;
 
               const acquired =
                 await browserAnchors(
@@ -1420,12 +1764,15 @@ export async function resolveResilientArticleTargets(
             successfulPages++;
 
             preferredStageIndex =
-              Math.max(
-                0,
-                STAGES.indexOf(
-                  stage
-                )
-              );
+              stage ===
+                "puppeteer"
+                ? 0
+                : Math.max(
+                    0,
+                    STAGES.indexOf(
+                      stage
+                    )
+                  );
 
 
             const candidates =
@@ -1437,9 +1784,31 @@ export async function resolveResilientArticleTargets(
                 options.urlPredicate
               );
 
+            const relaxedCandidates =
+              relaxedCandidatesFromAnchors(
+                context,
+                pageUrl,
+                anchors,
+                stage,
+                options.urlPredicate
+              );
+
+            const evidenceStats =
+              anchorEvidenceStats(
+                context,
+                pageUrl,
+                anchors,
+                options.urlPredicate
+              );
+
             mergeCandidates(
               pool,
               candidates
+            );
+
+            mergeCandidates(
+              relaxedPool,
+              relaxedCandidates
             );
 
             const accumulated =
@@ -1447,9 +1816,24 @@ export async function resolveResilientArticleTargets(
                 pool
               );
 
+            const relaxedAccumulated =
+              candidatePool(
+                relaxedPool
+              )
+                .slice(
+                  0,
+                  RELAXED_AI_CANDIDATE_LIMIT
+                );
+
             const currentCoverage =
               coverage(
                 accumulated,
+                context.cities
+              );
+
+            const relaxedCoverage =
+              coverage(
+                relaxedAccumulated,
                 context.cities
               );
 
@@ -1470,11 +1854,21 @@ export async function resolveResilientArticleTargets(
                 stageCandidateCount:
                   candidates.length,
 
+                relaxedStageCandidateCount:
+                  relaxedCandidates.length,
+
                 accumulatedCandidateCount:
                   accumulated.length,
 
+                relaxedAccumulatedCandidateCount:
+                  relaxedAccumulated.length,
+
+                evidenceStats,
+
                 coverage:
                   currentCoverage,
+
+                relaxedCoverage,
 
                 nextPagePreferredStage:
                   STAGES[
@@ -1492,6 +1886,116 @@ export async function resolveResilientArticleTargets(
               !currentCoverage
                 .complete
             ) {
+              if (
+                relaxedAccumulated.length &&
+                relaxedCoverage.complete
+              ) {
+                const relaxedSelection =
+                  await selectCandidates(
+                    context,
+                    relaxedAccumulated
+                  );
+
+                const relaxedSelectionCoverage =
+                  selectedCoverage(
+                    relaxedSelection.urls,
+                    relaxedAccumulated,
+                    context.cities
+                  );
+
+                diagnostics
+                  .attempts
+                  .push({
+                    pageNumber,
+                    pageUrl,
+
+                    stage:
+                      `${stage}-workers-ai-relaxed-selection`,
+
+                    safetyFence:
+                      "allowed-url+exact-date+exact-city+no-negative",
+
+                    candidateCount:
+                      relaxedAccumulated.length,
+
+                    selected:
+                      relaxedSelection.urls,
+
+                    aiError:
+                      relaxedSelection.aiError,
+
+                    coverage:
+                      relaxedSelectionCoverage,
+
+                    semantic:
+                      relaxedSelection.diagnostics
+                  });
+
+                if (
+                  relaxedSelection.urls.length &&
+                  relaxedSelectionCoverage
+                    .complete
+                ) {
+                  diagnostics.finalPool =
+                    relaxedAccumulated.map(
+                      candidate => ({
+                        url:
+                          candidate.url,
+
+                        score:
+                          candidate.score,
+
+                        matchedCities:
+                          candidate
+                            .matchedCities,
+
+                        stage:
+                          candidate.stage,
+
+                        pageUrl:
+                          candidate.pageUrl,
+
+                        text:
+                          candidate.text
+                            .slice(
+                              0,
+                              500
+                            )
+                      })
+                    );
+
+                  diagnostics.finalSelection = {
+                    mode:
+                      "relaxed-date-city-ai",
+
+                    selected:
+                      relaxedSelection.urls,
+
+                    coverage:
+                      relaxedSelectionCoverage,
+
+                    aiError:
+                      relaxedSelection.aiError
+                  };
+
+                  return {
+                    status:"ready",
+                    mode:"article",
+
+                    targets:
+                      relaxedSelection.urls,
+
+                    discoveredFromUrl:
+                      pageUrl,
+
+                    discoveryMethod:
+                      `${stage}-page-first-relaxed-workers-ai`,
+
+                    diagnostics
+                  };
+                }
+              }
+
               break;
             }
 
@@ -1792,6 +2296,45 @@ export async function resolveResilientArticleTargets(
 
   diagnostics.finalCoverage =
     finalCoverage;
+
+  diagnostics.finalRelaxedPool =
+    candidatePool(
+      relaxedPool
+    )
+      .slice(
+        0,
+        RELAXED_AI_CANDIDATE_LIMIT
+      )
+      .map(
+        candidate => ({
+          url:
+            candidate.url,
+
+          score:
+            candidate.score,
+
+          matchedCities:
+            candidate
+              .matchedCities,
+
+          stage:
+            candidate.stage,
+
+          pageUrl:
+            candidate.pageUrl,
+
+          text:
+            candidate.text
+              .slice(
+                0,
+                500
+              )
+        })
+      );
+
+  diagnostics.elapsedDiscoveryMs =
+    Date.now() -
+    discoveryStartedAt;
 
 
   return {
