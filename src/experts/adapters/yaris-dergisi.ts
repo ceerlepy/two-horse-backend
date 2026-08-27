@@ -92,7 +92,7 @@ export const yarisDergisiAdapter =
     ],
 
     maxCandidates:8,
-    maxVerifiedPerCity:2,
+    maxVerifiedPerCity:1,
 
     allowPuppeteerDiscovery:true,
     allowPuppeteerArticle:true,
@@ -107,7 +107,7 @@ export const yarisDergisiAdapter =
      * TOTAL across listing + verification.
      * Not per page.
      */
-    browserNavigationBudget:2,
+    browserNavigationBudget:3,
 
     fallback:"feed"
   });

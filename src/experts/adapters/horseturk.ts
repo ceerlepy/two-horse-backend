@@ -42,10 +42,10 @@ function ownsArticle(
       ) &&
       (
         path.includes(
-          "tahmin"
+          "at-yarisi-tahmin"
         ) ||
         path.includes(
-          "altili-ganyan"
+          "altili-ganyan-tahmin"
         )
       )
     );
@@ -75,25 +75,39 @@ export const horseturkAdapter =
         );
 
       return context.cities
-        .map(
-          city => ({
-            city,
+        .flatMap(
+          city => {
+            const suffix =
+              [
+                simpleSlug(city),
+                parts.day,
+                parts.monthSlug,
+                parts.year
+              ]
+                .join("-");
 
-            url:
-              new URL(
-                [
-                  "at-yarisi-tahminleri",
-                  simpleSlug(city),
-                  parts.day,
-                  parts.monthSlug,
-                  parts.year
-                ]
-                  .join("-") +
-                  "/",
-                ROOT
-              )
-                .toString()
-          })
+            return [
+              {
+                city,
+
+                url:
+                  new URL(
+                    `at-yarisi-tahminleri-${suffix}/`,
+                    ROOT
+                  ).toString()
+              },
+
+              {
+                city,
+
+                url:
+                  new URL(
+                    `altili-ganyan-tahmin-${suffix}/`,
+                    ROOT
+                  ).toString()
+              }
+            ];
+          }
         );
     },
 
@@ -101,8 +115,9 @@ export const horseturkAdapter =
       context
     ) {
       return [
-        CATEGORY,
-
+        /*
+         * Source-native search exactly like old HorsAI.
+         */
         ...context.cities.map(
           city =>
             wordpressSearchUrl(
@@ -114,6 +129,7 @@ export const horseturkAdapter =
             )
         ),
 
+        CATEGORY,
         ROOT
       ];
     },

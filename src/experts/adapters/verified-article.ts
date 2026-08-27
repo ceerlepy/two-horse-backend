@@ -2028,9 +2028,31 @@ export async function resolveVerifiedArticleTargets(
                 )
               ),
 
+            /*
+             * Article body verifies the candidate identity;
+             * it must NEVER expand its city scope.
+             *
+             * Example:
+             * an Ankara article mentioning Kocaeli elsewhere
+             * cannot satisfy Kocaeli coverage.
+             */
             matchedCities:
-              evidence
-                .matchedCities,
+              candidate
+                .matchedCities
+                .filter(
+                  city =>
+                    evidence
+                      .matchedCities
+                      .some(
+                        matched =>
+                          normalizeExpertSearchText(
+                            matched
+                          ) ===
+                          normalizeExpertSearchText(
+                            city
+                          )
+                      )
+                ),
 
             verificationStage:
               stage,
@@ -2351,6 +2373,59 @@ export async function resolveVerifiedArticleTargets(
         await discoverPage(
           discoveryUrl
         );
+
+        /*
+         * HorsAI behaviour:
+         * once discovery has candidates for every target city,
+         * STOP browsing listings and start verifying articles.
+         *
+         * Do not spend article browser budget on page 2/3/4.
+         */
+        const looseCityCoverage =
+          new Set(
+            [
+              ...looseByUrl.values()
+            ]
+              .flatMap(
+                candidate =>
+                  candidate.matchedCities
+              )
+              .map(
+                city =>
+                  normalizeExpertSearchText(
+                    city
+                  )
+              )
+          );
+
+        const looseCoverageComplete =
+          context.cities.every(
+            city =>
+              looseCityCoverage.has(
+                normalizeExpertSearchText(
+                  city
+                )
+              )
+          );
+
+        if (
+          looseCoverageComplete
+        ) {
+          diagnostics
+            .listingAttempts
+            .push({
+              stage:
+                "early-stop",
+
+              reason:
+                "ALL_TARGET_CITIES_HAVE_LOOSE_ARTICLE_CANDIDATES",
+
+              cities:
+                context.cities
+            });
+
+          break;
+        }
       }
 
       const ranked =

@@ -826,38 +826,6 @@ function cityForArticle(
 }
 
 
-function mobileArticleUrl(
-  value:string
-):string {
-  const url =
-    new URL(value);
-
-  if (
-    /Mobile\.html$/i
-      .test(
-        url.pathname
-      )
-  ) {
-    return url.toString();
-  }
-
-  if (
-    /\.html$/i
-      .test(
-        url.pathname
-      )
-  ) {
-    url.pathname =
-      url.pathname.replace(
-        /\.html$/i,
-        "Mobile.html"
-      );
-  }
-
-  return url.toString();
-}
-
-
 export async function acquireGanyanGalopArticle(
   context:
     ExpertAcquireContext
@@ -869,41 +837,112 @@ export async function acquireGanyanGalopArticle(
 
   if (!city) {
     throw new Error(
-      "GANYAN_ARTICLE_CITY_AMBIGUOUS"
+      "GANYAN_PUBLIC_GALOP_CITY_AMBIGUOUS"
     );
   }
-
-  const urls = [
-    ...new Set([
-      mobileArticleUrl(
-        context.url
-      ),
-      context.url
-    ])
-  ];
 
   const failures:any[] =
     [];
 
 
-  for (const url of urls) {
+  /*
+   * Public galop page first with ordinary HTTP.
+   */
+  try {
+    const acquired =
+      await acquireHttpHtml(
+        context.url,
+        {
+          timeoutMs:6_000,
+          minimumBytes:200,
 
-    /*
-     * First choice is plain HTTP.
-     * Mobile historical article is public and does not
-     * require Browser Run when available.
-     */
+          userAgent:
+            "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36"
+        }
+      );
+
+    const text =
+      bodyTextFromHtml(
+        acquired.html
+      );
+
+    const section =
+      extractGanyanCommentsSection(
+        text,
+        city
+      );
+
+    if (section) {
+      const html =
+        wrapDocument(
+          context.raceDate,
+          city,
+          section
+        );
+
+      return {
+        stage:"http",
+        html,
+
+        requestedUrl:
+          context.url,
+
+        finalUrl:
+          acquired.finalUrl,
+
+        status:
+          acquired.status,
+
+        contentType:
+          "text/html",
+
+        bodyLength:
+          html.length
+      };
+    }
+
+    failures.push({
+      stage:"http",
+      bodyLength:
+        acquired.bodyLength,
+      textCharacters:
+        text.length,
+      reason:
+        "EXACT_CITY_COMMENTS_NOT_FOUND"
+    });
+
+  } catch(error) {
+    failures.push({
+      stage:"http",
+
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error)
+    });
+  }
+
+
+  /*
+   * Existing Quick Action fallbacks only after HTTP.
+   */
+  for (
+    const stage of
+    EXPERT_ACQUISITION_CONFIG
+      .extraction
+      .acquisitionOrder
+      .filter(
+        value =>
+          value !==
+          "http"
+      )
+  ) {
     try {
       const acquired =
-        await acquireHttpHtml(
-          url,
-          {
-            timeoutMs:6_000,
-            minimumBytes:200,
-
-            userAgent:
-              "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36"
-          }
+        await acquireExpertHtmlStage(
+          context.env,
+          context.url,
+          stage
         );
 
       const text =
@@ -917,49 +956,55 @@ export async function acquireGanyanGalopArticle(
           city
         );
 
-      if (section) {
-        const html =
-          wrapDocument(
-            context.raceDate,
-            city,
-            section
-          );
-
-        return {
-          stage:"http",
-
-          html,
-
-          requestedUrl:
-            context.url,
-
-          finalUrl:
-            acquired.finalUrl,
-
-          status:
-            acquired.status,
-
-          contentType:
-            "text/html",
+      if (!section) {
+        failures.push({
+          stage,
 
           bodyLength:
-            html.length
-        };
+            acquired.bodyLength,
+
+          textCharacters:
+            text.length,
+
+          reason:
+            "EXACT_CITY_COMMENTS_NOT_FOUND"
+        });
+
+        continue;
       }
 
-      failures.push({
-        url,
-        stage:"http",
-        reason:
-          "EXACT_CITY_COMMENTS_NOT_FOUND",
-        textCharacters:
-          text.length
-      });
+      const html =
+        wrapDocument(
+          context.raceDate,
+          city,
+          section
+        );
+
+      return {
+        stage:
+          acquired.stage,
+
+        html,
+
+        requestedUrl:
+          context.url,
+
+        finalUrl:
+          acquired.finalUrl,
+
+        status:
+          acquired.status,
+
+        contentType:
+          "text/html",
+
+        bodyLength:
+          html.length
+      };
 
     } catch(error) {
       failures.push({
-        url,
-        stage:"http",
+        stage,
 
         error:
           error instanceof Error
@@ -967,105 +1012,11 @@ export async function acquireGanyanGalopArticle(
             : String(error)
       });
     }
-
-
-    /*
-     * Quick Actions only if HTTP did not provide the exact
-     * city-specific historical comments.
-     */
-    for (
-      const stage of
-      EXPERT_ACQUISITION_CONFIG
-        .extraction
-        .acquisitionOrder
-        .filter(
-          value =>
-            value !== "http"
-        )
-    ) {
-      try {
-        const acquired =
-          await acquireExpertHtmlStage(
-            context.env,
-            url,
-            stage
-          );
-
-        const text =
-          bodyTextFromHtml(
-            acquired.html
-          );
-
-        const section =
-          extractGanyanCommentsSection(
-            text,
-            city
-          );
-
-        if (!section) {
-          failures.push({
-            url,
-            stage,
-
-            reason:
-              "EXACT_CITY_COMMENTS_NOT_FOUND",
-
-            bodyLength:
-              acquired.bodyLength,
-
-            textCharacters:
-              text.length
-          });
-
-          continue;
-        }
-
-        const html =
-          wrapDocument(
-            context.raceDate,
-            city,
-            section
-          );
-
-        return {
-          stage:
-            acquired.stage,
-
-          html,
-
-          requestedUrl:
-            context.url,
-
-          finalUrl:
-            acquired.finalUrl,
-
-          status:
-            acquired.status,
-
-          contentType:
-            "text/html",
-
-          bodyLength:
-            html.length
-        };
-
-      } catch(error) {
-        failures.push({
-          url,
-          stage,
-
-          error:
-            error instanceof Error
-              ? error.message
-              : String(error)
-        });
-      }
-    }
   }
 
 
   throw new Error(
-    "GANYAN_EXACT_CITY_COMMENTS_FAILED:" +
+    "GANYAN_PUBLIC_GALOP_ACQUISITION_FAILED:" +
     JSON.stringify(
       failures
     )

@@ -104,7 +104,7 @@ export const bankoTahminlerAdapter =
     ],
 
     maxCandidates:8,
-    maxVerifiedPerCity:2,
+    maxVerifiedPerCity:1,
 
     allowPuppeteerDiscovery:true,
     allowPuppeteerArticle:true,
@@ -115,7 +115,7 @@ export const bankoTahminlerAdapter =
      */
     adapterOwnedExtraction:true,
 
-    browserNavigationBudget:2,
+    browserNavigationBudget:3,
 
     fallback:"feed"
   });

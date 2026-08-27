@@ -679,12 +679,14 @@ function usefulPanel(
 
 async function fallbackPanel(
   page:any,
-  raceNumber:number
+  raceNumber:number,
+  excludedFingerprints:string[]
 ) {
   return String(
     await page.evaluate(
       (
-        wantedRace:number
+        wantedRace:number,
+        excluded:string[]
       ) => {
         const clean =
           (value:unknown) =>
@@ -712,6 +714,15 @@ async function fallbackPanel(
         const expected =
           `${wantedRace} KOSU`;
 
+        const excludedSet =
+          new Set(
+            excluded
+              .map(
+                value =>
+                  foldLocal(value)
+              )
+          );
+
         const nodes =
           Array.from(
             document.querySelectorAll(
@@ -738,7 +749,9 @@ async function fallbackPanel(
                   Boolean(
                     node.offsetWidth ||
                     node.offsetHeight ||
-                    node.getClientRects().length
+                    node
+                      .getClientRects()
+                      .length
                   );
 
                 if (!visible) {
@@ -761,12 +774,31 @@ async function fallbackPanel(
                 const normalized =
                   foldLocal(text);
 
+                /*
+                 * Never reuse a panel already assigned
+                 * to another race.
+                 */
+                if (
+                  excludedSet.has(
+                    normalized
+                  )
+                ) {
+                  return null;
+                }
+
                 const races =
                   new Set(
-                    [...normalized.matchAll(
-                      /\b(\d{1,2})\s+KOSU\b/g
-                    )]
-                      .map(x => Number(x[1]))
+                    [
+                      ...normalized.matchAll(
+                        /\b(\d{1,2})\s+KOSU\b/g
+                      )
+                    ]
+                      .map(
+                        match =>
+                          Number(
+                            match[1]
+                          )
+                      )
                   );
 
                 if (races.size > 2) {
@@ -788,7 +820,9 @@ async function fallbackPanel(
                   ]
                     .filter(
                       key =>
-                        normalized.includes(key)
+                        normalized.includes(
+                          key
+                        )
                     )
                     .length;
 
@@ -798,10 +832,13 @@ async function fallbackPanel(
 
                 return {
                   text,
+
                   score:
                     (
-                      normalized.includes(expected)
-                        ? 1000
+                      normalized.includes(
+                        expected
+                      )
+                        ? 2000
                         : 0
                     ) +
                     semantics * 50 -
@@ -823,9 +860,14 @@ async function fallbackPanel(
                 b.score-a.score
             );
 
-        return candidates[0]?.text ?? "";
+        return (
+          candidates[0]
+            ?.text ??
+          ""
+        );
       },
-      raceNumber
+      raceNumber,
+      excludedFingerprints
     )
   );
 }
@@ -951,9 +993,13 @@ export async function acquireAfaBrowserSession(
       ok:false
     };
 
+    /*
+     * City options are hydrated asynchronously after date
+     * change. Live Kocaeli preview proved 1.2s was too short.
+     */
     for (
       let attempt=0;
-      attempt<8;
+      attempt<25;
       attempt++
     ) {
       cityState =
@@ -966,7 +1012,7 @@ export async function acquireAfaBrowserSession(
         break;
       }
 
-      await delay(150);
+      await delay(200);
     }
 
     if (!cityState.ok) {
@@ -1086,7 +1132,10 @@ export async function acquireAfaBrowserSession(
         const fallback =
           await fallbackPanel(
             page,
-            raceNumber
+            raceNumber,
+            [
+              ...fingerprints.keys()
+            ]
           );
 
         const choices = [
@@ -1264,7 +1313,7 @@ export async function acquireAfaBrowserSession(
 
       diagnostics:{
         traceVersion:
-          "afa-state-transition-v4",
+          "afa-state-transition-v5",
 
         city,
         races,
