@@ -24,10 +24,10 @@ const CURRENT =
   "https://istinyeganyan.com/ganyan/tahminler/";
 
 const LIST_READY =
-  "article a[href],.post a[href],.entry a[href],h2 a[href],h3 a[href]";
+  "body";
 
 const ARTICLE_READY =
-  "article,main,.entry-content,.post-content,[role='main'],h1";
+  "body";
 
 
 function ownsHistorical(

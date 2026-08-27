@@ -12,14 +12,17 @@ import type {
 } from "./types";
 
 
+const HOME =
+  "https://www.bankotahminler.com/";
+
 const CATEGORY =
   "https://www.bankotahminler.com/kategori/tahminler/";
 
 const LIST_READY =
-  'a[href*="/tahminler/"]:not([href*="/kategori/"])';
+  "body";
 
 const ARTICLE_READY =
-  "article,main,.entry-content,.post-content,[role='main'],h1";
+  "body";
 
 
 function ownsArticle(
@@ -69,6 +72,7 @@ export const bankoTahminlerAdapter:
           context,
           {
             landingUrls:[
+              HOME,
               CATEGORY
             ],
 

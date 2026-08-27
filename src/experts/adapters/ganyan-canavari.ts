@@ -15,7 +15,7 @@ const NEWS =
   "https://www.ganyancanavari.com.tr/haberler/";
 
 const LIST_READY =
-  'a[href*="haber-detay"]';
+  "body";
 
 
 function isGalopArticle(
@@ -63,7 +63,21 @@ export const ganyanCanavariAdapter:
           readySelector:
             LIST_READY,
 
-          maxPages:2,
+          maxPages:3,
+
+          pageUrlBuilder(
+            base,
+            page
+          ) {
+            if (page <= 1) {
+              return base;
+            }
+
+            return new URL(
+              String(page),
+              base
+            ).toString();
+          },
 
           urlPredicate:
             isGalopArticle

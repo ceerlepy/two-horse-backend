@@ -857,8 +857,19 @@ export async function acquireAfaBrowserSession(
     await page.goto(
       targetUrl,
       {
-        waitUntil:"networkidle2",
-        timeout:30_000
+        waitUntil:
+          "domcontentloaded",
+
+        timeout:
+          10_000
+      }
+    );
+
+    await page.waitForSelector(
+      "input",
+      {
+        timeout:
+          5_000
       }
     );
 
@@ -869,7 +880,7 @@ export async function acquireAfaBrowserSession(
 
     for (
       let attempt=0;
-      attempt<15;
+      attempt<10;
       attempt++
     ) {
       const text =
@@ -890,13 +901,13 @@ export async function acquireAfaBrowserSession(
         break;
       }
 
-      if (attempt === 14) {
+      if (attempt === 9) {
         throw new Error(
           "AFA_BROWSER_TARGET_DATE_NOT_RENDERED"
         );
       }
 
-      await delay(350);
+      await delay(180);
     }
 
     let cityState:any = {
@@ -905,7 +916,7 @@ export async function acquireAfaBrowserSession(
 
     for (
       let attempt=0;
-      attempt<12;
+      attempt<8;
       attempt++
     ) {
       cityState =
@@ -918,7 +929,7 @@ export async function acquireAfaBrowserSession(
         break;
       }
 
-      await delay(250);
+      await delay(150);
     }
 
     if (!cityState.ok) {
@@ -927,7 +938,7 @@ export async function acquireAfaBrowserSession(
       );
     }
 
-    await delay(700);
+    await delay(300);
 
     const races =
       await getRaceNumbers(page);
@@ -946,7 +957,7 @@ export async function acquireAfaBrowserSession(
       page,
       races[races.length-1]
     );
-    await delay(400);
+    await delay(200);
 
     const panels:
       Array<{
@@ -996,13 +1007,13 @@ export async function acquireAfaBrowserSession(
        */
       for (
         let attempt=0;
-        attempt<18;
+        attempt<10;
         attempt++
       ) {
         await delay(
           attempt === 0
-            ? 350
-            : 180
+            ? 220
+            : 100
         );
 
         const after =
@@ -1124,8 +1135,8 @@ export async function acquireAfaBrowserSession(
          * synthetic click was swallowed by the frontend.
          */
         if (
-          attempt === 5 ||
-          attempt === 11
+          attempt === 3 ||
+          attempt === 6
         ) {
           await clickRace(
             page,
@@ -1188,7 +1199,7 @@ export async function acquireAfaBrowserSession(
 
       diagnostics:{
         traceVersion:
-          "afa-state-transition-v2",
+          "afa-state-transition-v3",
 
         city,
         races,

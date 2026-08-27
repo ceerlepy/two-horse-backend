@@ -6,6 +6,10 @@ import type {
 } from "../../acquisition/types";
 
 import {
+  acquireHttpHtml
+} from "../../acquisition/http";
+
+import {
   candidateEvidence
 } from "../discovery";
 
@@ -59,6 +63,15 @@ const PUPPETEER_DISCOVERY_PAGE_BUDGET =
 const RELAXED_AI_CANDIDATE_LIMIT =
   40;
 
+const LISTING_HTTP_TIMEOUT_MS =
+  4_000;
+
+const ARTICLE_HTTP_TIMEOUT_MS =
+  6_000;
+
+const HTTP_USER_AGENT =
+  "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/136 Safari/537.36";
+
 const ARTICLE_GOTO_TIMEOUT_MS =
   15_000;
 
@@ -67,6 +80,7 @@ const ARTICLE_SELECTOR_TIMEOUT_MS =
 
 
 type Stage =
+  | "http"
   | "cf-content"
   | "cf-scrape"
   | "cf-links"
@@ -74,6 +88,7 @@ type Stage =
 
 
 const STAGES:Stage[] = [
+  "http",
   "cf-content",
   "cf-scrape",
   "cf-links",
@@ -86,6 +101,11 @@ export interface ResilientArticleResolveOptions {
   readySelector:string;
   maxPages?:number;
   urlPredicate?:(url:string)=>boolean;
+
+  pageUrlBuilder?:(
+    base:string,
+    page:number
+  )=>string;
 }
 
 
@@ -1466,17 +1486,21 @@ export async function resolveResilientArticleTargets(
 
   const diagnostics:any = {
     traceVersion:
-      "part5-resilient-v3",
+      "part5-resilient-v4",
 
     architecture:
-      "page-first:strict-then-relaxed-ai:bounded-browser",
+      "http-first:page-first:strict-relaxed-ai:bounded-browser",
 
     initialOrder:[
+      "http",
       "cf-content",
       "cf-scrape",
       "cf-links",
       "puppeteer"
     ],
+
+    listingHttpTimeoutMs:
+      LISTING_HTTP_TIMEOUT_MS,
 
     gotoWaitUntil:
       "domcontentloaded",
@@ -1563,10 +1587,15 @@ export async function resolveResilientArticleTargets(
         }
 
         const pageUrl =
-          pagedUrl(
-            landingUrl,
-            pageNumber
-          );
+          options.pageUrlBuilder
+            ? options.pageUrlBuilder(
+                landingUrl,
+                pageNumber
+              )
+            : pagedUrl(
+                landingUrl,
+                pageNumber
+              );
 
         const pageStages =
           STAGES.slice(
@@ -1598,6 +1627,43 @@ export async function resolveResilientArticleTargets(
               {};
 
             if (
+              stage ===
+              "http"
+            ) {
+              const acquired =
+                await acquireHttpHtml(
+                  pageUrl,
+                  {
+                    timeoutMs:
+                      LISTING_HTTP_TIMEOUT_MS,
+
+                    minimumBytes:500,
+
+                    userAgent:
+                      HTTP_USER_AGENT
+                  }
+                );
+
+              anchors =
+                anchorsFromHtml(
+                  acquired.html
+                );
+
+              metadata = {
+                status:
+                  acquired.status,
+
+                bodyLength:
+                  acquired.bodyLength,
+
+                anchorCount:
+                  anchors.length,
+
+                finalUrl:
+                  acquired.finalUrl
+              };
+
+            } else if (
               stage ===
               "cf-content"
             ) {
@@ -2566,10 +2632,10 @@ export async function acquireResilientArticleHtml(
 
       diagnostics:{
         traceVersion:
-          "part5-article-acquisition-v2",
+          "part5-article-acquisition-v3",
 
         architecture:
-          "content>scrape>puppeteer:true-fallback",
+          "http>content>scrape>puppeteer:true-fallback",
 
         gotoWaitUntil:
           "domcontentloaded",
@@ -2590,6 +2656,60 @@ export async function acquireResilientArticleHtml(
         diagnostics:any
       };
   };
+
+
+  /*
+   * Article HTTP.
+   *
+   * Cheapest path. Quality gate is identical to Browser
+   * acquisition, so a challenge/login shell cannot pass.
+   */
+  try {
+    const acquired =
+      await acquireHttpHtml(
+        context.url,
+        {
+          timeoutMs:
+            ARTICLE_HTTP_TIMEOUT_MS,
+
+          minimumBytes:500,
+
+          userAgent:
+            HTTP_USER_AGENT
+        }
+      );
+
+    const quality =
+      articleQuality(
+        context,
+        acquired.html
+      );
+
+    if (!quality.ok) {
+      throw new Error(
+        "HTTP_ARTICLE_QUALITY_FAILED:" +
+        JSON.stringify(
+          quality
+        )
+      );
+    }
+
+    return withTrace(
+      acquired,
+      "http",
+      quality
+    );
+
+  } catch(error) {
+    failures.push({
+      stage:"http",
+
+      error:
+        errorMessage(
+          error
+        )
+    });
+  }
 
 
   /*
