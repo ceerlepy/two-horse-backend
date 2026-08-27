@@ -307,6 +307,191 @@ function mainPicks(
 }
 
 
+
+function buildPart5Acceptance(
+  sourceKey:string,
+  status:string,
+  cities:string[],
+  resolution:any,
+  attempts:any[],
+  counts:any
+) {
+  const expectedStatus=
+    sourceKey==="yaris_analizi"
+      ? "access-restricted"
+      : "success";
+
+  const restrictionExpected=
+    expectedStatus==="access-restricted";
+
+  const validatedCities=
+    new Set<string>();
+
+  for (const attempt of attempts)
+    for (
+      const city of
+      attempt
+        ?.diagnostics
+        ?.targetCities ??
+      []
+    )
+      validatedCities.add(
+        String(city)
+      );
+
+  const norm=
+    (v:string)=>
+      v
+        .normalize("NFKC")
+        .toLocaleUpperCase("tr-TR");
+
+  const normalizedValidated=
+    new Set(
+      [...validatedCities]
+        .map(norm)
+    );
+
+  const missingValidatedCities=
+    restrictionExpected
+      ? []
+      : cities.filter(
+          city=>
+            !normalizedValidated.has(
+              norm(city)
+            )
+        );
+
+  const allDocumentsCanonical=
+    attempts.length>0 &&
+    attempts.every(
+      a=>
+        a?.completeCanonical===
+        true
+    );
+
+  const documents=
+    attempts.map(
+      a=>({
+        url:a?.url??null,
+        status:a?.status??null,
+        method:a?.method??null,
+        extracted:a?.extracted??0,
+        validated:a?.validated??0,
+        completeCanonical:
+          a?.completeCanonical??false,
+        error:a?.error??null,
+
+        targetCities:
+          a?.diagnostics
+            ?.targetCities ??
+          [],
+
+        acquisition:
+          a?.diagnostics
+            ?.acquisition ??
+          null,
+
+        articleText:
+          a?.diagnostics
+            ?.articleText ??
+          null,
+
+        semanticFlags:
+          a?.diagnostics
+            ?.semanticInput
+            ? {
+                containsBanko:
+                  a.diagnostics
+                    .semanticInput
+                    .containsBanko ??
+                  false,
+
+                containsTek:
+                  a.diagnostics
+                    .semanticInput
+                    .containsTek ??
+                  false,
+
+                containsFavorite:
+                  a.diagnostics
+                    .semanticInput
+                    .containsFavorite ??
+                  false
+              }
+            : null
+      })
+    );
+
+  const pass=
+    restrictionExpected
+      ? status===expectedStatus
+      : (
+          status===expectedStatus &&
+          Number(
+            counts?.total ??
+            0
+          )>0 &&
+          allDocumentsCanonical &&
+          missingValidatedCities.length===0
+        );
+
+  return {
+    traceVersion:
+      "part5-acceptance-v1",
+
+    expectedStatus,
+    actualStatus:
+      status,
+
+    pass,
+    persisted:false,
+
+    discoveryMethod:
+      resolution
+        ?.discoveryMethod ??
+      null,
+
+    resolutionStatus:
+      resolution
+        ?.status ??
+      null,
+
+    targetCount:
+      Array.isArray(
+        resolution?.targets
+      )
+        ? resolution.targets.length
+        : 0,
+
+    targets:
+      resolution?.targets ??
+      [],
+
+    canonicalCities:
+      cities,
+
+    validatedCities:[
+      ...validatedCities
+    ],
+
+    missingValidatedCities,
+
+    allDocumentsCanonical:
+      restrictionExpected
+        ? null
+        : allDocumentsCanonical,
+
+    totalValidated:
+      Number(
+        counts?.total ??
+        0
+      ),
+
+    documents
+  };
+}
+
+
 export async function previewExpertSource(
   env:
     Env,
@@ -452,7 +637,17 @@ export async function previewExpertSource(
       counts:
         summarize([]),
 
-      extractionAttempts:[]
+      extractionAttempts:[],
+
+      part5Acceptance:
+        buildPart5Acceptance(
+          sourceKey,
+          resolution.status,
+          cities,
+          resolution,
+          [],
+          summarize([])
+        )
     };
   }
 
@@ -705,6 +900,16 @@ export async function previewExpertSource(
 
     extractionAttempts:
       attempts,
+
+    part5Acceptance:
+      buildPart5Acceptance(
+        sourceKey,
+        status,
+        cities,
+        resolution,
+        attempts,
+        summarize(picks)
+      ),
 
     counts:
       summarize(picks),

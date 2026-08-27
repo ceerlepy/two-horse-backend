@@ -1163,7 +1163,12 @@ export async function extractExperts(
             .bodyLength,
 
         previousFailures:
-          document.failures
+          document.failures,
+
+        adapterDiagnostics:
+          (document.acquired as any)
+            ?.diagnostics ??
+          null
       },
 
       articleText:{
