@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 10,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -159,6 +159,7 @@
       "preflightRequiresCity": true,
       "entryUrls": [
         "https://www.yarisdergisi.com/tag/altili-tahmin/",
+        "https://www.yarisdergisi.com/tag/yaris-tahminleri/",
         "https://www.yarisdergisi.com/"
       ],
       "navigationLabels": [
