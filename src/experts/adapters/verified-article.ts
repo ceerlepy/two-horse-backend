@@ -156,6 +156,17 @@ export interface VerifiedArticlePlan {
   allowPartialCoverage?:
     boolean;
 
+  /*
+   * Source identity must carry target date BEFORE
+   * the article body is fetched.
+   *
+   * Prevents a stale 25-Aug article from becoming
+   * a 27-Aug candidate because its sidebar mentions
+   * today's date.
+   */
+  requireCandidateDateEvidence?:
+    boolean;
+
   allowPuppeteerDiscovery?:
     boolean;
 
@@ -175,6 +186,24 @@ export interface VerifiedArticlePlan {
    */
   adapterOwnedExtraction?:
     boolean;
+
+  /*
+   * Optional source-specific BODY cleanup.
+   *
+   * It runs while still inside the exact-URL
+   * acquisition ladder.
+   *
+   * If it rejects the body, acquisition continues
+   * to the next transport for the SAME exact URL.
+   */
+  prepareArticleHtml?:
+    (
+      context:
+        ExpertAcquireContext,
+
+      acquired:
+        AcquiredHtml
+    )=>AcquiredHtml;
 
   browserNavigationBudget?:
     number;
@@ -543,6 +572,12 @@ export async function acquireHttpFirstArticleHtml(
   options:{
     allowPuppeteer?:
       boolean;
+
+    prepareAcquired?:
+      (
+        acquired:
+          AcquiredHtml
+      )=>AcquiredHtml;
   } = {}
 ):Promise<AcquiredHtml> {
   const failures:any[] =
@@ -721,10 +756,40 @@ export async function acquireHttpFirstArticleHtml(
         if (
           quality.usable
         ) {
+          /*
+           * Source-specific preparation is deliberately
+           * inside this try block.
+           *
+           * If the fetched HTML is a shell/wrong body,
+           * preparation throws and the SAME exact URL
+           * proceeds to the next acquisition stage.
+           */
+          const selected =
+            options.prepareAcquired
+              ? options
+                  .prepareAcquired(
+                    acquired
+                  )
+              : acquired;
+
           return {
-            ...acquired,
+            ...selected,
 
             diagnostics:{
+              ...(
+                (
+                  selected as
+                    AcquiredHtml & {
+                      diagnostics?:
+                        Record<
+                          string,
+                          unknown
+                        >;
+                    }
+                )
+                  .diagnostics ??
+                {}
+              ),
               traceVersion:
                 "http-first-article-v1",
 
@@ -957,10 +1022,10 @@ function looseCandidate(
     `${String(day).padStart(2,"0")}${String(month).padStart(2,"0")}${yy}`;
 
   const hasCompact =
-    tokens.has(
+    material.includes(
       compact
     ) ||
-    tokens.has(
+    material.includes(
       compactPadded
     );
 
@@ -1018,6 +1083,15 @@ function looseCandidate(
           .allowYearlessDateEvidence
       )
     );
+
+  if (
+    plan
+      .requireCandidateDateEvidence ===
+        true &&
+    !dateEvidence
+  ) {
+    return null;
+  }
 
   const topicEvidence =
     evidence
@@ -2750,7 +2824,18 @@ export function createVerifiedArticleAdapter(
             allowPuppeteer:
               plan
                 .allowPuppeteerArticle ===
-              true
+              true,
+
+            prepareAcquired:
+              plan
+                .prepareArticleHtml
+                ? acquired =>
+                    plan
+                      .prepareArticleHtml!(
+                        context,
+                        acquired
+                      )
+                : undefined
           }
         );
   }

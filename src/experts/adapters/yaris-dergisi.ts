@@ -7,6 +7,10 @@ import {
   wordpressSearchUrl
 } from "./article-url-utils";
 
+import {
+  prepareRaceProseArticle
+} from "./race-prose";
+
 
 const ROOT =
   "https://www.yarisdergisi.com/";
@@ -14,8 +18,21 @@ const ROOT =
 const TAG =
   "https://www.yarisdergisi.com/tag/altili-tahmin/";
 
-const LEGACY_TAG =
-  "https://www.yarisdergisi.com/tag/yaris-tahminleri/";
+
+function fresh(
+  value:string,
+  raceDate:string
+):string {
+  const url =
+    new URL(value);
+
+  url.searchParams.set(
+    "twohorse_date",
+    raceDate
+  );
+
+  return url.toString();
+}
 
 
 function ownsArticle(
@@ -67,24 +84,34 @@ export const yarisDergisiAdapter =
     ) {
       return [
         /*
-         * First shared tag page: one page can contain both
-         * Ankara and Kocaeli articles.
+         * Current public source-native prediction index.
          */
-        TAG,
-        LEGACY_TAG,
+        fresh(
+          TAG,
+          context.raceDate
+        ),
 
+        /*
+         * Narrow source search is secondary discovery only.
+         */
         ...context.cities.map(
           city =>
-            wordpressSearchUrl(
-              ROOT,
-              dateSearchText(
-                context.raceDate,
-                city
-              )
+            fresh(
+              wordpressSearchUrl(
+                ROOT,
+                dateSearchText(
+                  context.raceDate,
+                  city
+                )
+              ),
+              context.raceDate
             )
         ),
 
-        ROOT
+        fresh(
+          ROOT,
+          context.raceDate
+        )
       ];
     },
 
@@ -95,21 +122,34 @@ export const yarisDergisiAdapter =
       "yurt-disi"
     ],
 
-    maxCandidates:8,
+    /*
+     * Critical for compact slugs:
+     * e.g. compact date suffix embedded in the article slug.
+     */
+    requireCandidateDateEvidence:
+      true,
+
+    maxCandidates:12,
     maxVerifiedPerCity:1,
 
     allowPuppeteerDiscovery:true,
     allowPuppeteerArticle:true,
 
-    /*
-     * This problematic source owns its bounded article
-     * acquisition path.
-     */
     adapterOwnedExtraction:true,
 
+    prepareArticleHtml(
+      context,
+      acquired
+    ) {
+      return prepareRaceProseArticle(
+        context,
+        acquired,
+        "YARIS DERGISI"
+      );
+    },
+
     /*
-     * TOTAL across listing + verification.
-     * Not per page.
+     * 1 listing + max 2 exact article renders.
      */
     browserNavigationBudget:3,
 

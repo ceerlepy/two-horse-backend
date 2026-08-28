@@ -1,0 +1,442 @@
+import {
+  load
+} from "cheerio";
+
+import type {
+  AcquiredHtml
+} from "../../acquisition/types";
+
+import {
+  normalizeExpertSearchText
+} from "../text-normalization";
+
+import type {
+  ExpertAcquireContext
+} from "./types";
+
+
+function escapeHtml(
+  value:string
+):string {
+  return value
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+
+function decodedUrlMaterial(
+  value:string
+):string {
+  try {
+    const url =
+      new URL(value);
+
+    return decodeURIComponent(
+      `${url.pathname} ${url.search}`
+    );
+  } catch {
+    try {
+      return decodeURIComponent(
+        value
+      );
+    } catch {
+      return value;
+    }
+  }
+}
+
+
+function sourceText(
+  html:string
+):string {
+  const $ =
+    load(html);
+
+  $(
+    [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "canvas",
+      "iframe",
+      "nav",
+      "footer",
+      "form"
+    ].join(",")
+  ).remove();
+
+  const roots = [
+    "article",
+    "main",
+    "[role='main']",
+    "body"
+  ];
+
+  let selector =
+    "body";
+
+  for (
+    const candidate of
+    roots
+  ) {
+    const node =
+      $(candidate)
+        .first();
+
+    const text =
+      node
+        .text()
+        .trim();
+
+    if (
+      text.length >=
+        300
+    ) {
+      selector =
+        candidate;
+      break;
+    }
+  }
+
+  const root =
+    $(selector)
+      .first();
+
+  root
+    .find("br")
+    .replaceWith("\n");
+
+  root
+    .find(
+      [
+        "p",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "li",
+        "tr",
+        "section"
+      ].join(",")
+    )
+    .each(
+      (
+        _index,
+        element
+      ) => {
+        $(element)
+          .append("\n");
+      }
+    );
+
+  return root
+    .text()
+    .replace(/\u00a0/g," ")
+    .replace(/[ \t\r]+/g," ")
+    .replace(/\n[ \t]+/g,"\n")
+    .replace(/\n{3,}/g,"\n\n")
+    .trim();
+}
+
+
+function targetCity(
+  context:
+    ExpertAcquireContext,
+
+  text:string
+):string {
+  const urlMaterial =
+    normalizeExpertSearchText(
+      decodedUrlMaterial(
+        context.url
+      )
+    );
+
+  const fromUrl =
+    context.cities
+      .filter(
+        city =>
+          urlMaterial.includes(
+            normalizeExpertSearchText(
+              city
+            )
+          )
+      );
+
+  if (
+    fromUrl.length ===
+      1
+  ) {
+    return fromUrl[0];
+  }
+
+  const normalizedText =
+    normalizeExpertSearchText(
+      text
+    );
+
+  const fromBody =
+    context.cities
+      .filter(
+        city =>
+          normalizedText.includes(
+            normalizeExpertSearchText(
+              city
+            )
+          )
+      );
+
+  if (
+    fromBody.length ===
+      1
+  ) {
+    return fromBody[0];
+  }
+
+  if (
+    context.cities.length ===
+      1
+  ) {
+    return context.cities[0];
+  }
+
+  throw new Error(
+    "RACE_PROSE_TARGET_CITY_AMBIGUOUS"
+  );
+}
+
+
+export function prepareRaceProseArticle(
+  context:
+    ExpertAcquireContext,
+
+  acquired:
+    AcquiredHtml,
+
+  sourceName:
+    string
+):AcquiredHtml {
+  const text =
+    sourceText(
+      acquired.html
+    );
+
+  const city =
+    targetCity(
+      context,
+      text
+    );
+
+  /*
+   * Critical acquisition gate.
+   *
+   * Exact URL alone is NOT enough.
+   * The actual fetched BODY must contain target city.
+   *
+   * This is what prevents Istinye Kocaeli from accepting
+   * an unrelated/generic fallback page.
+   */
+  if (
+    !normalizeExpertSearchText(
+      text
+    ).includes(
+      normalizeExpertSearchText(
+        city
+      )
+    )
+  ) {
+    throw new Error(
+      `RACE_PROSE_TARGET_CITY_NOT_IN_BODY:${city}`
+    );
+  }
+
+  const regex =
+    /(\d{1,2})\s*\.\s*KOŞU\b\s*:?\s*/giu;
+
+  const matches:
+    Array<{
+      raceNumber:number;
+      start:number;
+      bodyStart:number;
+    }> = [];
+
+  let match:
+    RegExpExecArray |
+    null;
+
+  while (
+    (
+      match =
+        regex.exec(text)
+    ) !== null
+  ) {
+    const raceNumber =
+      Number(
+        match[1]
+      );
+
+    if (
+      !Number.isInteger(
+        raceNumber
+      ) ||
+      raceNumber <= 0 ||
+      raceNumber > 30
+    ) {
+      continue;
+    }
+
+    matches.push({
+      raceNumber,
+
+      start:
+        match.index,
+
+      bodyStart:
+        regex.lastIndex
+    });
+  }
+
+  if (
+    !matches.length
+  ) {
+    throw new Error(
+      "RACE_PROSE_NO_RACE_BLOCKS"
+    );
+  }
+
+  const blocks:
+    Array<{
+      raceNumber:number;
+      text:string;
+    }> = [];
+
+  for (
+    let index=0;
+    index<matches.length;
+    index++
+  ) {
+    const current =
+      matches[index];
+
+    const next =
+      matches[
+        index+1
+      ];
+
+    const body =
+      text
+        .slice(
+          current.bodyStart,
+          next
+            ? next.start
+            : text.length
+        )
+        .trim();
+
+    if (
+      body.length <
+        20
+    ) {
+      continue;
+    }
+
+    blocks.push({
+      raceNumber:
+        current.raceNumber,
+
+      text:
+        body
+    });
+  }
+
+  if (
+    !blocks.length
+  ) {
+    throw new Error(
+      "RACE_PROSE_NO_USEFUL_BLOCKS"
+    );
+  }
+
+  const payload =
+    [
+      `TWOHORSE SOURCE: ${sourceName}`,
+      `TWOHORSE TARGET DATE: ${context.raceDate}`,
+      `TWOHORSE TARGET CITY: ${city}`,
+      "",
+      ...blocks.flatMap(
+        block => [
+          `TWOHORSE_RACE_CONTEXT|CITY=${city}|RACE=${block.raceNumber}`,
+          `${block.raceNumber}.KOŞU: ${block.text}`,
+          "TWOHORSE_RACE_CONTEXT_END",
+          ""
+        ]
+      )
+    ].join("\n");
+
+  const html =
+    [
+      "<html>",
+      "<body>",
+      "<article>",
+      "<pre>",
+      escapeHtml(
+        payload
+      ),
+      "</pre>",
+      "</article>",
+      "</body>",
+      "</html>"
+    ].join("");
+
+  return {
+    ...acquired,
+
+    html,
+
+    bodyLength:
+      html.length,
+
+    contentType:
+      "text/html",
+
+    diagnostics:{
+      ...(
+        (
+          acquired as
+            AcquiredHtml & {
+              diagnostics?:
+                Record<
+                  string,
+                  unknown
+                >;
+            }
+        )
+          .diagnostics ??
+        {}
+      ),
+
+      raceProse:{
+        traceVersion:
+          "race-prose-v1",
+
+        city,
+
+        raceBlockCount:
+          blocks.length,
+
+        races:
+          [
+            ...new Set(
+              blocks.map(
+                block =>
+                  block.raceNumber
+              )
+            )
+          ]
+      }
+    }
+  };
+}

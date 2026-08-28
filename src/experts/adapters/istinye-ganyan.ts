@@ -14,6 +14,10 @@ import {
   raceDateParts
 } from "./article-url-utils";
 
+import {
+  prepareRaceProseArticle
+} from "./race-prose";
+
 import type {
   ExpertAdapter
 } from "./types";
@@ -89,12 +93,10 @@ function historicalUrl(
       ),
 
       "ALTILI GANYAN TAHMİNLERİ"
-    ]
-      .join(" ");
+    ].join(" ");
 
   /*
-   * Preserve Unicode combining marks because this is how
-   * this WordPress installation generated the public slug.
+   * This is the source's real WordPress Unicode slug format.
    */
   const slug =
     title
@@ -127,8 +129,10 @@ function ownsHistorical(
         .replace(/^www\./,"")
         .toLowerCase() ===
         "istinyeganyan.com" &&
+
       url.toString() !==
         CURRENT &&
+
       !url.pathname
         .toLowerCase()
         .startsWith(
@@ -150,7 +154,7 @@ export const istinyeGanyanAdapter:
     resolve(context) {
       if (
         context.raceDate >=
-        turkeyDate()
+          turkeyDate()
       ) {
         return resolveDirectAdapter(
           context
@@ -180,7 +184,7 @@ export const istinyeGanyanAdapter:
 
         diagnostics:{
           traceVersion:
-            "istinye-deterministic-v1",
+            "istinye-deterministic-v2",
 
           cities:
             context.cities,
@@ -201,16 +205,30 @@ export const istinyeGanyanAdapter:
       );
     },
 
-    acquireHtml(context) {
+    acquireHtml(
+      context
+    ) {
       return acquireHttpFirstArticleHtml(
         context,
         {
           /*
-           * Exact URL is deterministic.
-           * Browser is only the final fallback after
-           * HTTP + CF Content + CF Scrape.
+           * HTTP first.
+           *
+           * If HTTP gives real target article:
+           * STOP.
+           *
+           * Otherwise:
+           * CF Content -> CF Scrape -> browser.
            */
-          allowPuppeteer:true
+          allowPuppeteer:true,
+
+          prepareAcquired:
+            acquired =>
+              prepareRaceProseArticle(
+                context,
+                acquired,
+                "ISTINYE GANYAN"
+              )
         }
       );
     }

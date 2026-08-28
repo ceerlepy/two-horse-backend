@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "discovery": {
     "acquisitionOrder": [
       "cf-scrape",
@@ -158,7 +158,7 @@
       "rootIsEditorial": true,
       "preflightRequiresCity": true,
       "entryUrls": [
-        "https://www.yarisdergisi.com/tag/yaris-tahminleri/",
+        "https://www.yarisdergisi.com/tag/altili-tahmin/",
         "https://www.yarisdergisi.com/"
       ],
       "navigationLabels": [
@@ -177,6 +177,7 @@
         "yurt-disi"
       ],
       "feedUrls": [
+        "https://www.yarisdergisi.com/tag/altili-tahmin/feed/",
         "https://www.yarisdergisi.com/tag/yaris-tahminleri/feed/",
         "https://www.yarisdergisi.com/feed/"
       ]
@@ -264,7 +265,7 @@
       "rootIsEditorial": false,
       "preflightRequiresCity": true,
       "entryUrls": [
-        "https://www.yarisanalizi.com/yazarlar/yazilari/9/Yaris-Analizi.html"
+        "https://www.yarisanalizi.com/yazarlar/yazilari/1/Eyup-CULFA.html"
       ],
       "navigationLabels": [
         "Yarış Analizi",

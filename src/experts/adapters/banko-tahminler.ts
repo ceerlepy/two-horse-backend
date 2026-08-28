@@ -7,15 +7,16 @@ import {
   wordpressSearchUrl
 } from "./article-url-utils";
 
+import {
+  prepareRaceProseArticle
+} from "./race-prose";
+
 
 const ROOT =
   "https://www.bankotahminler.com/";
 
 const CATEGORY =
   "https://www.bankotahminler.com/kategori/tahminler/";
-
-const BULLETIN =
-  "https://www.bankotahminler.com/bulten/";
 
 
 function ownsArticle(
@@ -66,18 +67,16 @@ export const bankoTahminlerAdapter =
     ) {
       return [
         /*
-         * Date-only search first:
-         * ideally Ankara + Kocaeli on one rendered page.
+         * Proven normal-HTTP public editorial index.
          */
+        CATEGORY,
+
         wordpressSearchUrl(
           ROOT,
           dateSearchText(
             context.raceDate
           )
         ),
-
-        CATEGORY,
-        BULLETIN,
 
         ...context.cities.map(
           city =>
@@ -103,27 +102,44 @@ export const bankoTahminlerAdapter =
       "birleşik krallık"
     ],
 
+    /*
+     * This closes the 25-Aug Kocaeli -> 27-Aug bug.
+     */
+    requireCandidateDateEvidence:
+      true,
+
     maxCandidates:8,
     maxVerifiedPerCity:1,
 
     /*
-     * Human-editorial Banko source may publish only some
-     * canonical meetings on a given day.
-     *
-     * /ai-tahmin stays excluded.
+     * Human editorial does not necessarily publish
+     * both canonical cities every day.
      */
     allowPartialCoverage:true,
 
-    allowPuppeteerDiscovery:true,
-    allowPuppeteerArticle:true,
-
     /*
-     * This problematic source owns its bounded article
-     * acquisition path.
+     * Proven current path:
+     * listing HTTP works
+     * exact article HTTP works.
+     *
+     * CF Content/Scrape remain inside acquisition ladder
+     * only if ordinary HTTP genuinely fails.
      */
+    allowPuppeteerDiscovery:false,
+    allowPuppeteerArticle:false,
+
     adapterOwnedExtraction:true,
 
-    browserNavigationBudget:3,
+    prepareArticleHtml(
+      context,
+      acquired
+    ) {
+      return prepareRaceProseArticle(
+        context,
+        acquired,
+        "BANKO TAHMINLER"
+      );
+    },
 
     fallback:"feed"
   });

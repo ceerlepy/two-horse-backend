@@ -3,14 +3,34 @@ import {
 } from "./verified-article";
 
 
-const WRITER =
-  "https://www.yarisanalizi.com/yazarlar/yazilari/9/Yaris-Analizi.html";
+const PUBLIC_WRITER =
+  "https://www.yarisanalizi.com/yazarlar/yazilari/1/Eyup-CULFA.html";
 
 const LATEST =
   "https://www.yarisanalizi.com/son-tahminler.html";
 
 const ROOT =
   "https://www.yarisanalizi.com/";
+
+
+function fresh(
+  value:string,
+  raceDate:string
+):string {
+  const url =
+    new URL(value);
+
+  /*
+   * Avoid a stale source/CDN listing while keeping
+   * source identity fully dynamic.
+   */
+  url.searchParams.set(
+    "twohorse_date",
+    raceDate
+  );
+
+  return url.toString();
+}
 
 
 function ownsArticle(
@@ -31,11 +51,17 @@ function ownsArticle(
       )
         .toLowerCase();
 
+    /*
+     * PUBLIC Eyup CULFA path only.
+     *
+     * Do not ingest writer 9 restricted articles when
+     * writer 1 has a public article for the same date.
+     */
     return (
       host ===
         "yarisanalizi.com" &&
       path.includes(
-        "/yazarlar/yazilari/9/"
+        "/yazarlar/yazilari/1/"
       ) &&
       path.includes(
         "/guncel-at-yaris-tahminleri/"
@@ -58,13 +84,33 @@ export const yarisAnaliziAdapter =
 
     ownsArticle,
 
-    discoveryUrls() {
+    discoveryUrls(
+      context
+    ) {
       return [
-        WRITER,
-        LATEST,
-        ROOT
+        fresh(
+          PUBLIC_WRITER,
+          context.raceDate
+        ),
+
+        fresh(
+          LATEST,
+          context.raceDate
+        ),
+
+        fresh(
+          ROOT,
+          context.raceDate
+        )
       ];
     },
+
+    /*
+     * Never let body/sidebar establish target date.
+     * The listing href/title must already match date.
+     */
+    requireCandidateDateEvidence:
+      true,
 
     maxCandidates:6,
     maxVerifiedPerCity:1,
