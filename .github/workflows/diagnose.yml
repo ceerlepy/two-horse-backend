@@ -13,6 +13,11 @@ jobs:
     permissions:
       contents: read
       issues: write
+    env:
+      BASE_URL: https://two-horse-backend.veyseltosun-vt.workers.dev
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      DATE: ${{ inputs.date }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,8 +37,3 @@ jobs:
           gh issue create \
             --title "Part 5 diagnostics — run ${{ github.run_number }}" \
             --body-file issue.md
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_URL: https://two-horse-backend.veyseltosun-vt.workers.dev
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
-          DATE: ${{ inputs.date }}
