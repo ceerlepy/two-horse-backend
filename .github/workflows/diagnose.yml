@@ -1,0 +1,39 @@
+name: Part 5 Diagnose
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "YYYY-MM-DD"
+        required: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run diagnostics
+        run: |
+          chmod +x scripts/part5-diagnose.sh
+          scripts/part5-diagnose.sh > out.txt 2>&1 || true
+          head -c 60000 out.txt > body.txt
+
+      - name: Post issue
+        run: |
+          {
+            echo '```'
+            cat body.txt
+            echo '```'
+          } > issue.md
+          gh issue create \
+            --title "Part 5 diagnostics — run ${{ github.run_number }}" \
+            --body-file issue.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_URL: https://two-horse-backend.veyseltosun-vt.workers.dev
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          DATE: ${{ inputs.date }}
