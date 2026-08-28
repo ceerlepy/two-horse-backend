@@ -16,6 +16,12 @@ export interface AcquiredHtml {
   contentType: string | null;
 
   bodyLength: number;
+
+  /*
+   * Optional adapter/acquisition diagnostics used by
+   * admin preview and source-specific ingestion.
+   */
+  diagnostics?: Record<string, unknown>;
 }
 
 export interface AcquisitionFailure {

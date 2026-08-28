@@ -945,6 +945,14 @@ export async function acquireGanyanGalopArticle(
     );
   }
 
+  /*
+   * Keep the post-guard value as a stable string.
+   * TypeScript does not preserve the nullable narrowing
+   * across the nested accepted() closure.
+   */
+  const targetCity:string =
+    city;
+
   const failures:any[] =
     [];
 
@@ -1031,7 +1039,7 @@ export async function acquireGanyanGalopArticle(
     const section =
       extractGanyanCommentsSection(
         text,
-        city
+        targetCity
       );
 
     if (!section) {
@@ -1058,7 +1066,7 @@ export async function acquireGanyanGalopArticle(
     const html =
       wrapDocument(
         context.raceDate,
-        city,
+        targetCity,
         section
       );
 
@@ -1241,7 +1249,7 @@ export async function acquireGanyanGalopArticle(
         const section =
           extractGanyanCommentsSection(
             text,
-            city
+            targetCity
           );
 
         if (!section) {
@@ -1265,7 +1273,7 @@ export async function acquireGanyanGalopArticle(
         const html =
           wrapDocument(
             context.raceDate,
-            city,
+            targetCity,
             section
           );
 
@@ -1295,7 +1303,8 @@ export async function acquireGanyanGalopArticle(
             traceVersion:
               "ganyan-public-comments-v2",
 
-            city,
+            city:
+              targetCity,
 
             selectedVariant:
               url,
