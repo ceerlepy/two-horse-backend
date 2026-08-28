@@ -12,6 +12,9 @@ const ROOT =
   "https://www.yarisdergisi.com/";
 
 const TAG =
+  "https://www.yarisdergisi.com/tag/altili-tahmin/";
+
+const LEGACY_TAG =
   "https://www.yarisdergisi.com/tag/yaris-tahminleri/";
 
 
@@ -68,6 +71,7 @@ export const yarisDergisiAdapter =
          * Ankara and Kocaeli articles.
          */
         TAG,
+        LEGACY_TAG,
 
         ...context.cities.map(
           city =>

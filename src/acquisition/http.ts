@@ -50,8 +50,65 @@ export async function acquireHttpHtml(
       await response.text();
 
     if (!response.ok) {
+      /*
+       * A transport-specific 404 is not automatically proof
+       * that a public article does not exist.
+       *
+       * Keep enough SAFE diagnostics to distinguish:
+       * - real origin 404
+       * - WAF / synthetic 404
+       * - redirect/routing mismatch
+       *
+       * Never include request secrets/cookies.
+       */
+      const title =
+        (
+          /<title[^>]*>([\\s\\S]*?)<\\/title>/i
+            .exec(html)?.[1] ??
+          ""
+        )
+          .replace(/<[^>]+>/g," ")
+          .replace(/\\s+/g," ")
+          .trim()
+          .slice(0,240);
+
+      const preview =
+        html
+          .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
+          .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+          .replace(/<[^>]+>/g," ")
+          .replace(/&nbsp;/gi," ")
+          .replace(/\\s+/g," ")
+          .trim()
+          .slice(0,360);
+
       throw new Error(
-        `HTTP_${response.status}`
+        `HTTP_${response.status}:` +
+        JSON.stringify({
+          finalUrl:
+            response.url || url,
+
+          contentType:
+            response.headers.get(
+              "content-type"
+            ),
+
+          server:
+            response.headers.get(
+              "server"
+            ),
+
+          cfRay:
+            response.headers.get(
+              "cf-ray"
+            ),
+
+          bodyLength:
+            html.length,
+
+          title,
+          preview
+        })
       );
     }
 

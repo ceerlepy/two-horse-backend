@@ -7,19 +7,12 @@ import {
 } from "../../acquisition/http";
 
 import {
-  acquireCfContentHtml
-} from "../../acquisition/cloudflare-html";
-
-import {
-  acquireCfLinks
-} from "../../acquisition/cloudflare-links";
-
-import {
   normalizeExpertSearchText
 } from "../text-normalization";
 
 import {
-  acquireGanyanGalopArticle
+  acquireGanyanGalopArticle,
+  extractGanyanCommentsSection
 } from "./ganyan-article";
 
 import type {
@@ -32,7 +25,14 @@ const ROOT =
   "https://www.ganyancanavari.com.tr/";
 
 
-function slug(
+const MAX_SOURCE_ROUTE_SLOT =
+  15;
+
+const PROBE_BATCH_SIZE =
+  4;
+
+
+function citySlug(
   value:string
 ):string {
   return normalizeExpertSearchText(
@@ -42,52 +42,31 @@ function slug(
 }
 
 
-function linksFromHtml(
-  base:string,
+function bodyText(
   html:string
-):string[] {
-  const $=
+):string {
+  const $ =
     load(html);
 
-  const urls:string[]=
-    [];
+  $(
+    "script,style,noscript,svg,canvas,iframe"
+  ).remove();
 
-  $("a[href]").each(
-    (
-      _index,
-      element
-    ) => {
-      const href=
-        $(element)
-          .attr("href");
-
-      if (!href)
-        return;
-
-      try {
-        urls.push(
-          new URL(
-            href,
-            base
-          ).toString()
-        );
-      } catch {
-        // ignore malformed source URL
-      }
-    }
-  );
-
-  return [
-    ...new Set(urls)
-  ];
+  return $("body")
+    .text()
+    .replace(/\u00a0/g," ")
+    .replace(/[\t\r ]+/g," ")
+    .replace(/\n\s+/g,"\n")
+    .replace(/\n{3,}/g,"\n\n")
+    .trim();
 }
 
 
-function targetPublicGalop(
-  city:string,
+function publicCommentsUrl(
   raceDate:string,
-  values:string[]
-):string|null {
+  city:string,
+  slot:number
+):string {
   const [
     year,
     month,
@@ -95,249 +74,252 @@ function targetPublicGalop(
   ] =
     raceDate.split("-");
 
-  const datePath =
-    `/${year}/${month}/${day}/`;
-
-  const cityPath =
-    `/${slug(city)}/`;
-
-  const matches =
-    values
-      .filter(
-        value => {
-          try {
-            const url=
-              new URL(value);
-
-            const host=
-              url.hostname
-                .replace(/^www\./,"")
-                .toLowerCase();
-
-            const path=
-              decodeURIComponent(
-                url.pathname
-              )
-                .normalize("NFKD")
-                .toLowerCase()
-                .replace(/\p{M}/gu,"")
-                .replace(/ı/g,"i")
-                .replace(/ş/g,"s")
-                .replace(/ğ/g,"g")
-                .replace(/ü/g,"u")
-                .replace(/ö/g,"o")
-                .replace(/ç/g,"c");
-
-            return (
-              host ===
-                "ganyancanavari.com.tr" &&
-              path.includes(
-                datePath
-              ) &&
-              path.includes(
-                cityPath
-              ) &&
-              /\/galoplar(?:-ozet)?\.html$/
-                .test(path)
-            );
-
-          } catch {
-            return false;
-          }
-        }
-      )
-      .sort(
-        (a,b) => {
-          /*
-           * Full galop page first,
-           * özet is valid fallback.
-           */
-          const aSummary=
-            /galoplar-ozet\.html$/i
-              .test(a)
-              ? 1
-              : 0;
-
-          const bSummary=
-            /galoplar-ozet\.html$/i
-              .test(b)
-              ? 1
-              : 0;
-
-          return aSummary-bSummary;
-        }
-      );
-
-  return matches[0] ?? null;
+  return new URL(
+    [
+      "site",
+      year,
+      month,
+      day,
+      String(slot),
+      citySlug(city),
+      "gecmis-dereceler.html"
+    ].join("/"),
+    ROOT
+  ).toString();
 }
 
 
-async function resolveCity(
+function exactDatePath(
+  raceDate:string
+):string {
+  const [
+    year,
+    month,
+    day
+  ] =
+    raceDate.split("-");
+
+  return `/${year}/${month}/${day}/`;
+}
+
+
+async function probeSlot(
   context:
     ExpertAdapterContext,
-  city:string
+
+  city:string,
+  slot:number
 ) {
-  const query=
-    new URL(ROOT);
+  const requestedUrl =
+    publicCommentsUrl(
+      context.raceDate,
+      city,
+      slot
+    );
 
-  query.searchParams.set(
-    "q",
-    `${city} ${context.raceDate} galoplar`
-  );
-
-  const attempts:any[]=
-    [];
-
-
-  /*
-   * Old HorsAI principle:
-   * HTTP first.
-   */
   try {
-    const acquired=
+    const acquired =
       await acquireHttpHtml(
-        query.toString(),
+        requestedUrl,
         {
-          timeoutMs:5_000,
-          minimumBytes:200,
+          timeoutMs:
+            3_500,
+
+          minimumBytes:
+            200,
 
           userAgent:
             "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36"
         }
       );
 
-    const selected=
-      targetPublicGalop(
-        city,
-        context.raceDate,
-        linksFromHtml(
-          acquired.finalUrl ??
-            query.toString(),
-          acquired.html
-        )
+    const text =
+      bodyText(
+        acquired.html
       );
 
-    attempts.push({
-      stage:"http",
-      bodyLength:
-        acquired.bodyLength,
-      selected
-    });
-
-    if (selected) {
-      return {
-        url:selected,
-        attempts
-      };
-    }
-
-  } catch(error) {
-    attempts.push({
-      stage:"http",
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    });
-  }
-
-
-  /*
-   * Rendered HTML fallback.
-   */
-  try {
-    const acquired=
-      await acquireCfContentHtml(
-        context.env,
-        query.toString()
+    const section =
+      extractGanyanCommentsSection(
+        text,
+        city
       );
 
-    const selected=
-      targetPublicGalop(
-        city,
-        context.raceDate,
-        linksFromHtml(
-          query.toString(),
-          acquired.html
-        )
-      );
+    const finalUrl =
+      acquired.finalUrl ||
+      requestedUrl;
 
-    attempts.push({
-      stage:"cf-content",
-      bodyLength:
-        acquired.bodyLength,
-      selected
-    });
+    /*
+     * Exact date is verified from the final source URL.
+     * This prevents a generic/current redirect from being
+     * accepted as the historical target.
+     */
+    const datePathOk =
+      new URL(
+        finalUrl
+      )
+        .pathname
+        .includes(
+          exactDatePath(
+            context.raceDate
+          )
+        );
 
-    if (selected) {
-      return {
-        url:selected,
-        attempts
-      };
-    }
-
-  } catch(error) {
-    attempts.push({
-      stage:"cf-content",
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error)
-    });
-  }
-
-
-  /*
-   * Link-only last discovery fallback.
-   */
-  try {
-    const acquired=
-      await acquireCfLinks(
-        context.env,
-        query.toString()
-      );
-
-    const selected=
-      targetPublicGalop(
-        city,
-        context.raceDate,
-        acquired.links
-      );
-
-    attempts.push({
-      stage:"cf-links",
-      linkCount:
-        acquired.links.length,
-      selected
-    });
+    const accepted =
+      Boolean(
+        section
+      ) &&
+      datePathOk;
 
     return {
-      url:selected,
-      attempts
+      slot,
+      requestedUrl,
+
+      url:
+        accepted
+          ? finalUrl
+          : null,
+
+      status:
+        acquired.status,
+
+      bodyLength:
+        acquired.bodyLength,
+
+      textCharacters:
+        text.length,
+
+      exactCityComments:
+        Boolean(section),
+
+      datePathOk,
+
+      error:null
     };
 
   } catch(error) {
-    attempts.push({
-      stage:"cf-links",
+    return {
+      slot,
+      requestedUrl,
+      url:null,
+      status:null,
+      bodyLength:null,
+      textCharacters:null,
+      exactCityComments:false,
+      datePathOk:false,
+
       error:
         error instanceof Error
           ? error.message
           : String(error)
-    });
-
-    return {
-      url:null,
-      attempts
     };
   }
 }
 
 
-function isPublicGalop(
+async function resolveCity(
+  context:
+    ExpertAdapterContext,
+
+  city:string
+) {
+  const attempts:any[] =
+    [];
+
+  let anyHttpSuccess =
+    false;
+
+  for (
+    let start=0;
+    start<=MAX_SOURCE_ROUTE_SLOT;
+    start+=PROBE_BATCH_SIZE
+  ) {
+    const slots =
+      Array.from(
+        {
+          length:
+            Math.min(
+              PROBE_BATCH_SIZE,
+              MAX_SOURCE_ROUTE_SLOT -
+                start +
+                1
+            )
+        },
+
+        (
+          _,
+          offset
+        ) =>
+          start + offset
+      );
+
+    const batch =
+      await Promise.all(
+        slots.map(
+          slot =>
+            probeSlot(
+              context,
+              city,
+              slot
+            )
+        )
+      );
+
+    attempts.push(
+      ...batch
+    );
+
+    if (
+      batch.some(
+        item =>
+          item.status ===
+            200
+      )
+    ) {
+      anyHttpSuccess =
+        true;
+    }
+
+    const winner =
+      batch.find(
+        item =>
+          Boolean(
+            item.url
+          )
+      );
+
+    if (
+      winner?.url
+    ) {
+      return {
+        city,
+
+        url:
+          winner.url,
+
+        discoveredSlot:
+          winner.slot,
+
+        anyHttpSuccess,
+        attempts
+      };
+    }
+  }
+
+  return {
+    city,
+    url:null,
+    discoveredSlot:null,
+    anyHttpSuccess,
+    attempts
+  };
+}
+
+
+function isPublicCommentsPage(
   value:string
 ):boolean {
   try {
-    const url=
+    const url =
       new URL(value);
 
     return (
@@ -345,7 +327,8 @@ function isPublicGalop(
         .replace(/^www\./,"")
         .toLowerCase() ===
         "ganyancanavari.com.tr" &&
-      /\/site\/\d{4}\/\d{2}\/\d{2}\/\d+\/[^/]+\/galoplar(?:-ozet)?\.html$/i
+
+      /\/site\/\d{4}\/\d{2}\/\d{2}\/\d+\/[^/]+\/(?:gecmis-dereceler|galoplar(?:-ozet)?)\.html$/i
         .test(
           url.pathname
         )
@@ -362,24 +345,25 @@ export const ganyanCanavariAdapter:
     sourceKey:
       "ganyan_canavari",
 
-    async resolve(context) {
-      const results=
+    async resolve(
+      context
+    ) {
+      const results:any[] =
         [];
 
       for (
         const city of
         context.cities
       ) {
-        results.push({
-          city,
-          ...await resolveCity(
+        results.push(
+          await resolveCity(
             context,
             city
           )
-        });
+        );
       }
 
-      const missing=
+      const missingCities =
         results
           .filter(
             result =>
@@ -390,51 +374,70 @@ export const ganyanCanavariAdapter:
               result.city
           );
 
-      if (missing.length) {
+      if (
+        missingCities.length
+      ) {
         return {
-          status:"not-published",
+          status:
+            results.some(
+              result =>
+                result
+                  .anyHttpSuccess
+            )
+              ? "not-published"
+              : "unavailable",
+
           mode:"article",
           targets:[],
-          discoveredFromUrl:ROOT,
+
+          discoveredFromUrl:
+            ROOT,
+
           discoveryMethod:null,
 
           diagnostics:{
             traceVersion:
-              "ganyan-public-galop-v1",
+              "ganyan-public-slot-probe-v2",
+
+            architecture:
+              "bounded-dynamic-source-slot>http>exact-city-comments",
 
             results,
-            missingCities:
-              missing
+            missingCities
           }
         };
       }
 
+      const targets =
+        results
+          .map(
+            result =>
+              result.url
+          )
+          .filter(
+            (
+              value
+            ): value is string =>
+              Boolean(value)
+          );
+
       return {
         status:"ready",
         mode:"article",
-
-        targets:
-          results
-            .map(
-              result =>
-                result.url
-            )
-            .filter(
-              (
-                value
-              ): value is string =>
-                Boolean(value)
-            ),
+        targets,
 
         discoveredFromUrl:
           ROOT,
 
         discoveryMethod:
-          "source-search-public-galop",
+          "bounded-public-source-slot",
 
         diagnostics:{
           traceVersion:
-            "ganyan-public-galop-v1",
+            "ganyan-public-slot-probe-v2",
+
+          architecture:
+            "bounded-dynamic-source-slot>http>exact-city-comments",
 
           results,
           missingCities:[]
@@ -443,7 +446,7 @@ export const ganyanCanavariAdapter:
     },
 
     ownsAcquisition:
-      isPublicGalop,
+      isPublicCommentsPage,
 
     acquireHtml:
       acquireGanyanGalopArticle

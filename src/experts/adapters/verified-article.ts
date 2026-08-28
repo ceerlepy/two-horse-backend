@@ -149,6 +149,13 @@ export interface VerifiedArticlePlan {
   maxVerifiedPerCity?:
     number;
 
+  /*
+   * Some human-editorial sources legitimately publish
+   * only a subset of today's canonical meetings.
+   */
+  allowPartialCoverage?:
+    boolean;
+
   allowPuppeteerDiscovery?:
     boolean;
 
@@ -229,23 +236,6 @@ function unique(
         .filter(Boolean)
     )
   ];
-}
-
-
-function fatalHttpMiss(
-  error:unknown
-):boolean {
-  const value =
-    errorMessage(error);
-
-  return (
-    value.includes(
-      "HTTP_404"
-    ) ||
-    value.includes(
-      "HTTP_410"
-    )
-  );
 }
 
 
@@ -760,14 +750,11 @@ export async function acquireHttpFirstArticleHtml(
             )
         });
 
-        if (
-          stage === "http" &&
-          fatalHttpMiss(
-            error
-          )
-        ) {
-          break;
-        }
+        /*
+         * One transport's 404/410 is not source-level proof.
+         * Continue to the next acquisition transport.
+         */
+
       } finally {
         if (
           stage ===
@@ -1739,15 +1726,11 @@ export async function resolveVerifiedArticleTargets(
               )
           });
 
-        if (
-          stage ===
-            "http" &&
-          fatalHttpMiss(
-            error
-          )
-        ) {
-          return;
-        }
+        /*
+         * Continue this discovery URL through CF Content,
+         * CF Links, CF Scrape and bounded browser as configured.
+         */
+
       }
     }
   }
@@ -2095,15 +2078,11 @@ export async function resolveVerifiedArticleTargets(
               )
           });
 
-        if (
-          stage ===
-            "http" &&
-          fatalHttpMiss(
-            error
-          )
-        ) {
-          break;
-        }
+        /*
+         * One transport's 404/410 is not source-level proof.
+         * Continue to the next acquisition transport.
+         */
+
       }
     }
 
@@ -2572,10 +2551,24 @@ export async function resolveVerifiedArticleTargets(
         selected.coverage
     };
 
-    if (
+    const partialCoverageAllowed =
+      plan.allowPartialCoverage ===
+        true &&
       selected
-        .coverage
-        .complete &&
+        .selected
+        .some(
+          candidate =>
+            candidate.status ===
+            "verified"
+        );
+
+    if (
+      (
+        selected
+          .coverage
+          .complete ||
+        partialCoverageAllowed
+      ) &&
       selected
         .selected
         .length
@@ -2602,10 +2595,14 @@ export async function resolveVerifiedArticleTargets(
           null,
 
         discoveryMethod:
-          selected.method ===
-            "workers-ai"
-            ? "verified-article-workers-ai"
-            : "verified-article-http-first",
+          !selected
+            .coverage
+            .complete
+            ? "verified-article-http-first-partial"
+            : selected.method ===
+                "workers-ai"
+              ? "verified-article-workers-ai"
+              : "verified-article-http-first",
 
         diagnostics
       };

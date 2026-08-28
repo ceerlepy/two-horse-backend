@@ -205,7 +205,12 @@ export const istinyeGanyanAdapter:
       return acquireHttpFirstArticleHtml(
         context,
         {
-          allowPuppeteer:false
+          /*
+           * Exact URL is deterministic.
+           * Browser is only the final fallback after
+           * HTTP + CF Content + CF Scrape.
+           */
+          allowPuppeteer:true
         }
       );
     }

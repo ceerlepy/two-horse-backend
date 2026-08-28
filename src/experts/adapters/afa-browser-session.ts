@@ -68,65 +68,156 @@ async function setDate(
       ) => {
         const inputs =
           Array.from(
-            document.querySelectorAll("input")
+            document.querySelectorAll(
+              "input"
+            )
           ) as HTMLInputElement[];
 
         const input =
-          inputs.find(x => x.type === "date") ??
+          inputs.find(
+            x =>
+              x.type === "date"
+          ) ??
           inputs.find(
             x =>
               /^\d{1,2}[./-]\d{1,2}[./-]\d{4}$/
-                .test(String(x.value ?? ""))
+                .test(
+                  String(
+                    x.value ?? ""
+                  )
+                )
           );
 
         if (!input) {
           return {
             ok:false,
-            reason:"DATE_INPUT_NOT_FOUND"
+            reason:
+              "DATE_INPUT_NOT_FOUND",
+
+            inputs:
+              inputs
+                .slice(0,20)
+                .map(
+                  x => ({
+                    type:x.type,
+                    value:x.value
+                  })
+                )
           };
         }
 
         const wanted =
-          input.type === "date"
+          input.type ===
+            "date"
             ? iso
             : display;
 
-        const descriptor =
-          Object.getOwnPropertyDescriptor(
-            HTMLInputElement.prototype,
-            "value"
-          );
+        const previous =
+          input.value;
 
-        if (descriptor?.set) {
-          descriptor.set.call(input,wanted);
+        const descriptor =
+          Object
+            .getOwnPropertyDescriptor(
+              HTMLInputElement.prototype,
+              "value"
+            );
+
+        if (
+          descriptor?.set
+        ) {
+          descriptor
+            .set
+            .call(
+              input,
+              wanted
+            );
         } else {
-          input.value=wanted;
+          input.value =
+            wanted;
+        }
+
+        const tracker =
+          (
+            input as
+              HTMLInputElement & {
+                _valueTracker?: {
+                  setValue?:
+                    (
+                      value:string
+                    ) => void;
+                };
+              }
+          )
+            ._valueTracker;
+
+        if (
+          tracker &&
+          typeof tracker.setValue ===
+            "function"
+        ) {
+          tracker.setValue(
+            previous
+          );
         }
 
         input.dispatchEvent(
-          new Event("input",{bubbles:true})
+          new Event(
+            "input",
+            {
+              bubbles:true
+            }
+          )
         );
+
         input.dispatchEvent(
-          new Event("change",{bubbles:true})
+          new Event(
+            "change",
+            {
+              bubbles:true
+            }
+          )
         );
-        input.blur();
+
+        input.dispatchEvent(
+          new Event(
+            "blur",
+            {
+              bubbles:true
+            }
+          )
+        );
 
         return {
-          ok:input.value === wanted,
-          current:input.value,
+          ok:
+            input.value ===
+            wanted,
+
+          type:
+            input.type,
+
+          previous,
+          current:
+            input.value,
           wanted
         };
       },
+
       raceDate,
-      displayDate(raceDate)
+      displayDate(
+        raceDate
+      )
     );
 
   if (!state.ok) {
     throw new Error(
       "AFA_TARGET_DATE_INPUT_FAILED:" +
-      JSON.stringify(state)
+      JSON.stringify(
+        state
+      )
     );
   }
+
+  return state;
 }
 
 
@@ -139,11 +230,28 @@ async function activateCity(
       wantedCity:string,
       clickableSelector:string
     ) => {
+      const clean =
+        (
+          value:unknown
+        ) =>
+          String(
+            value ?? ""
+          )
+            .replace(
+              /\s+/g,
+              " "
+            )
+            .trim();
+
       const foldLocal =
-        (value:unknown) =>
-          String(value ?? "")
+        (
+          value:unknown
+        ) =>
+          clean(value)
             .normalize("NFKD")
-            .toLocaleUpperCase("tr-TR")
+            .toLocaleUpperCase(
+              "tr-TR"
+            )
             .replace(/\p{M}/gu,"")
             .replace(/[İIıi]/g,"I")
             .replace(/Ğ/g,"G")
@@ -156,52 +264,114 @@ async function activateCity(
             .trim();
 
       const target =
-        foldLocal(wantedCity);
+        foldLocal(
+          wantedCity
+        );
+
+      const cityMatch =
+        (
+          value:unknown
+        ) => {
+          const text =
+            foldLocal(value);
+
+          if (!text)
+            return false;
+
+          return (
+            text === target ||
+            (
+              text.length <=
+                target.length + 40 &&
+              (
+                text.startsWith(
+                  `${target} `
+                ) ||
+                text.endsWith(
+                  ` ${target}`
+                ) ||
+                (
+                  ` ${text} `
+                ).includes(
+                  ` ${target} `
+                )
+              )
+            )
+          );
+        };
+
 
       for (
         const select of
         Array.from(
-          document.querySelectorAll("select")
+          document.querySelectorAll(
+            "select"
+          )
         ) as HTMLSelectElement[]
       ) {
         const option =
-          Array.from(select.options)
+          Array.from(
+            select.options
+          )
             .find(
               x =>
-                foldLocal(x.textContent) === target
+                cityMatch(
+                  x.textContent
+                )
             );
 
-        if (!option) {
+        if (!option)
           continue;
-        }
 
         const descriptor =
-          Object.getOwnPropertyDescriptor(
-            HTMLSelectElement.prototype,
-            "value"
-          );
+          Object
+            .getOwnPropertyDescriptor(
+              HTMLSelectElement.prototype,
+              "value"
+            );
 
-        if (descriptor?.set) {
+        if (
+          descriptor?.set
+        ) {
           descriptor.set.call(
             select,
             option.value
           );
         } else {
-          select.value=option.value;
+          select.value =
+            option.value;
         }
 
         select.dispatchEvent(
-          new Event("input",{bubbles:true})
+          new Event(
+            "input",
+            {
+              bubbles:true
+            }
+          )
         );
+
         select.dispatchEvent(
-          new Event("change",{bubbles:true})
+          new Event(
+            "change",
+            {
+              bubbles:true
+            }
+          )
         );
 
         return {
           ok:true,
-          method:"select"
+          method:"select",
+          label:
+            clean(
+              option.textContent
+            ),
+          value:
+            option.value
         };
       }
+
 
       const nodes =
         Array.from(
@@ -217,33 +387,127 @@ async function activateCity(
               Boolean(
                 element.offsetWidth ||
                 element.offsetHeight ||
-                element.getClientRects().length
+                element
+                  .getClientRects()
+                  .length
+              );
+
+            if (!visible)
+              return false;
+
+            const label =
+              clean(
+                element.innerText ??
+                element.textContent
               );
 
             return (
-              visible &&
-              foldLocal(
-                element.innerText ??
-                element.textContent
-              ) === target
+              label.length <= 80 &&
+              cityMatch(label)
             );
           }
         );
 
-      if (!node) {
+      if (node) {
+        const label =
+          clean(
+            node.innerText ??
+            node.textContent
+          );
+
+        node.click();
+
         return {
-          ok:false,
-          method:null
+          ok:true,
+          method:"click",
+          label
         };
       }
 
-      node.click();
+
+      const selectOptions =
+        Array.from(
+          document.querySelectorAll(
+            "select option"
+          )
+        )
+          .map(
+            option =>
+              clean(
+                option.textContent
+              )
+          )
+          .filter(Boolean)
+          .slice(0,60);
+
+      const clickableLabels =
+        nodes
+          .filter(
+            element =>
+              Boolean(
+                element.offsetWidth ||
+                element.offsetHeight ||
+                element
+                  .getClientRects()
+                  .length
+              )
+          )
+          .map(
+            element =>
+              clean(
+                element.innerText ??
+                element.textContent
+              )
+          )
+          .filter(
+            label =>
+              label.length > 0 &&
+              label.length <= 80
+          )
+          .filter(
+            (
+              value,
+              index,
+              values
+            ) =>
+              values.indexOf(value) ===
+              index
+          )
+          .slice(0,80);
+
+      const inputValues =
+        Array.from(
+          document.querySelectorAll(
+            "input"
+          )
+        )
+          .map(
+            input => ({
+              type:
+                (
+                  input as
+                    HTMLInputElement
+                ).type,
+
+              value:
+                (
+                  input as
+                    HTMLInputElement
+                ).value
+            })
+          )
+          .slice(0,20);
 
       return {
-        ok:true,
-        method:"click"
+        ok:false,
+        method:null,
+        target:wantedCity,
+        selectOptions,
+        clickableLabels,
+        inputValues
       };
     },
+
     city,
     CLICKABLE
   );
@@ -952,54 +1216,23 @@ export async function acquireAfaBrowserSession(
       }
     );
 
-    await setDate(
-      page,
-      context.raceDate
-    );
+    const dateState =
+      await setDate(
+        page,
+        context.raceDate
+      );
 
-    for (
-      let attempt=0;
-      attempt<10;
-      attempt++
-    ) {
-      const text =
-        await bodyText(page);
-
-      if (
-        fold(text).includes(
-          fold(context.raceDate)
-        ) ||
-        fold(text).includes(
-          fold(
-            displayDate(
-              context.raceDate
-            )
-          )
-        )
-      ) {
-        break;
-      }
-
-      if (attempt === 9) {
-        throw new Error(
-          "AFA_BROWSER_TARGET_DATE_NOT_RENDERED"
-        );
-      }
-
-      await delay(180);
-    }
-
+    /*
+     * Do not treat a date string in body text as proof.
+     * The target city's rendered control is the real proof.
+     */
     let cityState:any = {
       ok:false
     };
 
-    /*
-     * City options are hydrated asynchronously after date
-     * change. Live Kocaeli preview proved 1.2s was too short.
-     */
     for (
       let attempt=0;
-      attempt<25;
+      attempt<30;
       attempt++
     ) {
       cityState =
@@ -1008,8 +1241,19 @@ export async function acquireAfaBrowserSession(
           city
         );
 
-      if (cityState.ok) {
+      if (
+        cityState.ok
+      ) {
         break;
+      }
+
+      if (
+        attempt === 12
+      ) {
+        await setDate(
+          page,
+          context.raceDate
+        );
       }
 
       await delay(200);
@@ -1017,18 +1261,50 @@ export async function acquireAfaBrowserSession(
 
     if (!cityState.ok) {
       throw new Error(
-        `AFA_TARGET_CITY_NOT_FOUND:${city}`
+        "AFA_TARGET_CITY_NOT_FOUND:" +
+        JSON.stringify({
+          city,
+          raceDate:
+            context.raceDate,
+          dateState,
+          renderedState:
+            cityState
+        })
       );
     }
 
-    await delay(300);
+    let races:number[] =
+      [];
 
-    const races =
-      await getRaceNumbers(page);
+    for (
+      let attempt=0;
+      attempt<20;
+      attempt++
+    ) {
+      races =
+        await getRaceNumbers(
+          page
+        );
+
+      if (
+        races.length
+      ) {
+        break;
+      }
+
+      await delay(180);
+    }
 
     if (!races.length) {
       throw new Error(
-        `AFA_RACE_CONTROLS_NOT_FOUND:${city}`
+        "AFA_RACE_CONTROLS_NOT_FOUND:" +
+        JSON.stringify({
+          city,
+          raceDate:
+            context.raceDate,
+          dateState,
+          cityState
+        })
       );
     }
 
@@ -1313,10 +1589,13 @@ export async function acquireAfaBrowserSession(
 
       diagnostics:{
         traceVersion:
-          "afa-state-transition-v5",
+          "afa-state-transition-v6",
 
         city,
         races,
+
+        dateState,
+        cityState,
 
         panelCount:
           panels.length,

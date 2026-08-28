@@ -106,6 +106,14 @@ export const bankoTahminlerAdapter =
     maxCandidates:8,
     maxVerifiedPerCity:1,
 
+    /*
+     * Human-editorial Banko source may publish only some
+     * canonical meetings on a given day.
+     *
+     * /ai-tahmin stays excluded.
+     */
+    allowPartialCoverage:true,
+
     allowPuppeteerDiscovery:true,
     allowPuppeteerArticle:true,
 
