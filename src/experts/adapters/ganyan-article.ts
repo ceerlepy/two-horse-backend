@@ -234,11 +234,30 @@ function bodyTextFromHtml(
   ).remove();
 
 
-  return $("body")
+  const body =
+    $("body")
+      .first();
+
+  body
+    .find("br")
+    .replaceWith("\n");
+
+  body
+    .find(
+      "p,h1,h2,h3,h4,h5,h6,li,tr,section,article"
+    )
+    .each(
+      (_index,element) => {
+        $(element)
+          .append("\n");
+      }
+    );
+
+  return body
     .text()
     .replace(/\u00a0/g," ")
     .replace(/[\t\r ]+/g," ")
-    .replace(/\n\s+/g,"\n")
+    .replace(/ *\n */g,"\n")
     .replace(/\n{3,}/g,"\n\n")
     .trim();
 }
@@ -1236,21 +1255,47 @@ export async function acquireGanyanGalopArticle(
           }
         );
 
-        const text =
-          String(
-            await page.evaluate(
-              () =>
-                document.body
-                  ?.innerText ??
-                ""
-            )
-          );
+        let text="";
+        let section:string|null =
+          null;
 
-        const section =
-          extractGanyanCommentsSection(
-            text,
-            targetCity
+        /*
+         * Base DOM arrives before public comments.
+         * Wait for the ACTUAL city-comments block.
+         */
+        for (
+          let attempt=0;
+          attempt<30;
+          attempt++
+        ) {
+          text =
+            String(
+              await page.evaluate(
+                () =>
+                  document.body
+                    ?.innerText ??
+                  ""
+              )
+            );
+
+          section =
+            extractGanyanCommentsSection(
+              text,
+              targetCity
+            );
+
+          if (section) {
+            break;
+          }
+
+          await new Promise<void>(
+            resolve =>
+              setTimeout(
+                resolve,
+                250
+              )
           );
+        }
 
         if (!section) {
           failures.push({

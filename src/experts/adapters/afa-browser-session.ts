@@ -848,6 +848,270 @@ async function raceControlState(
 
 
 
+async function associatedRacePanel(
+  page:any,
+  raceNumber:number
+) {
+  return page.evaluate(
+    (
+      wantedRace:number,
+      clickableSelector:string
+    ) => {
+      const foldLocal =
+        (value:unknown) =>
+          String(
+            value ??
+            ""
+          )
+            .normalize("NFKD")
+            .toLocaleUpperCase("tr-TR")
+            .replace(/\p{M}/gu,"")
+            .replace(/[İIıi]/g,"I")
+            .replace(/Ğ/g,"G")
+            .replace(/Ü/g,"U")
+            .replace(/Ş/g,"S")
+            .replace(/Ö/g,"O")
+            .replace(/Ç/g,"C")
+            .replace(/[^A-Z0-9]+/g," ")
+            .replace(/\s+/g," ")
+            .trim();
+
+      const expected =
+        `${wantedRace} KOSU`;
+
+      const nodes =
+        Array.from(
+          document.querySelectorAll(
+            clickableSelector
+          )
+        ) as HTMLElement[];
+
+      const node =
+        nodes.find(
+          element => {
+            const visible =
+              Boolean(
+                element.offsetWidth ||
+                element.offsetHeight ||
+                element
+                  .getClientRects()
+                  .length
+              );
+
+            if (!visible)
+              return false;
+
+            const text =
+              foldLocal(
+                element.innerText ??
+                element.textContent
+              );
+
+            return (
+              text === expected ||
+              text.startsWith(
+                `${expected} `
+              )
+            );
+          }
+        );
+
+      if (!node) {
+        return {
+          found:false,
+          method:null,
+          text:""
+        };
+      }
+
+      const control =
+        (
+          node.closest(
+            "[role='tab']"
+          ) as HTMLElement | null
+        ) ??
+        node;
+
+      const targets =
+        [
+          control.getAttribute(
+            "aria-controls"
+          ),
+          control.getAttribute(
+            "data-target"
+          ),
+          control.getAttribute(
+            "href"
+          ),
+          node.getAttribute(
+            "aria-controls"
+          ),
+          node.getAttribute(
+            "data-target"
+          ),
+          node.getAttribute(
+            "href"
+          )
+        ]
+          .filter(
+            (
+              value
+            ): value is string =>
+              Boolean(value)
+          )
+          .map(
+            value =>
+              value.includes("#")
+                ? (
+                    value
+                      .split("#")
+                      .pop() ??
+                    ""
+                  )
+                : value.replace(
+                    /^#/,
+                    ""
+                  )
+          )
+          .filter(Boolean);
+
+      for (
+        const id of
+        targets
+      ) {
+        const panel =
+          document.getElementById(
+            id
+          ) as HTMLElement | null;
+
+        if (!panel)
+          continue;
+
+        const visible =
+          Boolean(
+            panel.offsetWidth ||
+            panel.offsetHeight ||
+            panel
+              .getClientRects()
+              .length
+          );
+
+        const text =
+          String(
+            panel.innerText ??
+            panel.textContent ??
+            ""
+          ).trim();
+
+        if (
+          visible &&
+          text.length >= 80
+        ) {
+          return {
+            found:true,
+            method:
+              "control-target",
+            text
+          };
+        }
+      }
+
+      if (control.id) {
+        const panel =
+          document.querySelector(
+            `[role="tabpanel"][aria-labelledby="${CSS.escape(control.id)}"]`
+          ) as HTMLElement | null;
+
+        if (panel) {
+          const text =
+            String(
+              panel.innerText ??
+              panel.textContent ??
+              ""
+            ).trim();
+
+          if (
+            text.length >= 80
+          ) {
+            return {
+              found:true,
+              method:
+                "aria-labelledby",
+              text
+            };
+          }
+        }
+      }
+
+      const tabList =
+        control.closest(
+          "[role='tablist']"
+        );
+
+      if (tabList) {
+        const tabs =
+          Array.from(
+            tabList.querySelectorAll(
+              "[role='tab']"
+            )
+          );
+
+        const index =
+          tabs.indexOf(
+            control
+          );
+
+        const scope =
+          tabList.parentElement ??
+          document.body;
+
+        const panels =
+          Array.from(
+            scope.querySelectorAll(
+              "[role='tabpanel']"
+            )
+          ) as HTMLElement[];
+
+        if (
+          index >= 0 &&
+          panels[index]
+        ) {
+          const text =
+            String(
+              panels[index]
+                .innerText ??
+              panels[index]
+                .textContent ??
+              ""
+            ).trim();
+
+          if (
+            text.length >= 80
+          ) {
+            return {
+              found:true,
+              method:
+                "tab-index",
+              text
+            };
+          }
+        }
+      }
+
+      return {
+        found:false,
+        method:null,
+        text:""
+      };
+    },
+
+    raceNumber,
+    CLICKABLE
+  );
+}
+
+
+
 function controlSignature(
   value:any
 ):string {
@@ -1405,16 +1669,33 @@ export async function acquireAfaBrowserSession(
             after
           );
 
-        const fallback =
-          await fallbackPanel(
+        const associated =
+          await associatedRacePanel(
             page,
-            raceNumber,
-            [
-              ...fingerprints.keys()
-            ]
+            raceNumber
           );
 
+        /*
+         * Expensive global DOM search is LAST rescue.
+         */
+        const fallback =
+          usefulPanel(
+            associated.text
+          )
+            ? ""
+            : await fallbackPanel(
+                page,
+                raceNumber,
+                [
+                  ...fingerprints.keys()
+                ]
+              );
+
         const choices = [
+          {
+            kind:"associated",
+            text:associated.text
+          },
           {
             kind:"diff",
             text:diff
@@ -1464,6 +1745,12 @@ export async function acquireAfaBrowserSession(
               undefined;
 
           const transitionProof =
+            (
+              choice.kind ===
+                "associated" &&
+              associated.found ===
+                true
+            ) ||
             choice.kind === "diff" ||
             controlChanged ||
             control.active === true ||
@@ -1476,6 +1763,10 @@ export async function acquireAfaBrowserSession(
             attempt,
             source:
               choice.kind,
+
+            associatedMethod:
+              associated.method,
+
             beforeControl,
             control,
             controlChanged,
@@ -1589,7 +1880,7 @@ export async function acquireAfaBrowserSession(
 
       diagnostics:{
         traceVersion:
-          "afa-state-transition-v6",
+          "afa-associated-panel-v7",
 
         city,
         races,

@@ -7,7 +7,7 @@ import {
 } from "./common";
 
 import {
-  acquireHttpFirstArticleHtml
+  createVerifiedArticleAdapter
 } from "./verified-article";
 
 import {
@@ -28,6 +28,9 @@ const ROOT =
 
 const CURRENT =
   "https://istinyeganyan.com/ganyan/tahminler/";
+
+const ARCHIVE =
+  "https://istinyeganyan.com/kategori/at-yarisi/";
 
 
 const MONTHS = [
@@ -95,9 +98,6 @@ function historicalUrl(
       "ALTILI GANYAN TAHMİNLERİ"
     ].join(" ");
 
-  /*
-   * This is the source's real WordPress Unicode slug format.
-   */
   const slug =
     title
       .toLowerCase()
@@ -117,33 +117,114 @@ function historicalUrl(
 }
 
 
-function ownsHistorical(
+function ownsHistoricalArticle(
   value:string
 ):boolean {
   try {
     const url =
       new URL(value);
 
-    return (
+    const host =
       url.hostname
         .replace(/^www\./,"")
-        .toLowerCase() ===
+        .toLowerCase();
+
+    const path =
+      url.pathname
+        .toLowerCase();
+
+    return (
+      host ===
         "istinyeganyan.com" &&
 
-      url.toString() !==
-        CURRENT &&
+      path !== "/" &&
 
-      !url.pathname
-        .toLowerCase()
-        .startsWith(
-          "/kategori/"
-        )
+      !path.startsWith(
+        "/kategori/"
+      ) &&
+
+      !path.startsWith(
+        "/ganyan/"
+      )
     );
 
   } catch {
     return false;
   }
 }
+
+
+const historicalAdapter =
+  createVerifiedArticleAdapter({
+    sourceKey:
+      "istinye_ganyan",
+
+    sourceName:
+      "İstinye Ganyan",
+
+    ownsArticle:
+      ownsHistoricalArticle,
+
+    /*
+     * Pattern-first.
+     * This is only a CANDIDATE, never blindly READY.
+     */
+    directCandidates(
+      context
+    ) {
+      return context.cities.map(
+        city => ({
+          city,
+
+          url:
+            historicalUrl(
+              city,
+              context.raceDate
+            )
+        })
+      );
+    },
+
+    /*
+     * Direct candidate fails strict verification:
+     * discover actual published href.
+     */
+    discoveryUrls() {
+      return [
+        CURRENT,
+        ARCHIVE
+      ];
+    },
+
+    listingCardContext:
+      true,
+
+    requireCandidateDateEvidence:
+      true,
+
+    maxCandidates:10,
+    maxVerifiedPerCity:1,
+
+    allowPuppeteerDiscovery:true,
+    allowPuppeteerArticle:true,
+
+    adapterOwnedExtraction:true,
+
+    prepareArticleHtml(
+      context,
+      acquired
+    ) {
+      return prepareRaceProseArticle(
+        context,
+        acquired,
+        "ISTINYE GANYAN"
+      );
+    },
+
+    browserNavigationBudget:4,
+
+    fallback:"feed"
+  });
 
 
 export const istinyeGanyanAdapter:
@@ -154,82 +235,39 @@ export const istinyeGanyanAdapter:
     resolve(context) {
       if (
         context.raceDate >=
-          turkeyDate()
+        turkeyDate()
       ) {
         return resolveDirectAdapter(
           context
         );
       }
 
-      const targets =
-        context.cities.map(
-          city =>
-            historicalUrl(
-              city,
-              context.raceDate
-            )
-        );
-
-      return Promise.resolve({
-        status:"ready",
-        mode:"article",
-
-        targets,
-
-        discoveredFromUrl:
-          ROOT,
-
-        discoveryMethod:
-          "deterministic-source-url",
-
-        diagnostics:{
-          traceVersion:
-            "istinye-deterministic-v2",
-
-          cities:
-            context.cities,
-
-          targets,
-
-          networkDiscovery:
-            false
-        }
-      });
+      return historicalAdapter
+        .resolve(context);
     },
 
-    ownsAcquisition(
-      url
-    ) {
-      return ownsHistorical(
-        url
+    ownsAcquisition(url) {
+      return Boolean(
+        historicalAdapter
+          .ownsAcquisition?.(
+            url
+          )
       );
     },
 
-    acquireHtml(
-      context
-    ) {
-      return acquireHttpFirstArticleHtml(
-        context,
-        {
-          /*
-           * HTTP first.
-           *
-           * If HTTP gives real target article:
-           * STOP.
-           *
-           * Otherwise:
-           * CF Content -> CF Scrape -> browser.
-           */
-          allowPuppeteer:true,
+    acquireHtml(context) {
+      const acquire =
+        historicalAdapter
+          .acquireHtml;
 
-          prepareAcquired:
-            acquired =>
-              prepareRaceProseArticle(
-                context,
-                acquired,
-                "ISTINYE GANYAN"
-              )
-        }
+      if (!acquire) {
+        throw new Error(
+          "ISTINYE_ACQUISITION_MISSING"
+        );
+      }
+
+      return acquire(
+        context
       );
     }
   };

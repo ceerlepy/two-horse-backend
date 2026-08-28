@@ -167,6 +167,14 @@ export interface VerifiedArticlePlan {
   requireCandidateDateEvidence?:
     boolean;
 
+  /*
+   * Some WordPress listing pages keep publication date
+   * next to the title rather than inside the <a> itself.
+   * Opt-in only; avoids page-global stale-date poisoning.
+   */
+  listingCardContext?:
+    boolean;
+
   allowPuppeteerDiscovery?:
     boolean;
 
@@ -321,7 +329,8 @@ function decodedUrl(
 
 function linksFromHtml(
   baseUrl:string,
-  html:string
+  html:string,
+  includeCardContext=false
 ):RawLink[] {
   const $ =
     load(html);
@@ -361,26 +370,52 @@ function linksFromHtml(
       if (!url)
         return;
 
+      const anchorText =
+        [
+          anchor.text(),
+          anchor.attr(
+            "title"
+          ) ?? "",
+          anchor.attr(
+            "aria-label"
+          ) ?? ""
+        ]
+          .filter(Boolean)
+          .join(" ");
+
       /*
-       * Deliberately link-local.
+       * Still LOCAL evidence.
        *
-       * No closest(li), no parent-card sibling poisoning.
-       * This is the important lesson from old HorsAI.
+       * For Yaris Dergisi the publication date sits in the
+       * same post/card but outside the anchor. We only inspect
+       * the nearest editorial container, never whole page.
        */
+      const cardText =
+        includeCardContext
+          ? anchor
+              .closest(
+                [
+                  "article",
+                  ".post",
+                  ".entry",
+                  ".card",
+                  ".item",
+                  "li"
+                ].join(",")
+              )
+              .first()
+              .text()
+          : "";
+
       const text =
         cleanExpertInlineText(
           [
-            anchor.text(),
-            anchor.attr(
-              "title"
-            ) ?? "",
-            anchor.attr(
-              "aria-label"
-            ) ?? ""
+            anchorText,
+            cardText
           ]
             .filter(Boolean)
             .join(" "),
-          1200
+          1600
         );
 
       const old =
@@ -419,6 +454,46 @@ function articleHeading(
       .first()
       .text(),
     1400
+  );
+}
+
+
+function missingPageHtml(
+  html:string
+):boolean {
+  const $ =
+    load(html);
+
+  const material =
+    normalizeExpertSearchText(
+      [
+        $("title")
+          .first()
+          .text(),
+
+        $("h1")
+          .first()
+          .text(),
+
+        $("body")
+          .text()
+          .slice(
+            0,
+            1800
+          )
+      ].join(" ")
+    );
+
+  return [
+    "sayfa bulunamadi",
+    "page not found",
+    "404 not found",
+    "404 error"
+  ].some(
+    term =>
+      material.includes(
+        term
+      )
   );
 }
 
@@ -552,11 +627,18 @@ function articleUsable(
           )
       );
 
+  const missingPage =
+    missingPageHtml(
+      html
+    );
+
   return {
     article,
     restriction,
+    missingPage,
 
     usable:
+      !missingPage &&
       article.outputCharacters >=
         180 &&
       racing &&
@@ -681,6 +763,58 @@ export async function acquireHttpFirstArticleHtml(
                 4_000
             }
           );
+
+          for (
+            let attempt=0;
+            attempt<24;
+            attempt++
+          ) {
+            const state =
+              await page.evaluate(
+                () => ({
+                  title:
+                    document.title ??
+                    "",
+
+                  text:
+                    document.body
+                      ?.innerText ??
+                    ""
+                })
+              );
+
+            const material =
+              normalizeExpertSearchText(
+                [
+                  state.title,
+                  state.text
+                ].join(" ")
+              );
+
+            const challenge =
+              material.includes(
+                "just a moment"
+              ) ||
+              material.includes(
+                "enable javascript and cookies to continue"
+              );
+
+            if (
+              !challenge &&
+              state.text.length >=
+                300
+            ) {
+              break;
+            }
+
+            await new Promise<void>(
+              resolve =>
+                setTimeout(
+                  resolve,
+                  250
+                )
+            );
+          }
 
           const html =
             String(
@@ -1412,6 +1546,12 @@ export async function resolveVerifiedArticleTargets(
     verificationAttempts:[],
     ai:null,
 
+    policy:{
+      allowPartialCoverage:
+        plan.allowPartialCoverage ===
+        true
+    },
+
     browser:{
       launches:0,
       navigations:0,
@@ -1479,6 +1619,63 @@ export async function resolveVerifiedArticleTargets(
   }
 
 
+  async function waitForBrowserBody(
+    current:any
+  ) {
+    for (
+      let attempt=0;
+      attempt<24;
+      attempt++
+    ) {
+      const state =
+        await current.evaluate(
+          () => ({
+            title:
+              document.title ??
+              "",
+
+            text:
+              document.body
+                ?.innerText ??
+              ""
+          })
+        );
+
+      const material =
+        normalizeExpertSearchText(
+          [
+            state.title,
+            state.text
+          ].join(" ")
+        );
+
+      const challenge =
+        material.includes(
+          "just a moment"
+        ) ||
+        material.includes(
+          "enable javascript and cookies to continue"
+        );
+
+      if (
+        !challenge &&
+        state.text.length >=
+          300
+      ) {
+        return;
+      }
+
+      await new Promise<void>(
+        resolve =>
+          setTimeout(
+            resolve,
+            250
+          )
+      );
+    }
+  }
+
+
   async function browserHtml(
     url:string
   ) {
@@ -1517,6 +1714,10 @@ export async function resolveVerifiedArticleTargets(
         timeout:
           4_000
       }
+    );
+
+    await waitForBrowserBody(
+      current
     );
 
     return {
@@ -1591,7 +1792,9 @@ export async function resolveVerifiedArticleTargets(
             linksFromHtml(
               acquired.finalUrl ??
                 discoveryUrl,
-              acquired.html
+              acquired.html,
+              plan.listingCardContext ===
+                true
             );
 
         } else if (
@@ -1610,7 +1813,9 @@ export async function resolveVerifiedArticleTargets(
           links =
             linksFromHtml(
               discoveryUrl,
-              acquired.html
+              acquired.html,
+              plan.listingCardContext ===
+                true
             );
 
         } else if (
@@ -1649,7 +1854,9 @@ export async function resolveVerifiedArticleTargets(
           links =
             linksFromHtml(
               discoveryUrl,
-              acquired.html
+              acquired.html,
+              plan.listingCardContext ===
+                true
             );
 
         } else {
@@ -1666,7 +1873,9 @@ export async function resolveVerifiedArticleTargets(
           links =
             linksFromHtml(
               acquired.finalUrl,
-              acquired.html
+              acquired.html,
+              plan.listingCardContext ===
+                true
             );
         }
 

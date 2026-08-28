@@ -122,6 +122,13 @@ export function liderformExpectedMainSelections(
     >();
 
 
+  const occurrences:
+    Array<{
+      city:string;
+      index:number;
+    }> = [];
+
+
   for (
     const city of
     cities
@@ -130,19 +137,71 @@ export function liderformExpectedMainSelections(
       continue;
     }
 
-
     const pattern =
       new RegExp(
-        escapeRegExp(city) +
-        String.raw`.{0,420}?(\d+)\s*\.\s*Koşu\s+olan[^;]{0,350};\s*\((\d+)\)`,
-
-        "gisu"
+        escapeRegExp(city),
+        "giu"
       );
-
 
     for (
       const match of
       articleText.matchAll(pattern)
+    ) {
+      if (
+        match.index !==
+        undefined
+      ) {
+        occurrences.push({
+          city,
+          index:
+            match.index
+        });
+      }
+    }
+  }
+
+
+  occurrences.sort(
+    (a,b) =>
+      a.index-b.index
+  );
+
+
+  for (
+    const occurrence of
+    occurrences
+  ) {
+    const city =
+      occurrence.city;
+
+    const nextOther =
+      occurrences.find(
+        candidate =>
+          candidate.index >
+            occurrence.index &&
+          normalizeCity(
+            candidate.city
+          ) !==
+            normalizeCity(city)
+      );
+
+    const section =
+      articleText.slice(
+        occurrence.index,
+        nextOther
+          ? nextOther.index
+          : articleText.length
+      );
+
+    const racePattern =
+      /(\d+)\s*\.\s*Koşu\s+olan[^;]{0,350};\s*\((\d+)\)/giu;
+
+
+    for (
+      const match of
+      section.matchAll(
+        racePattern
+      )
     ) {
       const raceNumber =
         Number(match[1]);
@@ -152,9 +211,13 @@ export function liderformExpectedMainSelections(
 
 
       if (
-        !Number.isInteger(raceNumber) ||
+        !Number.isInteger(
+          raceNumber
+        ) ||
         raceNumber <= 0 ||
-        !Number.isInteger(horseNumber) ||
+        !Number.isInteger(
+          horseNumber
+        ) ||
         horseNumber <= 0
       ) {
         continue;

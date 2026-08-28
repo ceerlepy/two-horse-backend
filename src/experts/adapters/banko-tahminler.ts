@@ -38,9 +38,11 @@ function ownsArticle(
     return (
       host ===
         "bankotahminler.com" &&
+
       path.startsWith(
         "/tahminler/"
       ) &&
+
       !path.includes(
         "/ai-tahmin/"
       )
@@ -66,10 +68,8 @@ export const bankoTahminlerAdapter =
       context
     ) {
       return [
-        /*
-         * Proven normal-HTTP public editorial index.
-         */
         CATEGORY,
+        ROOT,
 
         wordpressSearchUrl(
           ROOT,
@@ -102,31 +102,23 @@ export const bankoTahminlerAdapter =
       "birleşik krallık"
     ],
 
-    /*
-     * This closes the 25-Aug Kocaeli -> 27-Aug bug.
-     */
+    listingCardContext:
+      true,
+
     requireCandidateDateEvidence:
       true,
 
-    maxCandidates:8,
+    maxCandidates:10,
     maxVerifiedPerCity:1,
 
-    /*
-     * Human editorial does not necessarily publish
-     * both canonical cities every day.
-     */
     allowPartialCoverage:true,
 
     /*
-     * Proven current path:
-     * listing HTTP works
-     * exact article HTTP works.
-     *
-     * CF Content/Scrape remain inside acquisition ladder
-     * only if ordinary HTTP genuinely fails.
+     * HTTP / CF Content / CF Links / CF Scrape still run first.
+     * Browser is only the bounded last rescue.
      */
-    allowPuppeteerDiscovery:false,
-    allowPuppeteerArticle:false,
+    allowPuppeteerDiscovery:true,
+    allowPuppeteerArticle:true,
 
     adapterOwnedExtraction:true,
 
@@ -140,6 +132,8 @@ export const bankoTahminlerAdapter =
         "BANKO TAHMINLER"
       );
     },
+
+    browserNavigationBudget:4,
 
     fallback:"feed"
   });

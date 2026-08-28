@@ -316,13 +316,21 @@ function buildPart5Acceptance(
   attempts:any[],
   counts:any
 ) {
+  /*
+   * Yarış Analizi now uses verified PUBLIC writer article.
+   */
   const expectedStatus=
-    sourceKey==="yaris_analizi"
-      ? "access-restricted"
-      : "success";
+    "success";
 
   const restrictionExpected=
-    expectedStatus==="access-restricted";
+    false;
+
+  const partialCoverageAllowed=
+    resolution
+      ?.diagnostics
+      ?.policy
+      ?.allowPartialCoverage ===
+    true;
 
   const validatedCities=
     new Set<string>();
@@ -432,7 +440,10 @@ function buildPart5Acceptance(
             0
           )>0 &&
           allDocumentsCanonical &&
-          missingValidatedCities.length===0
+          (
+            missingValidatedCities.length===0 ||
+            partialCoverageAllowed
+          )
         );
 
   return {
@@ -480,6 +491,8 @@ function buildPart5Acceptance(
       restrictionExpected
         ? null
         : allDocumentsCanonical,
+
+    partialCoverageAllowed,
 
     totalValidated:
       Number(
