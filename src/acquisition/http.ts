@@ -63,22 +63,22 @@ export async function acquireHttpHtml(
        */
       const title =
         (
-          /<title[^>]*>([\\s\\S]*?)<\\/title>/i
+          /<title[^>]*>([\s\S]*?)<\/title>/i
             .exec(html)?.[1] ??
           ""
         )
           .replace(/<[^>]+>/g," ")
-          .replace(/\\s+/g," ")
+          .replace(/\s+/g," ")
           .trim()
           .slice(0,240);
 
       const preview =
         html
-          .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
-          .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+          .replace(/<script[\s\S]*?<\/script>/gi," ")
+          .replace(/<style[\s\S]*?<\/style>/gi," ")
           .replace(/<[^>]+>/g," ")
           .replace(/&nbsp;/gi," ")
-          .replace(/\\s+/g," ")
+          .replace(/\s+/g," ")
           .trim()
           .slice(0,360);
 
