@@ -23,6 +23,10 @@ import {
   validateExpertPicks
 } from "./validator";
 
+import {
+  normalizeExpertSearchText
+} from "./text-normalization";
+
 
 function validDate(
   value:
@@ -245,6 +249,125 @@ function rejectedPicks(
           pick.comment
       })
     );
+}
+
+
+async function canonicalRunnersFor(
+  env:
+    Env,
+
+  raceDate:
+    string,
+
+  cities:
+    string[]
+) {
+  const result:
+    Record<
+      string,
+      {
+        raceNumbers:number[];
+        sample:Array<{
+          raceNumber:number;
+          horseNumber:number;
+          horseName:string;
+        }>;
+      }
+    > = {};
+
+
+  const allRows =
+    await env.DB.prepare(`
+      SELECT
+        city,
+        race_number,
+        horse_number,
+        horse_name
+      FROM runners
+      WHERE race_date = ?
+      ORDER BY
+        race_number,
+        horse_number
+    `)
+      .bind(
+        raceDate
+      )
+      .all<any>();
+
+
+  const all =
+    allRows.results ??
+    [];
+
+
+  for (
+    const city of
+    cities
+  ) {
+    /*
+     * Same loose Turkish-diacritic-insensitive comparison
+     * used everywhere else here — D1's stored city casing
+     * must not silently defeat this diagnostic.
+     */
+    const normalizedTarget =
+      normalizeExpertSearchText(
+        city
+      );
+
+    const rawRows =
+      all.filter(
+        row =>
+          normalizeExpertSearchText(
+            String(
+              row.city
+            )
+          ) ===
+          normalizedTarget
+      );
+
+
+    result[city] = {
+      raceNumbers:
+        [
+          ...new Set(
+            rawRows.map(
+              row =>
+                Number(
+                  row.race_number
+                )
+            )
+          )
+        ],
+
+      sample:
+        rawRows
+          .slice(
+            0,
+            15
+          )
+          .map(
+            row => ({
+              raceNumber:
+                Number(
+                  row.race_number
+                ),
+
+              horseNumber:
+                Number(
+                  row.horse_number
+                ),
+
+              horseName:
+                String(
+                  row.horse_name
+                )
+            })
+          )
+    };
+  }
+
+
+  return result;
 }
 
 
@@ -760,6 +883,38 @@ export async function previewExpertSource(
           validated.length;
 
 
+      const rejected =
+        rejectedPicks(
+          raw,
+          validated
+        );
+
+
+      /*
+       * Diagnostic-only: preview never persists anomalies
+       * (writeAnomalies:false above), so a reader could not
+       * otherwise tell "wrong race number" from "wrong horse
+       * identity" from "no runners for this city/date at all"
+       * for a rejected pick. Compare against what D1 actually
+       * has for the cities the rejected picks claim.
+       */
+      const canonicalRunners =
+        rejected.length
+          ? await canonicalRunnersFor(
+              env,
+              raceDate,
+              [
+                ...new Set(
+                  rejected.map(
+                    pick =>
+                      pick.city
+                  )
+                )
+              ]
+            )
+          : undefined;
+
+
       attempts.push({
         url,
 
@@ -778,10 +933,9 @@ export async function previewExpertSource(
         completeCanonical,
 
         rejectedPicks:
-          rejectedPicks(
-            raw,
-            validated
-          ),
+          rejected,
+
+        canonicalRunners,
 
         rawSample:
           raw.slice(

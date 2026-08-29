@@ -73,6 +73,10 @@ def main():
         if rejected:
             print(f"DOC[{index}] REJECTED_PICKS =", dump(rejected, ARTICLE_CAP))
 
+        canonical_runners = attempt.get("canonicalRunners")
+        if canonical_runners:
+            print(f"DOC[{index}] CANONICAL_RUNNERS =", dump(canonical_runners, ARTICLE_CAP))
+
         excerpt = semantic.get("excerpt")
         if excerpt:
             print(f"DOC[{index}] SEMANTIC_EXCERPT:")
