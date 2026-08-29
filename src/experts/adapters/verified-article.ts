@@ -211,7 +211,7 @@ export interface VerifiedArticlePlan {
 
       acquired:
         AcquiredHtml
-    )=>AcquiredHtml;
+    )=>AcquiredHtml | Promise<AcquiredHtml>;
 
   browserNavigationBudget?:
     number;
@@ -659,7 +659,7 @@ export async function acquireHttpFirstArticleHtml(
       (
         acquired:
           AcquiredHtml
-      )=>AcquiredHtml;
+      )=>AcquiredHtml | Promise<AcquiredHtml>;
   } = {}
 ):Promise<AcquiredHtml> {
   const failures:any[] =
@@ -900,7 +900,7 @@ export async function acquireHttpFirstArticleHtml(
            */
           const selected =
             options.prepareAcquired
-              ? options
+              ? await options
                   .prepareAcquired(
                     acquired
                   )
