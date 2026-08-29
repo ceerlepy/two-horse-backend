@@ -6,6 +6,9 @@ on:
       date:
         description: "YYYY-MM-DD"
         required: false
+      sources:
+        description: "Space-separated source keys (default: all eight)"
+        required: false
 
 jobs:
   diagnose:
@@ -17,6 +20,7 @@ jobs:
       BASE_URL: https://two-horse-backend.veyseltosun-vt.workers.dev
       ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
       DATE: ${{ inputs.date }}
+      SOURCES: ${{ inputs.sources }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
