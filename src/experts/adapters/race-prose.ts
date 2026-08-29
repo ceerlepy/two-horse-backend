@@ -253,8 +253,18 @@ export function prepareRaceProseArticle(
     );
   }
 
+  /*
+   * "N. KOŞU" is not universal. Yarış Dergisi's real
+   * articles (confirmed via an indexed excerpt — the site's
+   * own anti-bot wall blocks fetching the raw HTML directly,
+   * including its WordPress REST API, so this could not be
+   * verified against a full article body) write each leg as
+   * "1A) ...", "2A) ..." instead of spelling out "KOŞU"/"AYAK".
+   * Accept all three forms; this only ADDS acceptance, so a
+   * source already matching "N. KOŞU" is unaffected.
+   */
   const regex =
-    /(\d{1,2})\s*\.\s*KOŞU\b\s*:?\s*/giu;
+    /(\d{1,2})\s*\.\s*KOŞU\b\s*:?\s*|(\d{1,2})\s*\.?\s*AYAK\b\s*:?\s*|\b(\d{1,2})\s*A\)\s*/giu;
 
   const matches:
     Array<{
@@ -275,7 +285,9 @@ export function prepareRaceProseArticle(
   ) {
     const raceNumber =
       Number(
-        match[1]
+        match[1] ??
+        match[2] ??
+        match[3]
       );
 
     if (
