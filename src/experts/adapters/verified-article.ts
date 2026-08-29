@@ -498,6 +498,25 @@ function missingPageHtml(
 }
 
 
+/*
+ * A soft-404: the origin returns "Sayfa bulunamadı" for a guessed
+ * URL, but a proxy stage (cf-content in particular) can still
+ * return HTTP 200 with that error page's body — and that body's
+ * own "recent posts" sidebar often lists unrelated real articles
+ * whose titles happen to carry a target city/date/prediction word,
+ * which is enough to fool the generic evidence heuristics below
+ * into accepting it. Detect the page itself as absent regardless
+ * of what its surrounding chrome mentions.
+ */
+const GENERIC_NOT_FOUND_TERMS = [
+  "sayfa bulunamadi",
+  "aradiginiz sayfa bulunamadi",
+  "aradiginiz sey bulunamadi",
+  "404 not found",
+  "page not found"
+];
+
+
 function restrictionState(
   sourceKey:string,
   text:string
@@ -511,6 +530,18 @@ function restrictionState(
     normalizeExpertSearchText(
       text
     );
+
+  const notFoundHit =
+    GENERIC_NOT_FOUND_TERMS
+      .find(
+        term =>
+          normalized.includes(
+            normalizeExpertSearchText(
+              term
+            )
+          )
+      ) ??
+    null;
 
   const hits =
     (
@@ -579,6 +610,7 @@ function restrictionState(
   return {
     restricted:
       Boolean(
+        notFoundHit ||
         strongTerm ||
         (
           weakVipTerm &&
@@ -589,7 +621,8 @@ function restrictionState(
     strongTerm,
     weakVipTerm,
     substantive,
-    hits
+    hits,
+    notFoundHit
   };
 }
 
@@ -2312,6 +2345,9 @@ export async function resolveVerifiedArticleTargets(
 
             restrictionTerms:
               restriction.hits,
+
+            notFoundHit:
+              restriction.notFoundHit,
 
             accepted
           });
