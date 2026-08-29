@@ -10,6 +10,10 @@ import {
   normalizeExpertSearchText
 } from "../text-normalization";
 
+import {
+  normalizeExpertHorseName
+} from "../validator";
+
 import type {
   ExpertAcquireContext
 } from "./types";
@@ -221,7 +225,142 @@ function targetCity(
 }
 
 
-export function prepareRaceProseArticle(
+/*
+ * Some sources number their OWN "1.KOŞU"/"1A)" leg counter from
+ * whichever race they start covering, not from the official TJK
+ * race_number — e.g. Yarış Dergisi skips an uncovered opener and
+ * calls the official race 2 "1.KOŞU". Trusting that literal number
+ * verbatim silently mislabels every pick in the block, so every
+ * pick in it fails canonical validation even though the AI read
+ * the real horses correctly.
+ *
+ * Resolve the true official race number by matching the horse
+ * names actually present in the block against D1's real runners
+ * for that city/date. Requires at least two independent name hits
+ * to override — a single coincidental substring match is not
+ * enough evidence to relabel a whole block.
+ */
+async function officialRaceNameIndex(
+  context:
+    ExpertAcquireContext,
+
+  city:
+    string
+):Promise<Map<number,string[]> | null> {
+  try {
+    const rows =
+      await context.env.DB.prepare(`
+        SELECT race_number, horse_name, city
+        FROM runners
+        WHERE race_date = ?
+      `)
+        .bind(
+          context.raceDate
+        )
+        .all<any>();
+
+    const normalizedTarget =
+      normalizeExpertSearchText(
+        city
+      );
+
+    const index =
+      new Map<number,string[]>();
+
+    for (
+      const row of
+      (rows.results ?? [])
+    ) {
+      if (
+        normalizeExpertSearchText(
+          String(row.city)
+        ) !==
+        normalizedTarget
+      ) {
+        continue;
+      }
+
+      const raceNumber =
+        Number(
+          row.race_number
+        );
+
+      const name =
+        normalizeExpertHorseName(
+          String(row.horse_name)
+        );
+
+      if (!name) continue;
+
+      const list =
+        index.get(raceNumber) ??
+        [];
+
+      list.push(name);
+      index.set(raceNumber, list);
+    }
+
+    return index.size
+      ? index
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+
+function resolveOfficialRaceNumber(
+  index:
+    Map<number,string[]>,
+
+  blockText:
+    string,
+
+  parsedRaceNumber:
+    number
+):number {
+  const haystack =
+    normalizeExpertHorseName(
+      blockText
+    );
+
+  let bestRace =
+    parsedRaceNumber;
+
+  let bestHits =
+    (index.get(parsedRaceNumber) ?? [])
+      .filter(
+        name =>
+          name.length >= 4 &&
+          haystack.includes(name)
+      ).length;
+
+  for (
+    const [raceNumber, names] of
+    index
+  ) {
+    if (raceNumber === parsedRaceNumber) continue;
+
+    const hits =
+      names.filter(
+        name =>
+          name.length >= 4 &&
+          haystack.includes(name)
+      ).length;
+
+    if (hits > bestHits) {
+      bestHits = hits;
+      bestRace = raceNumber;
+    }
+  }
+
+  return bestHits >= 2
+    ? bestRace
+    : parsedRaceNumber;
+}
+
+
+export async function prepareRaceProseArticle(
   context:
     ExpertAcquireContext,
 
@@ -230,7 +369,7 @@ export function prepareRaceProseArticle(
 
   sourceName:
     string
-):AcquiredHtml {
+):Promise<AcquiredHtml> {
   const text =
     sourceText(
       acquired.html
@@ -397,13 +536,35 @@ export function prepareRaceProseArticle(
     );
   }
 
+  const officialIndex =
+    await officialRaceNameIndex(
+      context,
+      city
+    );
+
+  const resolvedBlocks =
+    officialIndex
+      ? blocks.map(
+          block => ({
+            ...block,
+
+            raceNumber:
+              resolveOfficialRaceNumber(
+                officialIndex,
+                block.text,
+                block.raceNumber
+              )
+          })
+        )
+      : blocks;
+
   const payload =
     [
       `TWOHORSE SOURCE: ${sourceName}`,
       `TWOHORSE TARGET DATE: ${context.raceDate}`,
       `TWOHORSE TARGET CITY: ${city}`,
       "",
-      ...blocks.flatMap(
+      ...resolvedBlocks.flatMap(
         block => [
           `TWOHORSE_RACE_CONTEXT|CITY=${city}|RACE=${block.raceNumber}`,
           `${block.raceNumber}.KOŞU: ${block.text}`,
@@ -462,17 +623,20 @@ export function prepareRaceProseArticle(
         city,
 
         raceBlockCount:
-          blocks.length,
+          resolvedBlocks.length,
 
         races:
           [
             ...new Set(
-              blocks.map(
+              resolvedBlocks.map(
                 block =>
                   block.raceNumber
               )
             )
-          ]
+          ],
+
+        raceNumberResolvedFromD1:
+          officialIndex !== null
       }
     }
   };
