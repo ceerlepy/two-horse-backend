@@ -1630,16 +1630,38 @@ export async function acquireAfaBrowserSession(
        *
        * A stale duplicate panel is waited/re-clicked, not
        * immediately accepted or mislabeled.
+       *
+       * Bounded by WALL CLOCK, not a fixed attempt count: a
+       * live SPA's render/fetch latency varies with race
+       * number and backend load, so a fixed ~1.1s budget
+       * (10 attempts x ~100ms) confirmed transitions for some
+       * races and starved out later ones under real latency.
+       * Poll on a short fixed cadence up to a generous
+       * deadline instead, and space the re-clicks relative to
+       * that deadline so a swallowed click still gets retried
+       * with time left to confirm.
        */
-      for (
-        let attempt=0;
-        attempt<10;
-        attempt++
+      const transitionDeadlineMs=
+        4000;
+
+      const transitionStart=
+        Date.now();
+
+      let attempt=0;
+
+      let reclicked1=false;
+
+      let reclicked2=false;
+
+      while (
+        Date.now() -
+          transitionStart <
+        transitionDeadlineMs
       ) {
         await delay(
           attempt === 0
             ? 220
-            : 100
+            : 150
         );
 
         const after =
@@ -1812,18 +1834,43 @@ export async function acquireAfaBrowserSession(
         }
 
         /*
-         * Re-click twice during bounded wait in case the first
-         * synthetic click was swallowed by the frontend.
+         * Re-click twice during the bounded wait in case the
+         * first synthetic click was swallowed by the
+         * frontend, spaced at ~35%/~70% of the deadline so
+         * each retry still has time left to be confirmed.
          */
+        const elapsed=
+          Date.now() -
+          transitionStart;
+
         if (
-          attempt === 3 ||
-          attempt === 6
+          !reclicked1 &&
+          elapsed >=
+            transitionDeadlineMs *
+            0.35
         ) {
+          reclicked1=true;
+
+          await clickRace(
+            page,
+            raceNumber
+          );
+
+        } else if (
+          !reclicked2 &&
+          elapsed >=
+            transitionDeadlineMs *
+            0.7
+        ) {
+          reclicked2=true;
+
           await clickRace(
             page,
             raceNumber
           );
         }
+
+        attempt++;
       }
 
       if (!panel) {
