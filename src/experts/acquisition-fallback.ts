@@ -20,6 +20,37 @@ import type {
 } from "../config/expert-acquisition";
 
 
+/*
+ * Nothing in this pipeline ever benefits from a cached response —
+ * every fetch exists to read a source's current state. Beyond our
+ * own edge cache settings, the ORIGIN itself (WordPress page-cache
+ * plugins are extremely common on these sites) can serve the same
+ * cached body to every visitor for extended periods regardless of
+ * our request's cache directives. A unique query parameter changes
+ * the cache key everywhere — ours, Cloudflare's, and the origin's —
+ * so this is the one bypass that actually reaches all of them.
+ */
+function bustCache(
+  url:
+    string
+):string {
+  try {
+    const bust =
+      new URL(url);
+
+    bust.searchParams.set(
+      "_thcb",
+      Date.now().toString(36)
+    );
+
+    return bust.toString();
+
+  } catch {
+    return url;
+  }
+}
+
+
 export async function acquireExpertHtmlStage(
   env:
     Env,
@@ -30,35 +61,48 @@ export async function acquireExpertHtmlStage(
   stage:
     ExpertHtmlAcquisitionStage
 ): Promise<AcquiredHtml> {
-  switch(stage) {
+  const fetchUrl =
+    bustCache(url);
 
-    case "cf-scrape":
-      return acquireCfScrapeHtml(
-        env,
-        url
-      );
+  const acquired =
+    await (async () => {
+      switch(stage) {
 
-
-    case "cf-content":
-      return acquireCfContentHtml(
-        env,
-        url
-      );
+        case "cf-scrape":
+          return acquireCfScrapeHtml(
+            env,
+            fetchUrl
+          );
 
 
-    case "http":
-      return acquireHttpHtml(
-        url,
-        {
-          timeoutMs:
-            12_000,
+        case "cf-content":
+          return acquireCfContentHtml(
+            env,
+            fetchUrl
+          );
 
-          minimumBytes:
-            500,
 
-          userAgent:
-            "TwoHorse/1.0 (+expert-acquisition)"
-        }
-      );
-  }
+        case "http":
+          return acquireHttpHtml(
+            fetchUrl,
+            {
+              timeoutMs:
+                12_000,
+
+              minimumBytes:
+                500,
+
+              userAgent:
+                "TwoHorse/1.0 (+expert-acquisition)"
+            }
+          );
+      }
+    })();
+
+  return {
+    ...acquired,
+
+    requestedUrl:
+      url
+  };
 }
