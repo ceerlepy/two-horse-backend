@@ -1932,11 +1932,21 @@ export function directPageDateEvidence(
       }
 
 
+      /*
+       * A byline-style heading often states the city + prediction
+       * words in its own heading text, with the date appearing
+       * only in a separate byline/metadata line right after it
+       * (e.g. "OZAN ERSARAÇ ANKARA ALTILI GANYAN TAHMİNİ" followed
+       * by "Ozan Ersaraç - At Yarışı - 29.08.2026"). A tight
+       * window around the date token can land just short of the
+       * heading text it belongs to, so look further back than
+       * forward.
+       */
       const window =
         text.slice(
           Math.max(
             0,
-            index - 80
+            index - 400
           ),
           Math.min(
             text.length,
