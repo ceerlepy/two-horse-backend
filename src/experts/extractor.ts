@@ -942,6 +942,64 @@ export async function extractExperts(
     );
 
 
+  /*
+   * D1 has no canonical sixfold-start row for every city/date
+   * (upstream program ingestion coverage varies). Coupon-leg
+   * sources routinely state their own day's start race in the
+   * article's own intro line, e.g.
+   * "... Altılı Ganyan 3. Koşu ile saat 18.00 ekranlara
+   * gelecektir." — trust that self-declared fact only where no
+   * canonical row already exists, so canonical D1 data always
+   * wins when both are present.
+   */
+  const effectiveSixfoldStarts =
+    [...targetSixfoldStarts];
+
+  for (
+    const city of
+    targetCities
+  ) {
+    const hasCanonical =
+      targetSixfoldStarts.some(
+        value =>
+          normalizeExpertSearchText(
+            value.city
+          ) ===
+          normalizeExpertSearchText(
+            city
+          )
+      );
+
+    if (hasCanonical) {
+      continue;
+    }
+
+    const selfStated =
+      normalizeExpertSearchText(
+        document.semanticText
+      ).match(
+        /altili\s+ganyan\s+(\d{1,2})\s*\.?\s*kosu/
+      );
+
+    const raceNumber =
+      selfStated
+        ? Number(selfStated[1])
+        : NaN;
+
+    if (
+      Number.isInteger(raceNumber) &&
+      raceNumber > 0 &&
+      raceNumber <= 30
+    ) {
+      effectiveSixfoldStarts.push({
+        city,
+        sixfoldNumber:1,
+        raceNumber
+      });
+    }
+  }
+
+
   const sourceConfig =
     expertSourceConfig(
       sourceKey
@@ -973,7 +1031,7 @@ export async function extractExperts(
       ? explicitCouponExpectedSelections(
           document.semanticText,
           targetCities,
-          targetSixfoldStarts
+          effectiveSixfoldStarts
         )
       : [];
 
@@ -984,7 +1042,7 @@ export async function extractExperts(
       raceDate,
       targetCities,
       sourceKey,
-      targetSixfoldStarts
+      effectiveSixfoldStarts
     );
 
 
@@ -1272,7 +1330,7 @@ export async function extractExperts(
       },
 
       sixfoldStarts:
-        targetSixfoldStarts,
+        effectiveSixfoldStarts,
 
       targetCities,
 
