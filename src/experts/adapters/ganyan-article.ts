@@ -1075,6 +1075,22 @@ export async function acquireGanyanGalopArticle(
         textCharacters:
           text.length,
 
+        /*
+         * Distinguish "heading never arrived" (bot-served a
+         * thinner page, or the JS-loaded widget never
+         * rendered) from "heading arrived but the identity
+         * regex didn't match its exact wording" — without
+         * this, both look identical from the outside.
+         */
+        headingSeen:
+          new RegExp(
+            `${targetCity.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\s+En\\s+Son\\s+Yorumlar`,
+            "iu"
+          ).test(text),
+
+        textTail:
+          text.slice(-200),
+
         reason:
           "EXACT_CITY_COMMENTS_NOT_FOUND"
       });
@@ -1307,6 +1323,15 @@ export async function acquireGanyanGalopArticle(
 
             textCharacters:
               text.length,
+
+            headingSeen:
+              new RegExp(
+                `${targetCity.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\s+En\\s+Son\\s+Yorumlar`,
+                "iu"
+              ).test(text),
+
+            textTail:
+              text.slice(-200),
 
             reason:
               "EXACT_CITY_COMMENTS_NOT_FOUND"

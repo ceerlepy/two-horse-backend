@@ -1918,6 +1918,79 @@ export async function resolveVerifiedArticleTargets(
                 first.score
             );
 
+        /*
+         * scoredCandidates=0 with structuralLinks>0 is
+         * otherwise a dead end: ownsArticle() matched real
+         * article-shaped URLs, but nothing says WHY every one
+         * of them then failed looseCandidate's gates (missing
+         * city/date evidence, or a negative-language hit from
+         * boilerplate card text). Surface that directly on a
+         * few real structural links instead of re-guessing it
+         * blind next time.
+         */
+        const rejectedSample=
+          scored.length ===
+            0 &&
+          structural.length >
+            0
+            ? structural
+                .slice(0,3)
+                .map(
+                  link => {
+                    const material=
+                      normalizeExpertSearchText(
+                        [
+                          link.text,
+                          decodedUrl(
+                            link.url
+                          )
+                        ].join(" ")
+                      );
+
+                    const evidence=
+                      candidateEvidence(
+                        context
+                          .source
+                          .source_key,
+
+                        link.url,
+                        link.text,
+                        context.raceDate,
+                        context.cities,
+                        link.text
+                      );
+
+                    return {
+                      url:
+                        link.url,
+
+                      textSample:
+                        link.text.slice(
+                          0,
+                          200
+                        ),
+
+                      matchedCities:
+                        evidence.matchedCities,
+
+                      hasDate:
+                        evidence.hasDate,
+
+                      hasPredictionLanguage:
+                        evidence
+                          .hasPredictionLanguage,
+
+                      hasNegativeLanguage:
+                        evidence
+                          .hasNegativeLanguage,
+
+                      materialLength:
+                        material.length
+                    };
+                  }
+                )
+            : undefined;
+
         diagnostics
           .listingAttempts
           .push({
@@ -1936,6 +2009,8 @@ export async function resolveVerifiedArticleTargets(
 
             scoredCandidates:
               scored.length,
+
+            rejectedSample,
 
             sample:
               scored
