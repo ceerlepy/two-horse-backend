@@ -42,7 +42,19 @@ export async function acquireHttpHtml(
             "user-agent":
               options.userAgent ??
               "TwoHorse/1.0 (+race-analysis)"
-          }
+          },
+
+          /*
+           * Every fetch here is meant to reflect the source's
+           * current state (today's tahmin content) — a
+           * same-day-stale Cloudflare edge cache is never
+           * correct for this system, so always bypass it and
+           * hit the origin fresh.
+           */
+          cf: {
+            cacheTtl: 0,
+            cacheEverything: false
+          } as any
         }
       );
 
