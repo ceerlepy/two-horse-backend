@@ -101,6 +101,18 @@ function historicalUrl(
   const slug =
     title
       .toLowerCase()
+      /*
+       * Default toLowerCase() maps "İ" to the decomposed
+       * "i" + combining-dot-above (U+0307) instead of a
+       * plain "i", which the site's own slugs never carry.
+       * Collapse that sequence back to plain "i" before the
+       * slug charset filter, which otherwise lets the
+       * combining mark survive into the URL and 404.
+       */
+      .replace(
+        /i̇/g,
+        "i"
+      )
       .replace(
         /[^\p{L}\p{N}\p{M}]+/gu,
         "-"
