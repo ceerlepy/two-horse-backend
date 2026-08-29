@@ -1278,12 +1278,30 @@ export async function acquireGanyanGalopArticle(
         /*
          * Base DOM arrives before public comments.
          * Wait for the ACTUAL city-comments block.
+         *
+         * The comments widget can be scroll-triggered
+         * (IntersectionObserver-style lazy load), which a
+         * script that only reads document.body.innerText
+         * never fires. Actually scroll toward the bottom on
+         * each attempt, same as a real reader would, before
+         * re-checking — a real visitor never leaves scroll
+         * position at 0 through a whole article page.
          */
         for (
           let attempt=0;
           attempt<30;
           attempt++
         ) {
+          await page.evaluate(
+            () => {
+              window.scrollTo(
+                0,
+                document.body
+                  .scrollHeight
+              );
+            }
+          );
+
           text =
             String(
               await page.evaluate(
