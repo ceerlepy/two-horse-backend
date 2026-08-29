@@ -133,7 +133,8 @@ export function resolveCanonicalRunnerForPick(
 
   method:
     "exact" |
-    "same-race-name";
+    "same-race-name" |
+    "exact-number-name-mismatch";
 } | null {
   const exact =
     runners.find(
@@ -197,48 +198,69 @@ export function resolveCanonicalRunnerForPick(
    * - raceNumber may NOT change
    * - exact normalized horseName must uniquely match
    *
-   * Only horseNumber can be corrected.
+   * Only horseNumber can be corrected. This is checked BEFORE
+   * trusting a mismatched exact numeric identity below, since a
+   * unique name match on a DIFFERENT horseNumber is stronger
+   * evidence of a swapped/mistyped number than of a mistyped name.
    */
-  if (!suppliedName) {
-    return null;
+  if (suppliedName) {
+    const wanted =
+      sameRaceNameKey(
+        pick.city,
+        pick.raceNumber,
+        suppliedName
+      );
+
+
+    const matches =
+      runners.filter(
+        runner =>
+          sameRaceNameKey(
+            runner.city,
+            runner.raceNumber,
+            runner.horseName
+          ) ===
+          wanted
+      );
+
+
+    if (
+      matches.length ===
+        1
+    ) {
+      return {
+        runner:
+          matches[0],
+
+        method:
+          "same-race-name"
+      };
+    }
   }
 
 
-  const wanted =
-    sameRaceNameKey(
-      pick.city,
-      pick.raceNumber,
-      suppliedName
-    );
+  /*
+   * city + raceNumber + horseNumber already uniquely identify one
+   * real runner (the program number is a positional identity the
+   * article states explicitly, e.g. "(5) KING ÇAĞDAŞ"). A supplied
+   * name that doesn't match it AND doesn't uniquely match any other
+   * runner in the race is most likely a transcription slip on the
+   * name of that same, already-pinned horse — not evidence it's the
+   * wrong horse. Trust the numeric identity and use the canonical
+   * name.
+   */
+  if (exact) {
+    return {
+      runner:
+        exact,
 
-
-  const matches =
-    runners.filter(
-      runner =>
-        sameRaceNameKey(
-          runner.city,
-          runner.raceNumber,
-          runner.horseName
-        ) ===
-        wanted
-    );
-
-
-  if (
-    matches.length !==
-      1
-  ) {
-    return null;
+      method:
+        "exact-number-name-mismatch"
+    };
   }
 
 
-  return {
-    runner:
-      matches[0],
-
-    method:
-      "same-race-name"
-  };
+  return null;
 }
 
 
