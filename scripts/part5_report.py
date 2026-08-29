@@ -69,6 +69,10 @@ def main():
         print(f"DOC[{index}] ERROR     =", attempt.get("error"))
         print(f"DOC[{index}] ACQUISITION =", dump(diagnostics.get("acquisition"), ACQUISITION_CAP))
 
+        rejected = attempt.get("rejectedPicks")
+        if rejected:
+            print(f"DOC[{index}] REJECTED_PICKS =", dump(rejected, ARTICLE_CAP))
+
         excerpt = semantic.get("excerpt")
         if excerpt:
             print(f"DOC[{index}] SEMANTIC_EXCERPT:")
