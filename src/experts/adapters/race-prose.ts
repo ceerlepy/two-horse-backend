@@ -147,7 +147,10 @@ function targetCity(
     ExpertAcquireContext,
 
   text:string
-):string {
+):{
+  city:string;
+  confirmedByUrl:boolean;
+} {
   const urlMaterial =
     normalizeExpertSearchText(
       decodedUrlMaterial(
@@ -170,7 +173,10 @@ function targetCity(
     fromUrl.length ===
       1
   ) {
-    return fromUrl[0];
+    return {
+      city:fromUrl[0],
+      confirmedByUrl:true
+    };
   }
 
   const normalizedText =
@@ -193,14 +199,20 @@ function targetCity(
     fromBody.length ===
       1
   ) {
-    return fromBody[0];
+    return {
+      city:fromBody[0],
+      confirmedByUrl:false
+    };
   }
 
   if (
     context.cities.length ===
       1
   ) {
-    return context.cities[0];
+    return {
+      city:context.cities[0],
+      confirmedByUrl:false
+    };
   }
 
   throw new Error(
@@ -224,22 +236,35 @@ export function prepareRaceProseArticle(
       acquired.html
     );
 
-  const city =
+  const {
+    city,
+    confirmedByUrl
+  } =
     targetCity(
       context,
       text
     );
 
   /*
-   * Critical acquisition gate.
+   * Critical acquisition gate — but only when the URL itself
+   * did not already name the city unambiguously.
    *
-   * Exact URL alone is NOT enough.
-   * The actual fetched BODY must contain target city.
+   * When the city came from the URL (e.g.
+   * ".../herkulbey-bankom-ankara29826-..."), that is already
+   * a specific, per-article identity — re-demanding the city
+   * word verbatim in prose wrongly rejects real articles whose
+   * theme keeps the city in a byline/H1 outside the extracted
+   * <article> root rather than repeating it in body text.
    *
-   * This is what prevents Istinye Kocaeli from accepting
-   * an unrelated/generic fallback page.
+   * When the city instead came from body text or a single-city
+   * fallback, the URL was generic (e.g. istinye's
+   * "current tahminler" page), so the body IS the only evidence
+   * of identity — this is what prevents Istinye Kocaeli from
+   * accepting an unrelated/generic fallback page, and stays
+   * enforced.
    */
   if (
+    !confirmedByUrl &&
     !normalizeExpertSearchText(
       text
     ).includes(
