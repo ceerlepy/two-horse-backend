@@ -26,6 +26,10 @@ import {
 } from "../../scoring/weights";
 
 import {
+  summarizeExpertSourceHealth
+} from "../../experts/source-repository";
+
+import {
   MODEL_VERSION,
   LEARNING_POLICY_VERSION,
   COUPON_POLICY_VERSION
@@ -1553,16 +1557,9 @@ export async function routeDiagnostics(
           `
         );
 
-      const degradedSources =
-        await scalarCount(
-          env,
-          `
-            SELECT COUNT(*) total
-            FROM source_registry
-            WHERE
-              enabled = 1
-              AND health_status <> 'healthy'
-          `
+      const sourceHealth =
+        await summarizeExpertSourceHealth(
+          env
         );
 
       return json({
@@ -1574,7 +1571,22 @@ export async function routeDiagnostics(
         database:
           "healthy",
         invalidCaptureTiming,
-        degradedSources,
+
+        /*
+         * Kept for backward compatibility: previously counted any
+         * source not exactly "healthy", which conflated a genuine
+         * failure with a source that simply had no card today and
+         * with a source that succeeded days ago and was never
+         * rechecked. Now only real failures (degraded/blocked/
+         * parse-error, including stale-healthy) count here.
+         */
+        degradedSources:
+          sourceHealth.failedSources +
+          sourceHealth.staleSources,
+
+        expertSources:
+          sourceHealth,
+
         serverNow:
           new Date()
             .toISOString()

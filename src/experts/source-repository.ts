@@ -6,6 +6,10 @@ import type {
   ExpertSource
 } from "./source-types";
 
+import {
+  turkeyDate
+} from "../shared";
+
 
 export async function activeExpertSources(
   env:
@@ -324,4 +328,220 @@ export async function markExpertFailure(
       sourceKey
     )
     .run();
+}
+
+
+export type ExpertOutcomeStatus =
+  | "blocked"
+  | "parse-error"
+  | "no-picks-today";
+
+/*
+ * processSource has several non-throwing exit paths (no card
+ * published today, every attempt access-restricted, extraction ran
+ * but produced nothing usable) that used to leave health_status
+ * untouched — so a source that had a real success three days ago
+ * still reported "healthy" today with nothing to show for it. This
+ * records what actually happened on *this* check, every time,
+ * without touching last_success_at/content_hash (those still mark
+ * when the source last genuinely contributed).
+ */
+export async function markExpertOutcome(
+  env:
+    Env,
+
+  sourceKey:
+    string,
+
+  status:
+    ExpertOutcomeStatus
+): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE source_registry
+    SET
+      health_status = ?,
+      last_checked_at = ?,
+      updated_at =
+        CURRENT_TIMESTAMP
+    WHERE source_key = ?
+  `)
+    .bind(
+      status,
+
+      new Date()
+        .toISOString(),
+
+      sourceKey
+    )
+    .run();
+}
+
+
+const FAILED_HEALTH_STATUSES =
+  new Set([
+    "degraded",
+    "blocked",
+    "parse-error"
+  ]);
+
+export interface ExpertSourceHealthRow {
+  sourceKey: string;
+  healthStatus: string;
+  effectiveStatus: string;
+  lastCheckedAt: string | null;
+  lastSuccessAt: string | null;
+  contributingToday: boolean;
+}
+
+export interface ExpertSourceHealthSummary {
+  availableSources: number;
+  contributingSources: number;
+  staleSources: number;
+  failedSources: number;
+  sources: ExpertSourceHealthRow[];
+}
+
+/*
+ * A source recorded "healthy" once and may never be checked again,
+ * so the raw column would otherwise read healthy forever while it
+ * has contributed nothing for days. Any other recorded status
+ * (including "no-picks-today", which is an honest, non-broken
+ * outcome) is left as-is regardless of when it was last checked.
+ */
+export function deriveEffectiveSourceStatus(
+  healthStatus: string,
+  lastCheckedAt: string | null,
+  raceDate: string
+): string {
+  const checkedToday =
+    typeof lastCheckedAt ===
+      "string" &&
+    lastCheckedAt
+      .slice(0, 10) ===
+      raceDate;
+
+  return (
+    healthStatus === "healthy" &&
+    !checkedToday
+  )
+    ? "stale"
+    : healthStatus;
+}
+
+/*
+ * healthStatus reflects the last recorded outcome (see
+ * markExpertOutcome/markExpertHealthy/markExpertFailure).
+ * effectiveStatus additionally catches the case that motivated this
+ * function: a source recorded "healthy" once and was never checked
+ * again, so the raw column still reads healthy while it has
+ * contributed nothing for days. "no-picks-today" is deliberately
+ * excluded from staleSources/failedSources — a source that ran,
+ * found no current-day card, and said so honestly is not broken.
+ */
+export async function summarizeExpertSourceHealth(
+  env:
+    Env,
+
+  raceDate:
+    string =
+      turkeyDate()
+): Promise<ExpertSourceHealthSummary> {
+  const sources =
+    await env.DB.prepare(`
+      SELECT
+        source_key,
+        health_status,
+        last_checked_at,
+        last_success_at
+      FROM source_registry
+      WHERE enabled = 1
+      ORDER BY source_key
+    `)
+      .all<any>();
+
+  const contributing =
+    await env.DB.prepare(`
+      SELECT DISTINCT source_key
+      FROM expert_predictions
+      WHERE race_date = ?
+    `)
+      .bind(raceDate)
+      .all<any>();
+
+  const contributingKeys =
+    new Set(
+      (contributing.results ?? [])
+        .map(row =>
+          String(row.source_key)
+        )
+    );
+
+  const rows: ExpertSourceHealthRow[] =
+    (sources.results ?? [])
+      .map(row => {
+        const sourceKey =
+          String(row.source_key);
+
+        const healthStatus =
+          String(
+            row.health_status ??
+              "unknown"
+          );
+
+        const lastCheckedAt =
+          row.last_checked_at ??
+            null;
+
+        const effectiveStatus =
+          deriveEffectiveSourceStatus(
+            healthStatus,
+            lastCheckedAt,
+            raceDate
+          );
+
+        return {
+          sourceKey,
+          healthStatus,
+          effectiveStatus,
+
+          lastCheckedAt,
+
+          lastSuccessAt:
+            row.last_success_at ??
+              null,
+
+          contributingToday:
+            contributingKeys.has(
+              sourceKey
+            )
+        };
+      });
+
+  return {
+    availableSources:
+      rows.length,
+
+    contributingSources:
+      rows.filter(
+        row =>
+          row.contributingToday
+      ).length,
+
+    staleSources:
+      rows.filter(
+        row =>
+          row.effectiveStatus ===
+          "stale"
+      ).length,
+
+    failedSources:
+      rows.filter(
+        row =>
+          FAILED_HEALTH_STATUSES.has(
+            row.effectiveStatus
+          )
+      ).length,
+
+    sources: rows
+  };
 }

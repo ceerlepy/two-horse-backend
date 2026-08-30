@@ -11,6 +11,9 @@ import {
 import {
   previewExpertSource
 } from "../experts/preview";
+import {
+  summarizeExpertSourceHealth
+} from "../experts/source-repository";
 import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
@@ -768,7 +771,30 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  FROM source_registry
  ORDER BY enabled DESC, source_name
 `).all();
-  return json({ok:true,count:sources.results.length,sources:sources.results});
+
+  const health=await summarizeExpertSourceHealth(env);
+  const healthBySource=new Map(health.sources.map(row=>[row.sourceKey,row]));
+
+  const enriched=(sources.results as any[]).map(row=>{
+   const derived=healthBySource.get(String(row.source_key));
+   return {
+    ...row,
+    effectiveStatus:derived?.effectiveStatus ?? row.health_status,
+    contributingToday:derived?.contributingToday ?? false
+   };
+  });
+
+  return json({
+   ok:true,
+   count:enriched.length,
+   summary:{
+    availableSources:health.availableSources,
+    contributingSources:health.contributingSources,
+    staleSources:health.staleSources,
+    failedSources:health.failedSources
+   },
+   sources:enriched
+  });
  }
  if(url.pathname==="/api/debug/learning-labels") {
   try {
