@@ -25,19 +25,32 @@ import {
  * sample; a whole coupon is six.
  */
 /*
- * Deliberately low: at ~6 samples per evaluated coupon (one six-fold
- * = six legs), 200 would need ~33 fully-evaluated coupons before this
- * moved at all, which this feature's real usage so far (6 generated,
- * 3 evaluated, ever) may never reach. 50 lets a first, heavily-
- * shrunk signal join in after roughly 8 coupons instead -- the
- * reliability ramp below still keeps that early signal small, it
- * just doesn't wait for a volume this feature hasn't shown yet.
+ * Every tunable number for this feature lives here, in one place --
+ * same pattern as EXPERT_CHECK_CADENCE_TIERS in src/experts/policy.ts.
+ * Tune cost/aggressiveness of learning here, nowhere else.
+ *
+ * minSamples: deliberately low. At ~6 samples per evaluated coupon
+ * (one six-fold = six legs), 200 would need ~33 fully-evaluated
+ * coupons before this moved at all, which this feature's real usage
+ * so far (6 generated, 3 evaluated, ever) may never reach. 50 lets a
+ * first, heavily-shrunk signal join in after roughly 8 coupons
+ * instead -- fullReliabilitySamples below still keeps that early
+ * signal small, it just doesn't wait for a volume this feature
+ * hasn't shown yet.
+ *
+ * fullReliabilitySamples: sample count at which the calibration is
+ * trusted at its full strength. Below minSamples, no effect at all;
+ * between the two, effect scales up linearly.
+ *
+ * maxTemperatureShift: hard cap on how far calibration can move the
+ * temperature from its default, in either direction, even with an
+ * extreme observed bias and unlimited samples.
  */
-export const MIN_CALIBRATION_SAMPLES = 50;
-
-export const CALIBRATION_FULL_RELIABILITY_SAMPLES = 300;
-
-const MAX_TEMPERATURE_SHIFT = 0.30;
+export const SIXFOLD_CALIBRATION_CONFIG = {
+  minSamples: 50,
+  fullReliabilitySamples: 300,
+  maxTemperatureShift: 0.30
+} as const;
 
 
 export type CalibrationStatus =
@@ -56,11 +69,14 @@ export interface CalibrationStats {
 export function classifyCalibrationStatus(
   sampleCount: number
 ): CalibrationStatus {
-  if (sampleCount < MIN_CALIBRATION_SAMPLES) {
+  if (sampleCount < SIXFOLD_CALIBRATION_CONFIG.minSamples) {
     return "insufficient-data";
   }
 
-  if (sampleCount < CALIBRATION_FULL_RELIABILITY_SAMPLES) {
+  if (
+    sampleCount <
+    SIXFOLD_CALIBRATION_CONFIG.fullReliabilitySamples
+  ) {
     return "partial";
   }
 
@@ -69,16 +85,18 @@ export function classifyCalibrationStatus(
 
 
 /*
- * Stays at the uncalibrated default until MIN_CALIBRATION_SAMPLES is
- * met, then moves gradually (never more than +/-30%) as reliability
- * grows toward CALIBRATION_FULL_RELIABILITY_SAMPLES. One noisy early
- * batch can never swing this to an extreme.
+ * Stays at the uncalibrated default until SIXFOLD_CALIBRATION_CONFIG.
+ * minSamples is met, then moves gradually (never more than +/-
+ * maxTemperatureShift) as reliability grows toward
+ * fullReliabilitySamples. One noisy early batch can never swing this
+ * to an extreme.
  */
 export function computeCalibratedTemperature(
   stats: CalibrationStats
 ): number {
   if (
-    stats.sampleCount < MIN_CALIBRATION_SAMPLES ||
+    stats.sampleCount <
+      SIXFOLD_CALIBRATION_CONFIG.minSamples ||
     stats.predictedAvgCoverage <= 0
   ) {
     return DEFAULT_COUPON_TEMPERATURE;
@@ -92,11 +110,11 @@ export function computeCalibratedTemperature(
     clamp(
       (
         stats.sampleCount -
-        MIN_CALIBRATION_SAMPLES
+        SIXFOLD_CALIBRATION_CONFIG.minSamples
       ) /
       (
-        CALIBRATION_FULL_RELIABILITY_SAMPLES -
-        MIN_CALIBRATION_SAMPLES
+        SIXFOLD_CALIBRATION_CONFIG.fullReliabilitySamples -
+        SIXFOLD_CALIBRATION_CONFIG.minSamples
       ),
       0,
       1
@@ -121,7 +139,7 @@ export function computeCalibratedTemperature(
 
   const shift =
     rawShift *
-    MAX_TEMPERATURE_SHIFT *
+    SIXFOLD_CALIBRATION_CONFIG.maxTemperatureShift *
     reliability;
 
   return round(

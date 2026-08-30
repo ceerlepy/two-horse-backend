@@ -11,9 +11,14 @@ import {
 import {
   classifyCalibrationStatus,
   computeCalibratedTemperature,
-  MIN_CALIBRATION_SAMPLES,
-  CALIBRATION_FULL_RELIABILITY_SAMPLES
+  SIXFOLD_CALIBRATION_CONFIG
 } from "../src/coupons/calibration";
+
+const MIN_CALIBRATION_SAMPLES =
+  SIXFOLD_CALIBRATION_CONFIG.minSamples;
+
+const CALIBRATION_FULL_RELIABILITY_SAMPLES =
+  SIXFOLD_CALIBRATION_CONFIG.fullReliabilitySamples;
 
 
 describe(

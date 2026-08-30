@@ -1816,7 +1816,7 @@ yakalamak için bacak başına doğal olarak daha fazla at seçer.
 
 Pozitif bias → underconfident → temperature DÜŞER → dağılım keskinleşir.
 
-Gate: MIN_CALIBRATION_SAMPLES (50) altında etkisiz; 300 örnekte tam
+Gate: SIXFOLD_CALIBRATION_CONFIG.minSamples (50) altında etkisiz; 300 örnekte tam
 güven; maksimum kayma ±%30.
 
 Bu yazının yazıldığı tarihte sistemde toplam 6 sixfold kupon üretilmiş
