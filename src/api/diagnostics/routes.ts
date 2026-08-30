@@ -34,6 +34,10 @@ import {
 } from "./data-quality";
 
 import {
+  buildRaceFieldSignalCoverage
+} from "../../field/coverage";
+
+import {
   MODEL_VERSION,
   LEARNING_POLICY_VERSION,
   COUPON_POLICY_VERSION
@@ -694,6 +698,51 @@ export async function routeDiagnostics(
         perRace.results ?? []
       );
 
+    const perRaceFieldSignal =
+      await env.DB.prepare(`
+        SELECT
+          r.city,
+          r.race_number,
+          COUNT(*) total_runners,
+
+          SUM(
+            CASE
+              WHEN fs.tjk_score IS NOT NULL
+              THEN 1 ELSE 0
+            END
+          ) covered_runners
+
+        FROM runners r
+        LEFT JOIN field_signals fs
+          ON fs.race_date = r.race_date
+          AND fs.city = r.city
+          AND fs.race_number = r.race_number
+          AND fs.horse_number = r.horse_number
+        WHERE r.race_date = ?
+        GROUP BY r.city, r.race_number
+        ORDER BY r.city, r.race_number
+      `)
+        .bind(date)
+        .all<any>();
+
+    const fieldSignalCoverage =
+      buildRaceFieldSignalCoverage(
+        perRaceFieldSignal.results ?? []
+      );
+
+    /*
+     * partial-data races are exactly the ones where scoring
+     * suppresses field_score race-wide (Part 9) -- surfaced here so
+     * an operator can see why, rather than only seeing the effect
+     * downstream in a race's model scores.
+     */
+    const partialFieldCoverageRaces =
+      fieldSignalCoverage.filter(
+        race =>
+          race.coverageState ===
+          "partial-data"
+      );
+
     /*
      * A "likely-not-published" whole race (every runner missing
      * together — the debut/maiden-field signature) is expected and
@@ -735,6 +784,8 @@ export async function routeDiagnostics(
       },
 
       raceFieldCoverage,
+      fieldSignalCoverage,
+      partialFieldCoverageRaces,
 
       unexplainedGaps: {
         form: formGaps,

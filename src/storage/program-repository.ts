@@ -22,6 +22,10 @@ import {
 } from "../field/combined-field-score";
 
 import {
+  suppressPartialFieldCoverage
+} from "../field/coverage";
+
+import {
   horseIdentity,
   jockeyIdentity,
   distanceBand
@@ -637,9 +641,16 @@ export async function getToday(env: Env): Promise<any> {
                   }
                 );
 
+            const {
+              runners: fieldCoverageAdjustedRunners
+            } =
+              suppressPartialFieldCoverage(
+                assembledRunners
+              );
+
             const baseScoredRunners =
               scoreRace(
-                assembledRunners
+                fieldCoverageAdjustedRunners
               );
 
             const band =
