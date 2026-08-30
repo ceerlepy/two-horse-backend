@@ -38,6 +38,7 @@ import {
   markExpertChecked,
   markExpertFailure,
   markExpertHealthy,
+  markExpertOutcome,
   recordExpertDiscovery,
   recordExpertRefreshTrace
 } from "./source-repository";
@@ -161,6 +162,35 @@ async function rowsExist(
 
   return Boolean(
     row?.found
+  );
+}
+
+
+/*
+ * verified-article.ts's discovery diagnostics record each verified
+ * candidate's individual status, including "access-restricted" for
+ * a genuine VIP/paywall detection (article found, content refused,
+ * not the source simply having no card yet). Other adapters don't
+ * carry this shape, so this degrades to "no evidence of a block"
+ * rather than throwing.
+ */
+export function resolutionBlockedByAccess(
+  resolution:
+    unknown
+): boolean {
+  const verified =
+    (resolution as any)
+      ?.diagnostics
+      ?.final
+      ?.verified;
+
+  return (
+    Array.isArray(verified) &&
+    verified.some(
+      (candidate: any) =>
+        candidate?.status ===
+        "access-restricted"
+    )
   );
 }
 
@@ -416,6 +446,16 @@ async function processSource(
       "not-published" ||
     !resolution.targets.length
   ) {
+    await markExpertOutcome(
+      env,
+      source.source_key,
+      resolutionBlockedByAccess(
+        resolution
+      )
+        ? "blocked"
+        : "no-picks-today"
+    );
+
     return {
       source:
         source.source_key,
@@ -637,6 +677,18 @@ async function processSource(
 
 
   if (!all.length) {
+    await markExpertOutcome(
+      env,
+      source.source_key,
+      attempts.some(
+        attempt =>
+          attempt.outcome ===
+          "EXTRACTION_ERROR"
+      )
+        ? "parse-error"
+        : "no-picks-today"
+    );
+
     return {
       source:
         source.source_key,

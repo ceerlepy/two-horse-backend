@@ -26,10 +26,30 @@ import {
 } from "../../scoring/weights";
 
 import {
+  summarizeExpertSourceHealth
+} from "../../experts/source-repository";
+
+import {
+  buildRaceFieldCoverage
+} from "./data-quality";
+
+import {
+  buildRaceFieldSignalCoverage
+} from "../../field/coverage";
+
+import {
   MODEL_VERSION,
   LEARNING_POLICY_VERSION,
   COUPON_POLICY_VERSION
 } from "../../model/version";
+
+import {
+  SIXFOLD_STALE_AFTER_DAYS
+} from "../../coupons/repository";
+
+import {
+  buildSixFoldCouponHealth
+} from "./sixfold";
 
 function integerParam(
   url: URL,
@@ -635,8 +655,130 @@ export async function routeDiagnostics(
         date
       );
 
+    const perRace =
+      await env.DB.prepare(`
+        SELECT
+          city,
+          race_number,
+          COUNT(*) total_runners,
+
+          SUM(
+            CASE
+              WHEN recent_form_raw IS NULL
+                OR TRIM(recent_form_raw) = ''
+              THEN 1 ELSE 0
+            END
+          ) missing_form,
+
+          SUM(
+            CASE
+              WHEN hp IS NULL
+              THEN 1 ELSE 0
+            END
+          ) missing_hp,
+
+          /*
+           * TJK does not assign a handicap rating until a horse
+           * has run enough races. A runner missing HP whose own
+           * recent_form_raw shows at most one or two prior starts
+           * is explained by that, same as a full debut field —
+           * only a longer form history with no HP is unexplained.
+           */
+          SUM(
+            CASE
+              WHEN hp IS NULL
+                AND recent_form_raw IS NOT NULL
+                AND LENGTH(TRIM(recent_form_raw)) > 2
+              THEN 1 ELSE 0
+            END
+          ) unexplained_missing_hp
+
+        FROM runners
+        WHERE race_date = ?
+        GROUP BY city, race_number
+        ORDER BY city, race_number
+      `)
+        .bind(date)
+        .all<any>();
+
+    const raceFieldCoverage =
+      buildRaceFieldCoverage(
+        perRace.results ?? []
+      );
+
+    const perRaceFieldSignal =
+      await env.DB.prepare(`
+        SELECT
+          r.city,
+          r.race_number,
+          COUNT(*) total_runners,
+
+          SUM(
+            CASE
+              WHEN fs.tjk_score IS NOT NULL
+              THEN 1 ELSE 0
+            END
+          ) covered_runners
+
+        FROM runners r
+        LEFT JOIN field_signals fs
+          ON fs.race_date = r.race_date
+          AND fs.city = r.city
+          AND fs.race_number = r.race_number
+          AND fs.horse_number = r.horse_number
+        WHERE r.race_date = ?
+        GROUP BY r.city, r.race_number
+        ORDER BY r.city, r.race_number
+      `)
+        .bind(date)
+        .all<any>();
+
+    const fieldSignalCoverage =
+      buildRaceFieldSignalCoverage(
+        perRaceFieldSignal.results ?? []
+      );
+
+    /*
+     * partial-data races are exactly the ones where scoring
+     * suppresses field_score race-wide (Part 9) -- surfaced here so
+     * an operator can see why, rather than only seeing the effect
+     * downstream in a race's model scores.
+     */
+    const partialFieldCoverageRaces =
+      fieldSignalCoverage.filter(
+        race =>
+          race.coverageState ===
+          "partial-data"
+      );
+
+    /*
+     * A "likely-not-published" whole race (every runner missing
+     * together — the debut/maiden-field signature) is expected and
+     * not alarmed on. A form gap only has that one benign
+     * explanation, so partial-gap is always real for form. HP has a
+     * second benign explanation (insufficient own race history),
+     * so its alarm gates on unexplainedMissingHp rather than the
+     * raw count.
+     */
+    const formGaps =
+      raceFieldCoverage.filter(
+        race =>
+          race.formCoverage ===
+          "partial-gap"
+      );
+
+    const hpGaps =
+      raceFieldCoverage.filter(
+        race =>
+          race.unexplainedMissingHp >
+          0
+      );
+
     return json({
-      ok: true,
+      ok:
+        formGaps.length === 0 &&
+        hpGaps.length === 0,
+
       date,
       byCity:
         runners.results,
@@ -647,6 +789,15 @@ export async function routeDiagnostics(
           marketRows,
         field:
           fieldRows
+      },
+
+      raceFieldCoverage,
+      fieldSignalCoverage,
+      partialFieldCoverageRaces,
+
+      unexplainedGaps: {
+        form: formGaps,
+        hp: hpGaps
       }
     });
   }
@@ -1387,6 +1538,54 @@ export async function routeDiagnostics(
         FROM sixfold_coupon_snapshots
       `).first<any>();
 
+    const sixfoldHealthRow =
+      await env.DB.prepare(`
+        SELECT
+          COUNT(*) total,
+
+          SUM(
+            CASE
+              WHEN evaluated_at IS NOT NULL
+              THEN 1 ELSE 0
+            END
+          ) evaluated,
+
+          SUM(
+            CASE
+              WHEN evaluated_at IS NULL
+                AND unresolved_reason IS NULL
+              THEN 1 ELSE 0
+            END
+          ) pending,
+
+          SUM(
+            CASE
+              WHEN unresolved_reason IS NOT NULL
+              THEN 1 ELSE 0
+            END
+          ) unresolved,
+
+          SUM(
+            CASE
+              WHEN evaluated_at IS NULL
+                AND unresolved_reason IS NULL
+                AND race_date < date('now', ?)
+              THEN 1 ELSE 0
+            END
+          ) overdue_unclassified
+
+        FROM sixfold_coupon_snapshots
+      `)
+        .bind(
+          `-${SIXFOLD_STALE_AFTER_DAYS} days`
+        )
+        .first<any>();
+
+    const sixfoldCouponHealth =
+      buildSixFoldCouponHealth(
+        sixfoldHealthRow ?? {}
+      );
+
     const officialResults =
       await env.DB.prepare(`
         SELECT
@@ -1526,6 +1725,7 @@ export async function routeDiagnostics(
         sources.results,
       learning,
       coupons,
+      sixfoldCouponHealth,
 
       officialResults,
 
@@ -1553,16 +1753,9 @@ export async function routeDiagnostics(
           `
         );
 
-      const degradedSources =
-        await scalarCount(
-          env,
-          `
-            SELECT COUNT(*) total
-            FROM source_registry
-            WHERE
-              enabled = 1
-              AND health_status <> 'healthy'
-          `
+      const sourceHealth =
+        await summarizeExpertSourceHealth(
+          env
         );
 
       return json({
@@ -1574,7 +1767,22 @@ export async function routeDiagnostics(
         database:
           "healthy",
         invalidCaptureTiming,
-        degradedSources,
+
+        /*
+         * Kept for backward compatibility: previously counted any
+         * source not exactly "healthy", which conflated a genuine
+         * failure with a source that simply had no card today and
+         * with a source that succeeded days ago and was never
+         * rechecked. Now only real failures (degraded/blocked/
+         * parse-error, including stale-healthy) count here.
+         */
+        degradedSources:
+          sourceHealth.failedSources +
+          sourceHealth.staleSources,
+
+        expertSources:
+          sourceHealth,
+
         serverNow:
           new Date()
             .toISOString()
