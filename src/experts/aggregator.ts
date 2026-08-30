@@ -37,79 +37,72 @@ function clamp(
   );
 }
 
-const POSITIVE_CATEGORY_WORDS: Array<{
-  count: (c: {
-    bankoCount: number;
-    favoriteCount: number;
-    strongCount: number;
-    starCount: number;
-    surpriseCount: number;
-    rivalCount: number;
-  }) => number;
+interface CategoryTally {
+  bankoCount: number;
+  favoriteCount: number;
+  strongCount: number;
+  starCount: number;
+  rivalCount: number;
+  surpriseCount: number;
+  avoidCount: number;
+
+  bankoScore: number;
+  favoriteScore: number;
+  strongScore: number;
+  starScore: number;
+  rivalScore: number;
+  surpriseScore: number;
+  avoidScore: number;
+}
+
+const POSITIVE_CATEGORIES: Array<{
+  count: (c: CategoryTally) => number;
+  score: (c: CategoryTally) => number;
   word: string;
 }> = [
-  { count: (c) => c.bankoCount, word: "banko" },
-  { count: (c) => c.favoriteCount, word: "favori" },
-  { count: (c) => c.strongCount, word: "güçlü aday" },
-  { count: (c) => c.starCount, word: "yıldız aday" },
-  { count: (c) => c.surpriseCount, word: "sürpriz aday" },
-  { count: (c) => c.rivalCount, word: "rakip aday" }
+  { count: c => c.bankoCount, score: c => c.bankoScore, word: "banko" },
+  { count: c => c.favoriteCount, score: c => c.favoriteScore, word: "favori" },
+  { count: c => c.strongCount, score: c => c.strongScore, word: "güçlü aday" },
+  { count: c => c.starCount, score: c => c.starScore, word: "yıldız aday" },
+  { count: c => c.surpriseCount, score: c => c.surpriseScore, word: "sürpriz aday" },
+  { count: c => c.rivalCount, score: c => c.rivalScore, word: "rakip aday" }
 ];
 
 /*
  * A short, deterministic Turkish sentence built only from the
- * already-computed counts and score — never from source names or
- * raw scraped comments, so it can't leak which sites are behind it.
+ * already-computed counts and per-category weight shares — never
+ * from source names or raw scraped comments, so it can't leak which
+ * sites are behind it.
  */
 function buildSummary(
   sourceCount: number,
-  bankoCount: number,
-  favoriteCount: number,
-  strongCount: number,
-  starCount: number,
-  rivalCount: number,
-  surpriseCount: number,
-  avoidCount: number,
-  expertScore: number
+  tally: CategoryTally
 ): string {
   if (sourceCount === 0) {
     return "";
   }
 
   const topPositive =
-    POSITIVE_CATEGORY_WORDS
+    POSITIVE_CATEGORIES
       .map(entry => ({
         word: entry.word,
-        count: entry.count({
-          bankoCount,
-          favoriteCount,
-          strongCount,
-          starCount,
-          surpriseCount,
-          rivalCount
-        })
+        count: entry.count(tally),
+        score: entry.score(tally)
       }))
       .filter(entry => entry.count > 0)
       .sort((a, b) => b.count - a.count)[0];
 
-  if (avoidCount > 0 && avoidCount >= (topPositive?.count ?? 0)) {
-    return `${sourceCount} kaynaktan ${avoidCount} tanesi bu attan kaçınılmasını öneriyor.`;
+  if (tally.avoidCount > 0 && tally.avoidCount >= (topPositive?.count ?? 0)) {
+    return `${sourceCount} kaynaktan ${tally.avoidCount} tanesi bu attan kaçınılmasını öneriyor (%${tally.avoidScore} destek).`;
   }
 
   if (topPositive) {
-    const confidenceWord =
-      expertScore >= 70
-        ? "güçlü"
-        : expertScore >= 50
-          ? "orta düzey"
-          : "zayıf";
-
     const avoidNote =
-      avoidCount > 0
-        ? `, ${avoidCount} kaynak ise kaçının diyor`
+      tally.avoidCount > 0
+        ? `, ${tally.avoidCount} kaynak ise kaçının diyor`
         : "";
 
-    return `${sourceCount} kaynaktan ${topPositive.count} tanesi bu atı ${topPositive.word} olarak gösteriyor (${confidenceWord} konsensüs)${avoidNote}.`;
+    return `${sourceCount} kaynaktan ${topPositive.count} tanesi bu atı ${topPositive.word} olarak gösteriyor (%${topPositive.score} destek)${avoidNote}.`;
   }
 
   return `${sourceCount} kaynak bu at hakkında görüş bildirdi ancak net bir yön belirtmedi.`;
@@ -266,6 +259,22 @@ export function aggregateExpertPredictions(
       0.001
     );
 
+  const categoryScore = (
+    weighted: number
+  ): number =>
+    round(
+      (weighted / denominator) * 100,
+      1
+    );
+
+  const bankoScore = categoryScore(weightedBanko);
+  const favoriteScore = categoryScore(weightedFavorite);
+  const strongScore = categoryScore(weightedStrong);
+  const starScore = categoryScore(weightedStar);
+  const rivalScore = categoryScore(weightedRival);
+  const surpriseScore = categoryScore(weightedSurprise);
+  const avoidScore = categoryScore(weightedAvoid);
+
   const netSupport =
     (
       weightedSupport -
@@ -358,6 +367,14 @@ export function aggregateExpertPredictions(
     weightedOpposition:
       round(weightedOpposition),
 
+    bankoScore,
+    favoriteScore,
+    strongScore,
+    starScore,
+    rivalScore,
+    surpriseScore,
+    avoidScore,
+
     expertScore:
       round(
         expertScore,
@@ -375,14 +392,22 @@ export function aggregateExpertPredictions(
     summary:
       buildSummary(
         sourceCount,
-        bankoCount,
-        favoriteCount,
-        strongCount,
-        starCount,
-        rivalCount,
-        surpriseCount,
-        avoidCount,
-        expertScore
+        {
+          bankoCount,
+          favoriteCount,
+          strongCount,
+          starCount,
+          rivalCount,
+          surpriseCount,
+          avoidCount,
+          bankoScore,
+          favoriteScore,
+          strongScore,
+          starScore,
+          rivalScore,
+          surpriseScore,
+          avoidScore
+        }
       )
   };
 }

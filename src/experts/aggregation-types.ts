@@ -38,6 +38,19 @@ export interface ExpertConsensus {
   weightedSupport: number;
   weightedOpposition: number;
 
+  /*
+   * Each weightedX value as a percentage (0-100) of the total
+   * represented source weight — "what share of expert weight
+   * said this" — rather than the raw, unbounded weighted sum.
+   */
+  bankoScore: number;
+  favoriteScore: number;
+  strongScore: number;
+  starScore: number;
+  rivalScore: number;
+  surpriseScore: number;
+  avoidScore: number;
+
   expertScore: number;
   supportConfidence: number;
 
