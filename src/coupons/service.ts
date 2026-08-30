@@ -27,6 +27,10 @@ import {
   upsertSixFoldWindows
 } from "./repository";
 
+import {
+  currentSixFoldTemperature
+} from "./calibration";
+
 
 function normalize(
   value:
@@ -315,6 +319,11 @@ export async function generateSixFoldCoupons(
         )
     });
 
+  const temperature =
+    await currentSixFoldTemperature(
+      env
+    );
+
   const coupons =
     optimizeSixFoldCoupons({
       legs,
@@ -326,7 +335,9 @@ export async function generateSixFoldCoupons(
 
       multiplier:
         input.multiplier ??
-        1
+        1,
+
+      temperature
     });
 
   let snapshotPersisted =

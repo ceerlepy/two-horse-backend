@@ -36,7 +36,7 @@ describe(
 
 
     it(
-      "uses tighter cadence near the next race",
+      "uses tighter cadence near the next race, and hourly far from it",
       () => {
         expect(
           expertCheckIntervalMs(
@@ -51,7 +51,7 @@ describe(
 
         expect(
           expertCheckIntervalMs(
-            90
+            45
           )
         )
           .toBe(
@@ -62,13 +62,52 @@ describe(
 
         expect(
           expertCheckIntervalMs(
-            180
+            90
           )
         )
           .toBe(
             15 *
             60_000
           );
+
+
+        /*
+         * Hours from the next race, nothing about a source's
+         * content changes meaningfully in 15 minutes -- checking
+         * hourly instead is the same freshness for a quarter of
+         * the Workers AI / Browser Rendering cost.
+         */
+        expect(
+          expertCheckIntervalMs(
+            180
+          )
+        )
+          .toBe(
+            60 *
+            60_000
+          );
+      }
+    );
+
+
+    it(
+      "applies the tighter tier exactly at each boundary minute",
+      () => {
+        expect(
+          expertCheckIntervalMs(30)
+        ).toBe(5 * 60_000);
+
+        expect(
+          expertCheckIntervalMs(60)
+        ).toBe(10 * 60_000);
+
+        expect(
+          expertCheckIntervalMs(120)
+        ).toBe(15 * 60_000);
+
+        expect(
+          expertCheckIntervalMs(121)
+        ).toBe(60 * 60_000);
       }
     );
 

@@ -107,11 +107,19 @@ Record<
  * distribution inside each race.
  *
  * Temperature deliberately prevents one large raw
- * score difference from becoming near-certain.
+ * score difference from becoming near-certain. It is
+ * a parameter, not a constant, so real evaluated-coupon
+ * outcomes can calibrate it over time -- see
+ * ./calibration.ts.
  */
+export const DEFAULT_COUPON_TEMPERATURE = 14;
+
 function runnerProbabilities(
   runners:
-    CouponRunner[]
+    CouponRunner[],
+  temperature:
+    number =
+      DEFAULT_COUPON_TEMPERATURE
 ): PreparedRunner[] {
   if (!runners.length) {
     return [];
@@ -127,8 +135,6 @@ function runnerProbabilities(
 
   const best =
     ordered[0].score;
-
-  const temperature = 14;
 
   const weights =
     ordered.map(
@@ -190,7 +196,9 @@ function runnerProbabilities(
 
 function prepareLeg(
   leg:
-    CouponLegInput
+    CouponLegInput,
+  temperature:
+    number
 ): PreparedLeg {
   return {
     raceNumber:
@@ -207,7 +215,8 @@ function prepareLeg(
 
     runners:
       runnerProbabilities(
-        leg.runners
+        leg.runners,
+        temperature
       )
   };
 }
@@ -657,6 +666,15 @@ export function optimizeSixFoldCoupons(
 
     multiplier?:
       number;
+
+    /*
+     * Defaults to DEFAULT_COUPON_TEMPERATURE. A caller
+     * passes a calibrated value once enough evaluated
+     * sixfold legs exist to trust one -- see
+     * ./calibration.ts.
+     */
+    temperature?:
+      number;
   }
 ): OptimizedSixFoldCoupon[] {
   if (
@@ -704,9 +722,17 @@ export function optimizeSixFoldCoupons(
     );
   }
 
+  const temperature =
+    input.temperature ??
+    DEFAULT_COUPON_TEMPERATURE;
+
   const prepared =
     input.legs.map(
-      prepareLeg
+      leg =>
+        prepareLeg(
+          leg,
+          temperature
+        )
     );
 
   return (

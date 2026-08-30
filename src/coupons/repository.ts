@@ -161,7 +161,15 @@ export async function persistSixFoldCoupons(
             leg.horses.map(
               horse =>
                 horse.horseNumber
-            )
+            ),
+
+          /*
+           * Carried through so evaluation can compare this
+           * leg's predicted coverage against its real outcome
+           * -- see ./calibration.ts.
+           */
+          coverageProbability:
+            leg.coverageProbability
         })
       );
 
@@ -340,6 +348,7 @@ export async function evaluatePendingSixFoldCoupons(
       Array<{
         raceNumber: number;
         horseNumbers: number[];
+        coverageProbability?: number;
       }>;
 
     try {
@@ -445,6 +454,13 @@ export async function evaluatePendingSixFoldCoupons(
 
     let hitLegs = 0;
 
+    const calibrationSamples:
+      D1PreparedStatement[] = [];
+
+    const recordedAt =
+      new Date()
+        .toISOString();
+
     for (
       const leg of
       selections
@@ -456,16 +472,55 @@ export async function evaluatePendingSixFoldCoupons(
           )
         );
 
-      if (
+      const legHit =
         winner != null &&
         leg.horseNumbers
           .map(Number)
           .includes(
             winner
-          )
-      ) {
+          );
+
+      if (legHit) {
         hitLegs += 1;
       }
+
+      /*
+       * Only a leg whose generation actually recorded a
+       * predicted coverage becomes a calibration sample --
+       * legacy snapshots from before this field existed are
+       * silently skipped rather than polluting the average
+       * with a fabricated probability.
+       */
+      if (
+        typeof leg.coverageProbability ===
+        "number"
+      ) {
+        calibrationSamples.push(
+          env.DB.prepare(`
+            INSERT INTO sixfold_leg_calibration_samples(
+              snapshot_id,
+              race_number,
+              predicted_probability,
+              hit,
+              recorded_at
+            )
+            VALUES(?,?,?,?,?)
+          `)
+            .bind(
+              row.id,
+              leg.raceNumber,
+              leg.coverageProbability,
+              legHit ? 1 : 0,
+              recordedAt
+            )
+        );
+      }
+    }
+
+    if (calibrationSamples.length) {
+      await env.DB.batch(
+        calibrationSamples
+      );
     }
 
     await env.DB.prepare(`
