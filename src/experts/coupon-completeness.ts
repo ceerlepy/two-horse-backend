@@ -348,3 +348,123 @@ export function inspectExplicitCouponCompleteness(
     missing
   };
 }
+
+
+/*
+ * The prompt already hands the model these anchors as
+ * deterministic fact, but a model can still drop one under
+ * sampling (confirmed live: horseturk's Adana R3 banko). These
+ * anchors were parsed straight out of the source's own text by
+ * regex, not inferred — there is no reason to keep depending on
+ * the model to faithfully echo a fact we already know with
+ * certainty. Inject whatever the model's own output is missing
+ * (city + race + horseNumber only; no name is required for a
+ * canonical match) so a coupon-explicit source can never fail
+ * completeness over the model's own recall.
+ */
+export function backfillExplicitCouponAnchors(
+  raw:RawExpertExtraction,
+  expected:ExplicitCouponExpectedSelection[]
+):RawExpertExtraction {
+  if (!expected.length) {
+    return raw;
+  }
+
+
+  const races =
+    (raw.races ?? [])
+      .map(
+        race => ({
+          ...race,
+
+          selections:[
+            ...(race.selections ?? [])
+          ],
+
+          numberGroups:[
+            ...(race.numberGroups ?? [])
+          ]
+        })
+      );
+
+
+  for (const item of expected) {
+    let race =
+      races.find(
+        value =>
+          normalizedCity(
+            value.city
+          ) ===
+            normalizedCity(
+              item.city
+            ) &&
+          Number(
+            value.raceNumber
+          ) ===
+            item.raceNumber
+      );
+
+
+    if (!race) {
+      race = {
+        city:
+          item.city,
+
+        raceNumber:
+          item.raceNumber,
+
+        selections:[],
+        numberGroups:[]
+      };
+
+      races.push(race);
+    }
+
+
+    const alreadyCovered =
+      race.selections.some(
+        value =>
+          Number(
+            value.horseNumber
+          ) ===
+            item.horseNumber &&
+          (value.labels ?? [])
+            .includes("banko")
+      ) ||
+      race.numberGroups.some(
+        value =>
+          value.label ===
+            "banko" &&
+          (value.horseNumbers ?? [])
+            .map(Number)
+            .includes(
+              item.horseNumber
+            )
+      );
+
+
+    if (alreadyCovered) {
+      continue;
+    }
+
+
+    race.selections.push({
+      horseNumber:
+        item.horseNumber,
+
+      horseName:
+        null,
+
+      comment:
+        null,
+
+      labels:["banko"]
+    });
+  }
+
+
+  return {
+    ...raw,
+    races
+  };
+}
