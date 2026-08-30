@@ -496,95 +496,120 @@ async function processSource(
 
 
   /*
-   * NOTHING is persisted until every current target has
-   * completed extraction + canonical validation.
+   * Each target (typically one per city) is isolated: a single
+   * city throwing during extraction, coming back empty, or
+   * failing canonical validation never discards a sibling
+   * city's already-good result. persistExpertPicksForDate below
+   * only touches the cities present in `all`, so a city that
+   * fails here simply keeps whatever it already had — it is
+   * never wiped by another city's success and never blocks it.
    */
   for (const url of resolution.targets) {
-    const extracted =
-      await extractExperts(
-        env,
-        url,
-        source.source_name,
-        source.source_key,
-        raceDate
-      );
+    try {
+      const extracted =
+        await extractExperts(
+          env,
+          url,
+          source.source_name,
+          source.source_key,
+          raceDate
+        );
 
 
-    const raw =
-      extracted.extraction
-        .picks;
+      const raw =
+        extracted.extraction
+          .picks;
 
 
-    if (!raw.length) {
+      if (!raw.length) {
+        attempts.push({
+          url,
+
+          outcome:
+            "SEMANTIC_EMPTY",
+
+          method:
+            extracted.method,
+
+          diagnostics:
+            extracted.diagnostics
+        });
+
+        continue;
+      }
+
+
+      const validated =
+        await validateExpertPicks(
+          env,
+          raw,
+          raceDate
+        );
+
+
       attempts.push({
         url,
 
-        outcome:
-          "SEMANTIC_EMPTY",
-
         method:
           extracted.method,
+
+        extracted:
+          raw.length,
+
+        validated:
+          validated.length,
+
+        outcome:
+          validated.length ===
+            raw.length
+            ? "CANONICAL_MATCH"
+            : "CANONICAL_INCOMPLETE",
 
         diagnostics:
           extracted.diagnostics
       });
 
 
-      return {
-        source:
+      if (
+        !validated.length ||
+        validated.length !==
+          raw.length
+      ) {
+        await recordExpertRefreshTrace(
+          env,
           source.source_key,
+          "BUNDLE_REJECTED",
+          url,
+          {
+            reason:
+              "canonical-incomplete",
 
-        status:
-          "no-current-card",
+            attempts
+          }
+        );
 
-        count:0,
-
-        attempts
-      };
-    }
+        continue;
+      }
 
 
-    const validated =
-      await validateExpertPicks(
-        env,
-        raw,
-        raceDate
+      all.push(
+        ...validated
       );
 
+    } catch (error) {
+      attempts.push({
+        url,
 
-    attempts.push({
-      url,
+        outcome:
+          "EXTRACTION_ERROR",
 
-      method:
-        extracted.method,
-
-      extracted:
-        raw.length,
-
-      validated:
-        validated.length,
-
-      outcome:
-        validated.length ===
-          raw.length
-          ? "CANONICAL_MATCH"
-          : "CANONICAL_INCOMPLETE",
-
-      diagnostics:
-        extracted.diagnostics
-    });
+        error:
+          errorMessage(
+            error
+          )
+      });
 
 
-    /*
-     * Fail closed.
-     *
-     * Partial/new bad data never replaces old good rows.
-     */
-    if (
-      !validated.length ||
-      validated.length !==
-        raw.length
-    ) {
       await recordExpertRefreshTrace(
         env,
         source.source_key,
@@ -592,30 +617,32 @@ async function processSource(
         url,
         {
           reason:
-            "canonical-incomplete",
+            "extraction-error",
+
+          error:
+            errorMessage(
+              error
+            ),
 
           attempts
         }
       );
-
-
-      return {
-        source:
-          source.source_key,
-
-        status:
-          "no-current-card",
-
-        count:0,
-
-        attempts
-      };
     }
+  }
 
 
-    all.push(
-      ...validated
-    );
+  if (!all.length) {
+    return {
+      source:
+        source.source_key,
+
+      status:
+        "no-current-card",
+
+      count:0,
+
+      attempts
+    };
   }
 
 

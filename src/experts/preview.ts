@@ -448,13 +448,6 @@ function buildPart5Acceptance(
   const restrictionExpected=
     false;
 
-  const partialCoverageAllowed=
-    resolution
-      ?.diagnostics
-      ?.policy
-      ?.allowPartialCoverage ===
-    true;
-
   const validatedCities=
     new Set<string>();
 
@@ -492,9 +485,14 @@ function buildPart5Acceptance(
             )
         );
 
-  const allDocumentsCanonical=
-    attempts.length>0 &&
-    attempts.every(
+  /*
+   * Production now persists whichever cities validate rather
+   * than discarding everything over one failing city (see
+   * processSource in service.ts) — the acceptance test mirrors
+   * that: at least one fully-canonical document is enough.
+   */
+  const anyDocumentCanonical=
+    attempts.some(
       a=>
         a?.completeCanonical===
         true
@@ -562,11 +560,7 @@ function buildPart5Acceptance(
             counts?.total ??
             0
           )>0 &&
-          allDocumentsCanonical &&
-          (
-            missingValidatedCities.length===0 ||
-            partialCoverageAllowed
-          )
+          anyDocumentCanonical
         );
 
   return {
@@ -610,12 +604,10 @@ function buildPart5Acceptance(
 
     missingValidatedCities,
 
-    allDocumentsCanonical:
+    anyDocumentCanonical:
       restrictionExpected
         ? null
-        : allDocumentsCanonical,
-
-    partialCoverageAllowed,
+        : anyDocumentCanonical,
 
     totalValidated:
       Number(
