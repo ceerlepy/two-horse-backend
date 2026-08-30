@@ -24,9 +24,18 @@ import {
  * The reverse (underconfident) sharpens it. A single leg is one
  * sample; a whole coupon is six.
  */
-export const MIN_CALIBRATION_SAMPLES = 200;
+/*
+ * Deliberately low: at ~6 samples per evaluated coupon (one six-fold
+ * = six legs), 200 would need ~33 fully-evaluated coupons before this
+ * moved at all, which this feature's real usage so far (6 generated,
+ * 3 evaluated, ever) may never reach. 50 lets a first, heavily-
+ * shrunk signal join in after roughly 8 coupons instead -- the
+ * reliability ramp below still keeps that early signal small, it
+ * just doesn't wait for a volume this feature hasn't shown yet.
+ */
+export const MIN_CALIBRATION_SAMPLES = 50;
 
-export const CALIBRATION_FULL_RELIABILITY_SAMPLES = 700;
+export const CALIBRATION_FULL_RELIABILITY_SAMPLES = 300;
 
 const MAX_TEMPERATURE_SHIFT = 0.30;
 
