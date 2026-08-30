@@ -1,3 +1,23 @@
+/*
+ * Refresh cadence as a distance-to-race tier table, ordered nearest
+ * first. Each tier's maxMinutes is the boundary UP TO which that
+ * interval applies; the first matching tier wins. Both Workers AI
+ * (extraction) and Browser Rendering (the puppeteer/scrape rung of
+ * the acquisition ladder) are billed per use, and a far-off race
+ * gains nothing from checking every 15 minutes -- nothing about a
+ * source's content changes meaningfully hours before a card starts.
+ * Tune cost/freshness here, nowhere else.
+ */
+export const EXPERT_CHECK_CADENCE_TIERS: Array<{
+  maxMinutes: number;
+  intervalMinutes: number;
+}> = [
+  { maxMinutes: 30, intervalMinutes: 5 },
+  { maxMinutes: 60, intervalMinutes: 10 },
+  { maxMinutes: 120, intervalMinutes: 15 },
+  { maxMinutes: Infinity, intervalMinutes: 60 }
+];
+
 export function expertCheckIntervalMs(
   minutesToNextRace:
     number | null
@@ -17,26 +37,17 @@ export function expertCheckIntervalMs(
     return null;
   }
 
+  const tier =
+    EXPERT_CHECK_CADENCE_TIERS.find(
+      candidate =>
+        minutesToNextRace <=
+        candidate.maxMinutes
+    ) ??
+    EXPERT_CHECK_CADENCE_TIERS[
+      EXPERT_CHECK_CADENCE_TIERS.length - 1
+    ];
 
-  if (
-    minutesToNextRace <=
-    30
-  ) {
-    return 5 *
-      60_000;
-  }
-
-
-  if (
-    minutesToNextRace <=
-    120
-  ) {
-    return 10 *
-      60_000;
-  }
-
-
-  return 15 *
+  return tier.intervalMinutes *
     60_000;
 }
 
