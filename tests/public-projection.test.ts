@@ -150,10 +150,31 @@ describe(
           "expertPredictions" in entry
         ).toBe(false);
 
+        expect(entry.expertPredictionCount)
+          .toBe(1);
+
         expect(entry.runners)
           .toEqual([
             { horse_number: 1 }
           ]);
+      }
+    );
+
+
+    it(
+      "reports zero for an entry with no expert predictions",
+      () => {
+        const [entry] =
+          toPublicHistory([
+            {
+              raceDate: "2026-08-29",
+              city: "Adana",
+              raceNumber: 1
+            }
+          ]);
+
+        expect(entry.expertPredictionCount)
+          .toBe(0);
       }
     );
   }
