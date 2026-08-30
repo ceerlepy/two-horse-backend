@@ -1092,33 +1092,114 @@ export async function extractExperts(
       "afa";
 
 
-  const semantic =
-    await extractExpertJsonWithWorkersAi(
-      env,
-      document.semanticText,
-      prompt,
-      {
-        requireRace,
+  /*
+   * A completeness failure here means the model's own JSON
+   * output dropped one deterministic item (a stated banko pick,
+   * one race panel) that the source text plainly contains — a
+   * known Workers AI sampling flake, not a pipeline defect,
+   * confirmed live against horseturk (Adana R3 banko) and afa
+   * (İstanbul race 9). A single fresh resample gives the model
+   * an independent second chance before giving up.
+   */
+  const maxExtractionAttempts =
+    2;
 
-        /*
-         * Explicit coupon sources can contain bare leg grids.
-         * Do not force AI to manufacture a semantic selection
-         * in every returned race.
-         */
-        requireSelectionPerRace
-      }
-    );
+  let semantic:
+    Awaited<
+      ReturnType<
+        typeof extractExpertJsonWithWorkersAi
+      >
+    > | null =
+    null;
+
+  let afaCompleteness:
+    ReturnType<
+      typeof inspectAfaCompleteness
+    > | null =
+    null;
+
+  let completeness:any =
+    null;
+
+  for (
+    let attempt=1;
+    attempt<=maxExtractionAttempts;
+    attempt++
+  ) {
+    semantic =
+      await extractExpertJsonWithWorkersAi(
+        env,
+        document.semanticText,
+        prompt,
+        {
+          requireRace,
+
+          /*
+           * Explicit coupon sources can contain bare leg grids.
+           * Do not force AI to manufacture a semantic selection
+           * in every returned race.
+           */
+          requireSelectionPerRace
+        }
+      );
 
 
-  const afaCompleteness =
-    sourceKey ===
-      "afa"
-      ? inspectAfaCompleteness(
-          semantic.value,
-          document.semanticText,
-          targetCities
-        )
-      : null;
+    afaCompleteness =
+      sourceKey ===
+        "afa"
+        ? inspectAfaCompleteness(
+            semantic.value,
+            document.semanticText,
+            targetCities
+          )
+        : null;
+
+
+    completeness =
+      liderformMode
+        ? {
+            profile:
+              "liderform-main",
+
+            ...inspectLiderformCompleteness(
+              semantic.value,
+              document.normalized.text,
+              targetCities
+            )
+          }
+
+        : couponExpected.length
+          ? {
+              profile:
+                "coupon-explicit",
+
+              ...inspectExplicitCouponCompleteness(
+                semantic.value,
+                couponExpected
+              )
+            }
+
+          : null;
+
+
+    const incomplete =
+      (
+        afaCompleteness &&
+        !afaCompleteness.complete
+      ) ||
+      (
+        completeness &&
+        !completeness.complete
+      );
+
+    if (
+      !incomplete ||
+      attempt ===
+        maxExtractionAttempts
+    ) {
+      break;
+    }
+  }
 
 
   if (
@@ -1132,33 +1213,6 @@ export async function extractExperts(
       )
     );
   }
-
-
-  const completeness:any =
-    liderformMode
-      ? {
-          profile:
-            "liderform-main",
-
-          ...inspectLiderformCompleteness(
-            semantic.value,
-            document.normalized.text,
-            targetCities
-          )
-        }
-
-      : couponExpected.length
-        ? {
-            profile:
-              "coupon-explicit",
-
-            ...inspectExplicitCouponCompleteness(
-              semantic.value,
-              couponExpected
-            )
-          }
-
-        : null;
 
 
   if (
@@ -1175,6 +1229,13 @@ export async function extractExperts(
       JSON.stringify(
         completeness
       )
+    );
+  }
+
+
+  if (!semantic) {
+    throw new Error(
+      "EXPERT_EXTRACTION_NEVER_ATTEMPTED"
     );
   }
 
