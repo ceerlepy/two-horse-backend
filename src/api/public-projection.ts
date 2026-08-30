@@ -6,7 +6,38 @@
  * learning pipeline, which both need the raw per-source rows, so
  * the redaction happens here, once, at the one route that hands
  * the result to the public.
+ *
+ * shadowModelScore is a full second copy of modelScore's shape --
+ * production's own comment on it says it is "never served as
+ * production prediction before gate", i.e. it exists purely for
+ * server-side shadow-mode comparison against the learning-gated
+ * score, not for any client to read. It was ~27% of /api/today's
+ * runner payload for zero behavioral purpose to a caller.
  */
+/*
+ * race_history's stored snapshot_json is the exact pre-race payload,
+ * including the raw per-source expertPredictions rows (source_key,
+ * comment, content_hash) that toPublicMeetings above exists to keep
+ * away from any client. /api/history serves those snapshots directly
+ * and never passed through that redaction -- this closes the same
+ * gap for historical entries.
+ */
+export function toPublicHistory(
+  entries: any[]
+): any[] {
+  return entries.map(
+    entry => {
+      const {
+        expertPredictions,
+        ...publicEntry
+      } = entry;
+
+      return publicEntry;
+    }
+  );
+}
+
+
 export function toPublicMeetings(
   meetings: any[]
 ): any[] {
@@ -24,6 +55,7 @@ export function toPublicMeetings(
                 (runner: any) => {
                   const {
                     expertPredictions,
+                    shadowModelScore,
                     ...publicRunner
                   } = runner;
 

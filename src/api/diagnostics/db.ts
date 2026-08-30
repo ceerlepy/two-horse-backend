@@ -13,6 +13,30 @@ export function validIdentifier(
     .test(value);
 }
 
+/*
+ * D1/Cloudflare-managed bookkeeping tables. They pass validIdentifier
+ * and the SQL's own sqlite_% filter (neither name starts with that
+ * prefix), so without this they show up in db/counts next to the
+ * app's own tables -- noise with no application meaning, not a
+ * signal about the app's data.
+ */
+const INTERNAL_TABLES =
+  new Set([
+    "_cf_KV",
+    "d1_migrations"
+  ]);
+
+export function filterAppTableNames(
+  names: string[]
+): string[] {
+  return names
+    .filter(validIdentifier)
+    .filter(
+      name =>
+        !INTERNAL_TABLES.has(name)
+    );
+}
+
 export function boundedLimit(
   value: string | null,
   fallback = 50,
@@ -50,15 +74,17 @@ export async function tableNames(
       ORDER BY name
     `).all<any>();
 
-  return (
-    rows.results ??
-    []
-  )
-    .map(
-      row =>
-        String(row.name)
+  const names =
+    (
+      rows.results ??
+      []
     )
-    .filter(validIdentifier);
+      .map(
+        row =>
+          String(row.name)
+      );
+
+  return filterAppTableNames(names);
 }
 
 export async function scalarCount(

@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import { json, errorMessage, turkeyDate } from "../shared";
 import { getToday } from "../storage/program-repository";
-import { toPublicMeetings } from "./public-projection";
+import { toPublicMeetings, toPublicHistory } from "./public-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
 import {
   refreshExpertsIfDue,
@@ -160,7 +160,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
 
- if(url.pathname==="/api/history") return json({history:await getHistory(env)});
+ if(url.pathname==="/api/history") {
+  const limit=Math.max(1,Math.min(50,Math.floor(Number(url.searchParams.get("limit"))||20)));
+  const offset=Math.max(0,Math.floor(Number(url.searchParams.get("offset"))||0));
+  const {entries,total}=await getHistory(env,{limit,offset});
+  return json({history:toPublicHistory(entries),total,limit,offset});
+ }
  if(url.pathname==="/api/admin/repair-historical-dates" && request.method==="POST") {
   try {
    const body = await request.json<any>();
