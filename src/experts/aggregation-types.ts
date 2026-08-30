@@ -42,4 +42,5 @@ export interface ExpertConsensus {
   supportConfidence: number;
 
   labels: string[];
+  summary: string;
 }

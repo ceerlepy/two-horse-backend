@@ -37,6 +37,84 @@ function clamp(
   );
 }
 
+const POSITIVE_CATEGORY_WORDS: Array<{
+  count: (c: {
+    bankoCount: number;
+    favoriteCount: number;
+    strongCount: number;
+    starCount: number;
+    surpriseCount: number;
+    rivalCount: number;
+  }) => number;
+  word: string;
+}> = [
+  { count: (c) => c.bankoCount, word: "banko" },
+  { count: (c) => c.favoriteCount, word: "favori" },
+  { count: (c) => c.strongCount, word: "güçlü aday" },
+  { count: (c) => c.starCount, word: "yıldız aday" },
+  { count: (c) => c.surpriseCount, word: "sürpriz aday" },
+  { count: (c) => c.rivalCount, word: "rakip aday" }
+];
+
+/*
+ * A short, deterministic Turkish sentence built only from the
+ * already-computed counts and score — never from source names or
+ * raw scraped comments, so it can't leak which sites are behind it.
+ */
+function buildSummary(
+  sourceCount: number,
+  bankoCount: number,
+  favoriteCount: number,
+  strongCount: number,
+  starCount: number,
+  rivalCount: number,
+  surpriseCount: number,
+  avoidCount: number,
+  expertScore: number
+): string {
+  if (sourceCount === 0) {
+    return "";
+  }
+
+  const topPositive =
+    POSITIVE_CATEGORY_WORDS
+      .map(entry => ({
+        word: entry.word,
+        count: entry.count({
+          bankoCount,
+          favoriteCount,
+          strongCount,
+          starCount,
+          surpriseCount,
+          rivalCount
+        })
+      }))
+      .filter(entry => entry.count > 0)
+      .sort((a, b) => b.count - a.count)[0];
+
+  if (avoidCount > 0 && avoidCount >= (topPositive?.count ?? 0)) {
+    return `${sourceCount} kaynaktan ${avoidCount} tanesi bu attan kaçınılmasını öneriyor.`;
+  }
+
+  if (topPositive) {
+    const confidenceWord =
+      expertScore >= 70
+        ? "güçlü"
+        : expertScore >= 50
+          ? "orta düzey"
+          : "zayıf";
+
+    const avoidNote =
+      avoidCount > 0
+        ? `, ${avoidCount} kaynak ise kaçının diyor`
+        : "";
+
+    return `${sourceCount} kaynaktan ${topPositive.count} tanesi bu atı ${topPositive.word} olarak gösteriyor (${confidenceWord} konsensüs)${avoidNote}.`;
+  }
+
+  return `${sourceCount} kaynak bu at hakkında görüş bildirdi ancak net bir yön belirtmedi.`;
+}
+
 export function aggregateExpertPredictions(
   predictions: ExpertPredictionRow[]
 ): ExpertConsensus {
@@ -292,6 +370,19 @@ export function aggregateExpertPredictions(
         3
       ),
 
-    labels
+    labels,
+
+    summary:
+      buildSummary(
+        sourceCount,
+        bankoCount,
+        favoriteCount,
+        strongCount,
+        starCount,
+        rivalCount,
+        surpriseCount,
+        avoidCount,
+        expertScore
+      )
   };
 }
