@@ -30,8 +30,22 @@ export async function cleanup(env:Env):Promise<void>{
 }
 
 export async function getHistory(
- env:Env
-):Promise<any[]>{
+ env:Env,
+ pagination:{limit:number;offset:number}={limit:20,offset:0}
+):Promise<{entries:any[];total:number}>{
+ const total=
+  Number(
+   (
+    await env.DB.prepare(`
+     SELECT COUNT(*) total
+     FROM race_history
+     WHERE race_date >=
+       date('now','+3 hours','-2 days')
+    `).first<any>()
+   )?.total ??
+   0
+  );
+
  const rows=
   (
    await env.DB.prepare(`
@@ -43,7 +57,13 @@ export async function getHistory(
       race_date DESC,
       city,
       race_number
-   `).all<any>()
+    LIMIT ? OFFSET ?
+   `)
+    .bind(
+     pagination.limit,
+     pagination.offset
+    )
+    .all<any>()
   ).results ?? [];
 
  const output:any[]=[];
@@ -117,5 +137,5 @@ export async function getHistory(
   );
  }
 
- return output;
+ return {entries:output,total};
 }
