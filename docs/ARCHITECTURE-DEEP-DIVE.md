@@ -1573,3 +1573,357 @@ CONTROL PLANE
 router + auth + diagnostics + logs + versions + refresh state.
 
 Bu beş plane birlikte sistemi oluşturur.
+
+---
+
+# 51. Expert source health: effective status vs raw status
+
+Bir source için tek bir "healthy" kolonu yeterli değildir.
+
+processSource'un birçok non-throwing çıkış yolu vardır:
+
+- kart bugün yayınlanmamış
+- her extraction denemesi access-restricted
+- extraction çalıştı ama kullanılabilir pick üretmedi
+
+Bu yollar eskiden health_status'u değiştirmiyordu.
+
+Sonuç: üç gün önce gerçek bir başarı yaşamış bir source, bugün hiçbir
+şey üretmemesine rağmen "healthy" görünüyordu.
+
+markExpertOutcome bu çıkış yollarının her birinde gerçek durumu yazar:
+
+blocked (access-restricted)
+parse-error (extraction denendi, çıkarılamadı)
+no-picks-today (kart yok, ama source'un kendisi bozuk değil)
+
+last_success_at ve content_hash bu outcome'lardan etkilenmez — onlar
+yalnızca source gerçekten katkı sağladığında güncellenir.
+
+## Effective status
+
+Raw health_status tek başına yanıltıcı olabilir: bir source bir kez
+"healthy" yazmış ve bir daha hiç kontrol edilmemiş olabilir.
+
+deriveEffectiveSourceStatus şu kuralı uygular:
+
+health_status = healthy VE bugün kontrol edilmemiş → effectiveStatus = stale
+
+Diğer her durum (no-picks-today dahil) olduğu gibi kalır — no-picks-today
+dürüst bir sonuçtur, "bozuk" değildir ve staleSources/failedSources
+sayaçlarına girmez.
+
+summarizeExpertSourceHealth bunu tüm enabled source'lar için hesaplar ve
+availableSources / contributingSources / staleSources / failedSources
+özetini üretir.
+
+/api/debug/health ve /api/debug/sources bu özeti kullanır — artık
+degradedSources sayısı raw kolon değil, effective status'tan gelir.
+
+---
+
+# 52. Form/HP eksikliği: gerçek boşluk mu, beklenen boşluk mu
+
+~%30 form ve ~%33 HP eksiklik oranı ilk bakışta parser regresyonu gibi
+görünür. Canlı D1 incelemesi iki farklı, zararsız TJK gerçeğini ortaya
+çıkardı:
+
+1. Debut/maiden yarış — o yarıştaki HER runner'da form ve HP birlikte
+   eksik. Binary desen: ya hepsi ya hiçbiri.
+
+2. Kısa geçmişli at — recent_form_raw yalnızca 1-2 karakter (örn. "7")
+   olan bir atın TJK henüz handikap puanı atamamış olması normaldir.
+
+Gerçek bir regresyon farklı görünür: bazı runner'larda eksik, bazılarında
+yok, ortak bir açıklaması olmadan — dağınık bir alt küme.
+
+classifyRaceFieldCoverage bu ayrımı yapar:
+
+missingCount = 0            → full-coverage
+missingCount >= totalRunners → likely-not-published  (tüm yarış — 1. senaryo)
+0 < missingCount < total     → partial-gap            (dağınık — gerçek sinyal)
+
+HP için ek bir incelik var: unexplainedMissingHp yalnızca
+recent_form_raw uzunluğu 2'den büyük olan (yani gerçek yarış geçmişi
+olan) runner'ların HP eksikliğini sayar — 2. senaryoyu (kısa geçmiş)
+alarm listesinden çıkarır.
+
+/api/debug/data-quality artık raceFieldCoverage + unexplainedGaps
+alanlarını döner: bir sonraki gerçek regresyon, korkutucu görünen ama
+zararsız bir toplam yüzdenin arkasına gizlenmek yerine görünür olur.
+
+---
+
+# 53. Field signal: kısmi kapsamın haksız avantaj yaratması
+
+Bir runner'ın kendi field_score'unun null olması zaten doğru işleniyordu
+(bölüm 28'deki available-weight renormalization sayesinde) — eksik
+sinyal sıfır olarak cezalandırılmıyordu.
+
+Ama gözden kaçan farklı bir sorun vardı: aynı yarışta yalnızca 1-2
+runner'ın field sinyali varken diğer 8-9'unda hiç yoksa, o 1-2 runner
+diğerlerinin hiç sahip olmadığı bir skorlama boyutunu taşıyordu — bu
+adil bir karşılaştırma değil, çünkü kim daha iyi at olduğuyla ilgisi
+yok.
+
+suppressPartialFieldCoverage race-wide bir eşik uygular:
+
+coveredRunners / totalRunners < 0.5 → o yarıştaki HER runner'ın
+field_score'u null'a çekilir — yalnızca eksik olanların değil, zaten
+sahip olanların da.
+
+>= 0.5 kapsam varsa hiçbir şey değişmez; sahip olanlar sahip kalır,
+olmayanlar zaten null'dı.
+
+fieldSignal.tjkScore / expertScore ham veri olarak diagnostics için
+kalır — yalnızca skorlamaya giren `score` alanı bastırılır.
+
+Canlıda doğrulandı: aynı gün içinde bazı yarışlar %0 kapsamda (hepsi
+null), bazıları %75-91 kapsamda (gerçek skorlar) — ara bir durum
+(örneğin %20 kapsam açıkta kalmış) gözlenmedi.
+
+/api/debug/data-quality artık fieldSignalCoverage +
+partialFieldCoverageRaces alanlarını da döner.
+
+---
+
+# 54. Üç ayrı öğrenme/kalibrasyon mekanizması
+
+"Öğrenme" tek bir şey değildir — sistemde üç bağımsız, farklı
+granülaritede, farklı gate'lere sahip mekanizma vardır.
+
+## 54.1 Uzman kaynak güvenilirlik kalibrasyonu
+
+Her source'un pozitif dediği (banko/favori/güçlü/vs) atların gerçek
+kazanma/ilk-3 oranı, TÜM runner'ların global ortalamasıyla kıyaslanır.
+
+relativeQuality = 0.65 × (winRate / globalWinRate)
+                + 0.35 × (top3Rate / globalTop3Rate)
+
+reliability = clamp((sampleSize - 29) / 121, 0, 1)   → 150 örnekte tam güven
+
+adjustment = clamp((relativeQuality - 1) × 0.15 × reliability, -0.15, 0.15)
+
+multiplier = 1 + adjustment
+
+Bu multiplier, o source'un her tahmininin base_weight'ine çarpılır —
+expertConsensus'a, oradan da modelScore'un "expert" bileşenine (ağırlık
+%22) girer. Her an aktif, gate MIN_SAMPLES yok — sadece reliability
+küçük örneklerde etkiyi zaten küçültüyor.
+
+## 54.2 Uzman kategori kalibrasyonu
+
+Aynı mantık, ama kıyaslama global değil kategori-içi: bir source'un
+"rakip" pickleri, TÜM source'ların "rakip" picklerinin ortalamasıyla
+kıyaslanır — "banko" ile "rakip"i aynı çıtaya koymamak için.
+
+Her kategori kendi MIN_SAMPLES eşiğine sahiptir:
+
+banko 15, favori 25, güçlü 25, yıldız 20, rakip 30, sürpriz 30
+
+Eşik altında multiplier = 1 (etkisiz). Üstünde reliability
+(sampleSize - minSamples + 1) / 100 ile büyür, maksimum ±%12.
+
+Bir source genelde iyi ama belirli bir kategoride sıradan olabilir —
+bu mekanizma bunu ayrı ayrı yakalar.
+
+## 54.3 At/jokey/çift bağlam öncülleri (context priors)
+
+En granüler seviye: "bu at, bu şehir + bu pist + bu mesafe bandında
+tarihsel olarak nasıl performans gösterdi."
+
+Gruplama entity_key + city + track + distance_band üzerinden yapılır —
+yalnızca "at" değil, aynı koşul altındaki geçmiş.
+
+minSamples: at 6, jokey 20, çift (at+jokey) 5.
+
+Şu an (bu yazının yazıldığı tarihte) HİÇBİR entity bu eşiği
+geçmiyor — en yüksek örnek sayısı at için 2, çift için 2, jokey için
+12/20. Sebep bug değil: aynı atın aynı şehir+pist+mesafe kombinasyonunda
+6 kez koşması, birkaç haftalık veri geçmişiyle istatistiksel olarak
+neredeyse imkansız.
+
+Bu mekanizma production'da learningAdjustment olarak (frontend'de
+"🧠 Learning etkisi") gösterilir — şu an neredeyse her at için +0.0,
+ve bu doğru/dürüst bir gösterimdir, mekanizma bozuk olduğu için değil,
+henüz yeterli tekrar eden veri birikmediği için.
+
+## Ortak tasarım deseni
+
+Üçü de aynı iskeleti paylaşır:
+
+MIN_SAMPLES eşiği altında etkisiz (multiplier=1 veya adjustment=0)
+Eşik üstünde reliability lineer büyür
+Maksimum etki her zaman sabit bir tavana clamp'lenir
+
+Bu, "yetersiz veriyle production'ı bozma" ilkesinin (bkz. bölüm 35,
+"gate") somut, tekrar eden uygulamasıdır.
+
+---
+
+# 55. Sixfold kupon değerlendirmesinin tamlığı
+
+evaluatePendingSixFoldCoupons her bacağın kazananını
+learning_races/learning_runner_features üzerinden çözer.
+
+Sorun: bu tablo yalnızca gerçekten ingest edilmiş toplantılar için
+doldurulur. Bir toplantının learning_races'e hiç girmemiş olması
+(ingestion hiç başlamamış, ya da satır daha önce temizlenmiş) o
+kuponun ASLA çözülemeyeceği anlamına gelir — ama eski kod bunu sonsuza
+kadar sessizce yeniden denemeye devam ediyordu.
+
+Canlı kanıt: production'daki 3 bekleyen sixfold snapshot'ın hepsi
+aynı toplantıya (İstanbul, 2026-08-20) aitti ve bu toplantının
+learning_races, learning_runner_features, official_result_runs
+tablolarında SIFIR satırı vardı — ingestion o toplantı için hiç
+başlamamıştı.
+
+Çözüm: SIXFOLD_STALE_AFTER_DAYS (5 gün) sonra hâlâ çözülememiş bir
+snapshot, tekrar deneme sayısına değil yalnızca kendi yaşına bakılarak
+unresolved_reason = 'RESULTS_UNAVAILABLE' ile işaretlenir ve pending
+sorgusundan düşer. Yavaş ingest eden bir toplantı asla cezalandırılmaz —
+yalnızca gerçekten hiç çözülemeyecek olan işaretlenir.
+
+/api/debug/pipeline → sixfoldCouponHealth: evaluated/pending/
+unresolved/overdueUnclassified. overdueUnclassified > 0 ise cron
+çalışmıyor demektir — sonuçların yavaş gelmesi değil.
+
+---
+
+# 56. Sixfold olasılık öz-kalibrasyonu
+
+optimizeSixFoldCoupons'un softmax'ı (runner score'unu probability'ye
+çeviren fonksiyon) bir "temperature" parametresi kullanır — sabit 14
+değeriyle, hiç kalibre edilmemiş olarak.
+
+Bölüm 30'da bu parametrenin "sıradan bir constant değil, behavior
+policy" olduğu söyleniyordu — ama gerçekte hiçbir politika onu
+yönetmiyordu. Kuponun gerçek sonuçlarından hiçbir geri besleme yoktu.
+
+Şimdi var:
+
+Her değerlendirilen sixfold bacağı bir kalibrasyon örneğidir:
+tahmin edilen coverageProbability + gerçekte tuttu mu (0/1).
+
+recalibrateSixFoldProbabilities bu örnekleri toplar:
+
+bias = actualHitRate - predictedAvgCoverage
+
+Negatif bias (gerçek < tahmin) → overconfident → temperature YÜKSELİR
+→ dağılım düzleşir → aynı seçim için gelecekte daha düşük/dürüst
+coverageProbability raporlanır VE optimizer aynı hedef kapsamı
+yakalamak için bacak başına doğal olarak daha fazla at seçer.
+
+Pozitif bias → underconfident → temperature DÜŞER → dağılım keskinleşir.
+
+Gate: MIN_CALIBRATION_SAMPLES (50) altında etkisiz; 300 örnekte tam
+güven; maksimum kayma ±%30.
+
+Bu yazının yazıldığı tarihte sistemde toplam 6 sixfold kupon üretilmiş
+(3'ü değerlendirilmiş) — yani kalibrasyon şu an inert (varsayılan
+temperature'da). Gerçek kullanım hacmi arttıkça kendiliğinden devreye
+girer — bölüm 54'teki üç mekanizmayla aynı temkinli desen.
+
+/api/debug/pipeline → sixfoldCalibration: sampleCount, predictedAvgCoverage,
+actualHitRate, temperature, status.
+
+---
+
+# 57. Mobil payload disiplini
+
+/api/today'nin runner payload'ının %27'si shadowModelScore'du —
+production learning gate'i geçmemiş "shadow" skorun tam bir kopyası,
+sunucu-içi karşılaştırma için var olan, hiçbir client'ın okumadığı bir
+alan. toPublicMeetings artık bunu da expertPredictions gibi süzüyor.
+
+/api/history hiç böyle bir süzgeçten geçmiyordu — race_history'nin ham
+snapshot_json'ı, source_key ve comment dahil ham expertPredictions
+satırlarını doğrudan public'e servis ediyordu. toPublicHistory bunu
+kapatır — ama expertPredictionCount'u (kaç uzman satırı olduğunu, kim
+olduklarını değil) korur, çünkü Android History ekranı bu sayıyı
+gösterir. Sayıyı silip array'i kaldırmak bu ekranı sessizce kırardı —
+tam da olan buydu, bir sonraki turda bulunup düzeltildi.
+
+/api/history artık limit/offset ile sayfalanıyor (varsayılan 20,
+maksimum 50) — tüm 2 günlük pencereyi her seferinde döndürmek yerine.
+
+/api/debug/db/counts artık _cf_KV ve d1_migrations gibi D1'in kendi
+iç tablolarını listelemiyor — bunlar validIdentifier'dan geçiyordu ama
+uygulamanın veri modeliyle ilgisi yok.
+
+---
+
+# 58. Refresh cadence: maliyet politikası olarak
+
+expertCheckIntervalMs, yarışa kalan süreye göre bir tier tablosu
+kullanır — sabit if/else zinciri değil, tek bir dizi:
+
+>2 saat  → 360 dk (6 saat)
+2-1 saat → 15 dk
+1 saat-30 dk → 10 dk
+<30 dk   → 5 dk
+
+Her check hem Workers AI (extraction) hem Browser Rendering (puppeteer/
+scrape basamağı) tüketebilir — ikisi de faturalanır. Yarışa uzakken
+sık kontrol hiçbir tazelik kazandırmaz; bir source'un yayınladığı
+içerik saatler içinde anlamlı şekilde değişmez.
+
+6 saatlik tier iki kısıt arasında bir denge: "yarışa 2 saatten uzakken
+hiç kontrol etme" maliyeti en aza indirir ama sabahtan geç yayınlanan
+bir kartın saatlerce keşfedilmemiş kalmasına yol açabilir — bu
+uygulamanın temel değeri günün uzman tahminlerini göstermek, yalnızca
+son 2 saatte açanlara değil. 6 saat, günde birkaç kontrol garantiler.
+
+Bu tablo aynı zamanda expertFailureBackoffMs ile birlikte çalışır:
+art arda başarısız bir source, kendi ayrı backoff'una girer (15/30/60
+dk, yarışa yakınken daha kısa tavanlı) — bozuk bir source her cron
+tick'inde yeniden denenmez.
+
+---
+
+# 59. Diagnostics yüzeyi — 2026-08 eklemeleri
+
+/api/debug/health
+
+degradedSources artık effectiveStatus'tan (bölüm 51).
+
+/api/debug/data-quality
+
+raceFieldCoverage, unexplainedGaps (bölüm 52)
+fieldSignalCoverage, partialFieldCoverageRaces (bölüm 53)
+
+/api/debug/pipeline
+
+sixfoldCouponHealth (bölüm 55)
+sixfoldCalibration (bölüm 56)
+
+/api/debug/db/counts
+
+_cf_KV ve d1_migrations artık filtreleniyor (bölüm 57)
+
+Bu alanların hepsi mevcut endpoint'lere eklendi — yeni bir endpoint
+açılmadı. Diagnostics yüzeyini küçük tutma ilkesi (bölüm 2.4) korunuyor.
+
+---
+
+# 60. Güncel durum notu
+
+Bu bölümler (51-60), production fix planının Part 6-12'sini ve onu
+takip eden ek işi (field score açıklaması, üç öğrenme mekanizmasının
+derinlemesine belgelenmesi, sixfold öz-kalibrasyonu, refresh cadence
+maliyet ayarı) belgeler.
+
+Bilinen, kasıtlı olarak dokunulmamış durumlar:
+
+horse_form_history / horse_form_refresh_state — kodu yazılmış,
+hiçbir cron'a bağlanmamış, hiçbir yerde okunmuyor. Zararsız (hiç
+çalışmadığı için sıfır maliyet) ama tamamlanmamış — ayrı bir karar
+gerektirir.
+
+/api/today hâlâ ~827KB (hedef <400KB) — shadowModelScore kaldırma
+güvenli bir kazançtı; daha fazlası liste/detay endpoint ayrımı
+gerektirir, bu da mobil app'in veri sözleşmesini değiştirir.
+
+Bölüm 50'deki beş plane modeli hâlâ geçerli; bu eklemeler o modelin
+FEATURE PLANE (bölüm 51-53), LEARNING PLANE (bölüm 54, 56) ve CONTROL
+PLANE (bölüm 55, 57-59) katmanlarını derinleştirir, değiştirmez.
