@@ -2,7 +2,8 @@ export type AcquisitionStage =
   | "http"
   | "cf-scrape"
   | "cf-content"
-  | "browser-session";
+  | "browser-session"
+  | "wp-json";
 
 export interface AcquiredHtml {
   stage: AcquisitionStage;
