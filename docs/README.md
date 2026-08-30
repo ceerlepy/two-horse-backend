@@ -38,6 +38,15 @@ Ana semantic architecture kitabı.
 - logging
 - clean-code boundaries
 - incident examples
+- expert source health (effective vs raw status)
+- form/HP coverage classification
+- field-signal race-level coverage bias
+- the three calibration mechanisms (expert-source weight, expert-category
+  weight, horse/jockey/pair context priors)
+- sixfold coupon evaluation completeness
+- sixfold probability self-calibration
+- mobile payload discipline
+- refresh cadence as cost policy
 
 ## 2. DEBUG_API_REFERENCE.md
 

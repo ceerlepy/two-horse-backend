@@ -164,7 +164,27 @@ Bu değer ideal olarak her zaman 0 olmalıdır.
 
 degradedSources
 
-source_registry içinde enabled olup health_status healthy olmayan source sayısı.
+summarizeExpertSourceHealth'in effectiveStatus'una göre "stale" veya
+"blocked"/"parse-error" olan enabled source sayısı — raw health_status
+kolonu değil.
+
+Raw kolon tek başına yanıltıcıdır: bir source bir kez "healthy" yazıp
+bir daha hiç kontrol edilmemiş olabilir. effectiveStatus bunu
+deriveEffectiveSourceStatus ile yakalar (bkz. ARCHITECTURE-DEEP-DIVE.md
+bölüm 51): health_status=healthy VE bugün kontrol edilmemiş → stale.
+"no-picks-today" (kart yok ama source bozuk değil) bu sayaca girmez.
+
+expertSources
+
+summarizeExpertSourceHealth'in tam çıktısı:
+
+availableSources — enabled source sayısı
+contributingSources — bugün en az bir expert_predictions satırı
+  üreten source sayısı
+staleSources — effectiveStatus="stale" olan sayı
+failedSources — effectiveStatus blocked/parse-error/degraded olan sayı
+sources — her source için sourceKey, healthStatus (raw),
+  effectiveStatus, lastCheckedAt, lastSuccessAt, contributingToday
 
 serverNow
 
@@ -176,6 +196,8 @@ learning_snapshot_candidates
 
 source_registry
 
+expert_predictions (contributingToday hesaplaması için)
+
 ## Interpretation
 
 invalidCaptureTiming > 0
@@ -185,7 +207,9 @@ En kritik invariant ihlalidir.
 
 degradedSources > 0
 
-En az bir expert/source pipeline degrade olmuş.
+En az bir expert source stale veya failed. expertSources.sources
+içinde hangi source ve effectiveStatus'u ne olduğuna bakılmalı —
+"no-picks-today" görülüyorsa bu bozukluk değil, dürüst bir sonuçtur.
 
 database != healthy
 
@@ -648,6 +672,50 @@ signalRows.field
 
 tjk_score non-null field_signals row count.
 
+raceFieldCoverage[]
+
+Her city+race_number için form/HP eksikliğinin sınıflandırılması
+(ARCHITECTURE-DEEP-DIVE.md bölüm 52):
+
+city, raceNumber, totalRunners
+missingForm, missingHp, unexplainedMissingHp
+formCoverage / hpCoverage: "full-coverage" | "likely-not-published" |
+  "partial-gap"
+
+unexplainedMissingHp yalnızca recent_form_raw uzunluğu > 2 olan (yani
+gerçek yarış geçmişi olan) runner'ların HP eksikliğini sayar — kısa
+geçmişli atların (henüz handikap almamış) HP eksikliği bunun dışında
+kalır.
+
+unexplainedGaps.form / unexplainedGaps.hp
+
+raceFieldCoverage'ın filtrelenmiş hali: form için formCoverage=
+"partial-gap" olan satırlar, HP için unexplainedMissingHp > 0 olan
+satırlar. ok alanı bu iki listenin ikisinin de boş olmasına bağlıdır.
+
+fieldSignalCoverage[]
+
+Her city+race_number için TJK field-signal (saha sinyali) kapsamı:
+
+city, raceNumber, totalRunners, coveredRunners
+coverageState: "no-data" | "partial-data" | "full-data"
+
+Bu, scoring katmanının suppressPartialFieldCoverage ile aynı yarış-
+seviyesi eşiği (coveredRunners/totalRunners < 0.5 → partial-data)
+kullanır (ARCHITECTURE-DEEP-DIVE.md bölüm 53) — burada görülen
+partial-data bir yarış, o yarışta field_score'un HER runner için
+(zaten sahip olanlar dahil) null'a bastırıldığı yarıştır.
+
+partialFieldCoverageRaces[]
+
+fieldSignalCoverage'ın coverageState="partial-data" olan alt kümesi —
+scoring'in field sinyalini bastırdığı yarışları doğrudan gösterir.
+
+ok
+
+formGaps (partial-gap) ve hpGaps (unexplainedMissingHp > 0) ikisi de
+boşsa true.
+
 ## DB ilişkileri
 
 runners
@@ -666,11 +734,17 @@ AGF acquisition/parse eksikliği.
 
 missing_form yüksek
 
-Form acquisition eksikliği.
+Form acquisition eksikliği — ama önce raceFieldCoverage'a bakılmalı:
+formCoverage="likely-not-published" olan satırlar (tüm yarış birlikte
+eksik) genelde debut/maiden kartı, gerçek bir regresyon değil. Alarm
+formCoverage="partial-gap" (dağınık alt küme) satırlarındadır.
 
 missing_hp yüksek
 
-Canonical runner parsing sorunu olabilir.
+Aynı ayrım HP için de geçerli: unexplainedMissingHp = 0 olan satırlar
+kısa geçmişli atlardan (TJK henüz handikap atamamış) kaynaklanıyor
+olabilir, bug değildir. unexplainedGaps.hp doluysa gerçek bir sorun
+vardır.
 
 missing_weight yüksek
 
@@ -683,6 +757,14 @@ Expert pipeline current card için boş.
 market=0
 
 AGF snapshots yok.
+
+partialFieldCoverageRaces dolu
+
+Bu yarışlarda field bileşeni tüm runner'lar için bastırılmış —
+scoring bug'ı değil, kasıtlı adalet düzeltmesi (bkz. bölüm 53). Sorun
+şu ki field sinyali gerçekten yaygın biçimde eksikse (birçok yarışta
+partial-data), field acquisition pipeline'ının kendisi (src/field/service.ts)
+araştırılmalı.
 
 field=0
 
@@ -741,6 +823,34 @@ coupons.latest_generation
 
 En son generation timestamp.
 
+sixfoldCouponHealth
+
+coupons alanının daha ayrıntılı, ARCHITECTURE-DEEP-DIVE.md bölüm 55'te
+açıklanan hali:
+
+total, evaluated
+pending — evaluated_at null VE unresolved_reason null (gerçekten
+  bekleyen, henüz sonuç gelmemiş)
+unresolved — unresolved_reason not null (SIXFOLD_STALE_AFTER_DAYS
+  gün geçmesine rağmen hiçbir zaman çözülemeyen — örn. ingestion hiç
+  başlamamış bir toplantı)
+overdueUnclassified — pending olup SIXFOLD_STALE_AFTER_DAYS'ten daha
+  eski olan satır sayısı; > 0 ise cron çalışmıyor demektir
+ok — overdueUnclassified === 0
+
+sixfoldCalibration
+
+recalibrateSixFoldProbabilities'in son çalıştığında yazdığı satır
+(ARCHITECTURE-DEEP-DIVE.md bölüm 56):
+
+sampleCount, predictedAvgCoverage, actualHitRate
+temperature — optimizeSixFoldCoupons'a geçirilen güncel değer
+status — "insufficient-data" | "partial" | "calibrated"
+
+MIN_CALIBRATION_SAMPLES (50) altında sampleCount ise temperature hep
+varsayılan (14) kalır — bu bug değildir, henüz yeterli değerlendirilmiş
+kupon yoktur.
+
 ## DB ilişkileri
 
 refresh_state
@@ -750,6 +860,8 @@ source_registry
 learning_snapshot_candidates
 
 sixfold_coupon_snapshots
+
+sixfold_probability_calibration
 
 ## Interpretation
 
@@ -763,7 +875,11 @@ Learning capture henüz başlamamış veya data yok.
 
 pending coupon sürekli büyüyor
 
-Evaluation/result ingestion gecikiyor olabilir.
+sixfoldCouponHealth.overdueUnclassified'a bakılmalı: 0 ise bu
+snapshot'lar henüz normal şekilde sonuç bekliyor demektir (evaluation/
+result ingestion gecikiyor olabilir). > 0 ise cron'un kendisi
+çalışmıyor — SIXFOLD_STALE_AFTER_DAYS günden eski satırlar zaten
+unresolved'a düşmüş olmalıydı.
 
 ---
 
@@ -822,6 +938,13 @@ Sorularında authoritative runtime view sağlar.
 ## Amaç
 
 Bütün D1 tablolarının row countlarını görmek.
+
+Yalnızca uygulamanın kendi tabloları listelenir — filterAppTableNames
+(src/api/diagnostics/db.ts) `_cf_KV` ve `d1_migrations` gibi D1'in
+kendi iç bookkeeping tablolarını dışarıda bırakır. Bunlar
+validIdentifier'dan geçtiği ve isimleri sqlite_% ile başlamadığı için
+eskiden bu listede uygulama tablolarıyla yan yana görünüyorlardı — hiç
+uygulama anlamı taşımayan gürültü.
 
 ## Example
 
