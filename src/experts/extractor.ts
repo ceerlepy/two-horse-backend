@@ -51,7 +51,8 @@ import {
 import {
   explicitCouponExpectedSelections,
   explicitCouponExpectationPrompt,
-  inspectExplicitCouponCompleteness
+  inspectExplicitCouponCompleteness,
+  backfillExplicitCouponAnchors
 } from "./coupon-completeness";
 
 import {
@@ -1142,6 +1143,19 @@ export async function extractExperts(
           requireSelectionPerRace
         }
       );
+
+
+    if (couponExpected.length) {
+      semantic = {
+        ...semantic,
+
+        value:
+          backfillExplicitCouponAnchors(
+            semantic.value,
+            couponExpected
+          )
+      };
+    }
 
 
     afaCompleteness =
