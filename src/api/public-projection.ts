@@ -21,6 +21,10 @@
  * away from any client. /api/history serves those snapshots directly
  * and never passed through that redaction -- this closes the same
  * gap for historical entries.
+ *
+ * The app's History screen shows how many expert rows a past race
+ * had (not who they were from), so the count is kept explicitly
+ * rather than just deleting the array out from under it.
  */
 export function toPublicHistory(
   entries: any[]
@@ -32,7 +36,14 @@ export function toPublicHistory(
         ...publicEntry
       } = entry;
 
-      return publicEntry;
+      return {
+        ...publicEntry,
+
+        expertPredictionCount:
+          Array.isArray(expertPredictions)
+            ? expertPredictions.length
+            : 0
+      };
     }
   );
 }
