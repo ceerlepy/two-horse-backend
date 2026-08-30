@@ -291,6 +291,22 @@ interface PendingCoupon {
 }
 
 
+/*
+ * Evaluation depends entirely on learning_races/learning_runner_
+ * features carrying a labelled winner for every leg's race. That
+ * pipeline only runs for meetings that made it into learning_races
+ * in the first place -- a meeting whose ingestion never started (or
+ * whose learning row was purged before labelling) will never gain a
+ * winner no matter how many times this runs, so a snapshot can sit
+ * at evaluated_at IS NULL forever with no visible distinction from
+ * one that is genuinely still waiting on today's results. Giving it
+ * several days of slack before calling that "unresolved" keeps
+ * normal result-ingestion delays (and retries) from being flagged
+ * prematurely.
+ */
+export const SIXFOLD_STALE_AFTER_DAYS =
+  5;
+
 export async function evaluatePendingSixFoldCoupons(
   env: Env
 ): Promise<{
@@ -308,6 +324,9 @@ export async function evaluatePendingSixFoldCoupons(
 
       WHERE evaluated_at
         IS NULL
+
+        AND unresolved_reason
+          IS NULL
     `)
       .all<PendingCoupon>();
 
@@ -399,6 +418,28 @@ export async function evaluatePendingSixFoldCoupons(
       );
 
     if (!allResolved) {
+      /*
+       * Only the age of the snapshot decides this -- never repeated
+       * failed attempts -- so a meeting that ingests results slowly
+       * is never punished for it, only one that is old enough that
+       * waiting further is no longer a reasonable explanation.
+       */
+      await env.DB.prepare(`
+        UPDATE sixfold_coupon_snapshots
+        SET unresolved_reason = 'RESULTS_UNAVAILABLE'
+        WHERE id = ?
+          AND race_date <
+            date(
+              'now',
+              ?
+            )
+      `)
+        .bind(
+          row.id,
+          `-${SIXFOLD_STALE_AFTER_DAYS} days`
+        )
+        .run();
+
       continue;
     }
 

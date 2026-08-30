@@ -43,6 +43,14 @@ import {
   COUPON_POLICY_VERSION
 } from "../../model/version";
 
+import {
+  SIXFOLD_STALE_AFTER_DAYS
+} from "../../coupons/repository";
+
+import {
+  buildSixFoldCouponHealth
+} from "./sixfold";
+
 function integerParam(
   url: URL,
   name: string
@@ -1530,6 +1538,54 @@ export async function routeDiagnostics(
         FROM sixfold_coupon_snapshots
       `).first<any>();
 
+    const sixfoldHealthRow =
+      await env.DB.prepare(`
+        SELECT
+          COUNT(*) total,
+
+          SUM(
+            CASE
+              WHEN evaluated_at IS NOT NULL
+              THEN 1 ELSE 0
+            END
+          ) evaluated,
+
+          SUM(
+            CASE
+              WHEN evaluated_at IS NULL
+                AND unresolved_reason IS NULL
+              THEN 1 ELSE 0
+            END
+          ) pending,
+
+          SUM(
+            CASE
+              WHEN unresolved_reason IS NOT NULL
+              THEN 1 ELSE 0
+            END
+          ) unresolved,
+
+          SUM(
+            CASE
+              WHEN evaluated_at IS NULL
+                AND unresolved_reason IS NULL
+                AND race_date < date('now', ?)
+              THEN 1 ELSE 0
+            END
+          ) overdue_unclassified
+
+        FROM sixfold_coupon_snapshots
+      `)
+        .bind(
+          `-${SIXFOLD_STALE_AFTER_DAYS} days`
+        )
+        .first<any>();
+
+    const sixfoldCouponHealth =
+      buildSixFoldCouponHealth(
+        sixfoldHealthRow ?? {}
+      );
+
     const officialResults =
       await env.DB.prepare(`
         SELECT
@@ -1669,6 +1725,7 @@ export async function routeDiagnostics(
         sources.results,
       learning,
       coupons,
+      sixfoldCouponHealth,
 
       officialResults,
 
