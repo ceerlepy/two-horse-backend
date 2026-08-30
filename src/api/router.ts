@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { json, errorMessage, turkeyDate } from "../shared";
 import { getToday } from "../storage/program-repository";
+import { toPublicMeetings } from "./public-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
 import {
   refreshExpertsIfDue,
@@ -47,7 +48,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   const meetings=await getToday(env);
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
-  return json({date:turkeyDate(),meetings,servedFrom:"d1",refreshingInBackground:true});
+  return json({date:turkeyDate(),meetings:toPublicMeetings(meetings),servedFrom:"d1",refreshingInBackground:true});
  }
  if(url.pathname==="/api/coupons/generate") {
   try {
