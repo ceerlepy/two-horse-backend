@@ -18,6 +18,11 @@ import {
   acquireHttpHtml
 } from "../../acquisition/http";
 
+import {
+  acquireWpJsonHtml,
+  acquireWpJsonSearchLinks
+} from "../../acquisition/wp-json";
+
 import type {
   AcquiredHtml
 } from "../../acquisition/types";
@@ -61,14 +66,16 @@ type ListingStage =
   | "cf-content"
   | "cf-links"
   | "cf-scrape"
-  | "puppeteer";
+  | "puppeteer"
+  | "wp-json";
 
 
 type ArticleStage =
   | "http"
   | "cf-content"
   | "cf-scrape"
-  | "puppeteer";
+  | "puppeteer"
+  | "wp-json";
 
 
 interface RawLink {
@@ -719,7 +726,9 @@ export async function acquireHttpFirstArticleHtml(
                 "puppeteer" as const
               ]
             : []
-        )
+        ),
+
+        "wp-json"
       ];
 
     for (
@@ -766,6 +775,15 @@ export async function acquireHttpFirstArticleHtml(
           acquired =
             await acquireCfScrapeHtml(
               context.env,
+              context.url
+            );
+
+        } else if (
+          stage ===
+          "wp-json"
+        ) {
+          acquired =
+            await acquireWpJsonHtml(
               context.url
             );
 
@@ -1783,7 +1801,9 @@ export async function resolveVerifiedArticleTargets(
                 "puppeteer" as const
               ]
             : []
-        )
+        ),
+
+        "wp-json"
       ];
 
     for (
@@ -1890,6 +1910,27 @@ export async function resolveVerifiedArticleTargets(
               acquired.html,
               plan.listingCardContext ===
                 true
+            );
+
+        } else if (
+          stage ===
+          "wp-json"
+        ) {
+          const acquired =
+            await acquireWpJsonSearchLinks(
+              discoveryUrl,
+              context.cities
+            );
+
+          bodyLength =
+            acquired.links.length;
+
+          links =
+            acquired.links.map(
+              url => ({
+                url,
+                text:""
+              })
             );
 
         } else {
@@ -2154,7 +2195,9 @@ export async function resolveVerifiedArticleTargets(
                 "puppeteer" as const
               ]
             : []
-        )
+        ),
+
+        "wp-json"
       ];
 
     let restricted:
@@ -2218,6 +2261,21 @@ export async function resolveVerifiedArticleTargets(
           const acquired =
             await acquireCfScrapeHtml(
               context.env,
+              candidate.url
+            );
+
+          html =
+            acquired.html;
+
+          bodyLength =
+            acquired.bodyLength;
+
+        } else if (
+          stage ===
+          "wp-json"
+        ) {
+          const acquired =
+            await acquireWpJsonHtml(
               candidate.url
             );
 
