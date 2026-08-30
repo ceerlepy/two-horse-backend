@@ -30,6 +30,10 @@ import {
 } from "../../experts/source-repository";
 
 import {
+  buildRaceFieldCoverage
+} from "./data-quality";
+
+import {
   MODEL_VERSION,
   LEARNING_POLICY_VERSION,
   COUPON_POLICY_VERSION
@@ -639,8 +643,85 @@ export async function routeDiagnostics(
         date
       );
 
+    const perRace =
+      await env.DB.prepare(`
+        SELECT
+          city,
+          race_number,
+          COUNT(*) total_runners,
+
+          SUM(
+            CASE
+              WHEN recent_form_raw IS NULL
+                OR TRIM(recent_form_raw) = ''
+              THEN 1 ELSE 0
+            END
+          ) missing_form,
+
+          SUM(
+            CASE
+              WHEN hp IS NULL
+              THEN 1 ELSE 0
+            END
+          ) missing_hp,
+
+          /*
+           * TJK does not assign a handicap rating until a horse
+           * has run enough races. A runner missing HP whose own
+           * recent_form_raw shows at most one or two prior starts
+           * is explained by that, same as a full debut field —
+           * only a longer form history with no HP is unexplained.
+           */
+          SUM(
+            CASE
+              WHEN hp IS NULL
+                AND recent_form_raw IS NOT NULL
+                AND LENGTH(TRIM(recent_form_raw)) > 2
+              THEN 1 ELSE 0
+            END
+          ) unexplained_missing_hp
+
+        FROM runners
+        WHERE race_date = ?
+        GROUP BY city, race_number
+        ORDER BY city, race_number
+      `)
+        .bind(date)
+        .all<any>();
+
+    const raceFieldCoverage =
+      buildRaceFieldCoverage(
+        perRace.results ?? []
+      );
+
+    /*
+     * A "likely-not-published" whole race (every runner missing
+     * together — the debut/maiden-field signature) is expected and
+     * not alarmed on. A form gap only has that one benign
+     * explanation, so partial-gap is always real for form. HP has a
+     * second benign explanation (insufficient own race history),
+     * so its alarm gates on unexplainedMissingHp rather than the
+     * raw count.
+     */
+    const formGaps =
+      raceFieldCoverage.filter(
+        race =>
+          race.formCoverage ===
+          "partial-gap"
+      );
+
+    const hpGaps =
+      raceFieldCoverage.filter(
+        race =>
+          race.unexplainedMissingHp >
+          0
+      );
+
     return json({
-      ok: true,
+      ok:
+        formGaps.length === 0 &&
+        hpGaps.length === 0,
+
       date,
       byCity:
         runners.results,
@@ -651,6 +732,13 @@ export async function routeDiagnostics(
           marketRows,
         field:
           fieldRows
+      },
+
+      raceFieldCoverage,
+
+      unexplainedGaps: {
+        form: formGaps,
+        hp: hpGaps
       }
     });
   }
