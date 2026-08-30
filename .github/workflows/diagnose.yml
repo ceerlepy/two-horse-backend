@@ -31,12 +31,23 @@ jobs:
           scripts/part5-diagnose.sh > out.txt 2>&1 || true
           head -c 60000 out.txt > body.txt
 
+      - name: Upload full report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: part5-diagnose-full-${{ github.run_number }}
+          path: out.txt
+          retention-days: 14
+
       - name: Post issue
         run: |
           {
             echo '```'
             cat body.txt
             echo '```'
+            if [ "$(wc -c < out.txt)" -gt "$(wc -c < body.txt)" ]; then
+              echo ""
+              echo "_Report truncated at 60000 characters (GitHub issue body limit) — the full untruncated output is attached as the \`part5-diagnose-full-${{ github.run_number }}\` workflow artifact on this run._"
+            fi
           } > issue.md
           gh issue create \
             --title "Part 5 diagnostics — run ${{ github.run_number }}" \
