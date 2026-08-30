@@ -1,6 +1,10 @@
 import puppeteer
   from "@cloudflare/puppeteer";
 
+import type {
+  Env
+} from "../../env";
+
 import {
   load
 } from "cheerio";
@@ -687,6 +691,76 @@ function articleUsable(
 }
 
 
+const MOBILE_USER_AGENT =
+  "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36";
+
+
+/*
+ * The non-interactive article stages (everything but puppeteer,
+ * which needs a live page/browser handle) are identical wherever
+ * this file fetches a single known article URL — used by the
+ * http-first fetch below, and again inside verify()'s per-candidate
+ * loop. One shared dispatcher keeps that in one place instead of
+ * three copies drifting apart.
+ */
+async function acquireArticleStageHtml(
+  env:
+    Env,
+
+  url:
+    string,
+
+  stage:
+    Exclude<ArticleStage,"puppeteer">
+):Promise<AcquiredHtml> {
+  if (
+    stage ===
+    "http"
+  ) {
+    return acquireHttpHtml(
+      url,
+      {
+        timeoutMs:
+          6_000,
+
+        minimumBytes:
+          200,
+
+        userAgent:
+          MOBILE_USER_AGENT
+      }
+    );
+  }
+
+
+  if (
+    stage ===
+    "cf-content"
+  ) {
+    return acquireCfContentHtml(
+      env,
+      url
+    );
+  }
+
+
+  if (
+    stage ===
+    "cf-scrape"
+  ) {
+    return acquireCfScrapeHtml(
+      env,
+      url
+    );
+  }
+
+
+  return acquireWpJsonHtml(
+    url
+  );
+}
+
+
 export async function acquireHttpFirstArticleHtml(
   context:
     ExpertAcquireContext,
@@ -740,51 +814,14 @@ export async function acquireHttpFirstArticleHtml(
           AcquiredHtml;
 
         if (
-          stage ===
-          "http"
+          stage !==
+          "puppeteer"
         ) {
           acquired =
-            await acquireHttpHtml(
+            await acquireArticleStageHtml(
+              context.env,
               context.url,
-              {
-                timeoutMs:
-                  6_000,
-
-                minimumBytes:
-                  200,
-
-                userAgent:
-                  "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36"
-              }
-            );
-
-        } else if (
-          stage ===
-          "cf-content"
-        ) {
-          acquired =
-            await acquireCfContentHtml(
-              context.env,
-              context.url
-            );
-
-        } else if (
-          stage ===
-          "cf-scrape"
-        ) {
-          acquired =
-            await acquireCfScrapeHtml(
-              context.env,
-              context.url
-            );
-
-        } else if (
-          stage ===
-          "wp-json"
-        ) {
-          acquired =
-            await acquireWpJsonHtml(
-              context.url
+              stage
             );
 
         } else {
@@ -2214,69 +2251,14 @@ export async function resolveVerifiedArticleTargets(
         let bodyLength:number;
 
         if (
-          stage ===
-          "http"
+          stage !==
+          "puppeteer"
         ) {
           const acquired =
-            await acquireHttpHtml(
+            await acquireArticleStageHtml(
+              context.env,
               candidate.url,
-              {
-                timeoutMs:
-                  6_000,
-
-                minimumBytes:
-                  200,
-
-                userAgent:
-                  "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36"
-              }
-            );
-
-          html =
-            acquired.html;
-
-          bodyLength =
-            acquired.bodyLength;
-
-        } else if (
-          stage ===
-          "cf-content"
-        ) {
-          const acquired =
-            await acquireCfContentHtml(
-              context.env,
-              candidate.url
-            );
-
-          html =
-            acquired.html;
-
-          bodyLength =
-            acquired.bodyLength;
-
-        } else if (
-          stage ===
-          "cf-scrape"
-        ) {
-          const acquired =
-            await acquireCfScrapeHtml(
-              context.env,
-              candidate.url
-            );
-
-          html =
-            acquired.html;
-
-          bodyLength =
-            acquired.bodyLength;
-
-        } else if (
-          stage ===
-          "wp-json"
-        ) {
-          const acquired =
-            await acquireWpJsonHtml(
-              candidate.url
+              stage
             );
 
           html =
