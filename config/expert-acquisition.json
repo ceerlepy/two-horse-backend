@@ -93,7 +93,8 @@
     "acquisitionOrder": [
       "cf-scrape",
       "cf-content",
-      "http"
+      "http",
+      "wp-json"
     ],
     "minimumTextCharacters": 200,
     "sourceHardSafetyCharacters": 140000,

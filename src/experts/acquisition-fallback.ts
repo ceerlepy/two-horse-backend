@@ -15,6 +15,10 @@ import {
   acquireHttpHtml
 } from "../acquisition/http";
 
+import {
+  acquireWpJsonHtml
+} from "../acquisition/wp-json";
+
 import type {
   ExpertHtmlAcquisitionStage
 } from "../config/expert-acquisition";
@@ -95,6 +99,17 @@ export async function acquireExpertHtmlStage(
               userAgent:
                 "TwoHorse/1.0 (+expert-acquisition)"
             }
+          );
+
+
+        case "wp-json":
+          /*
+           * The REST API isn't page-cached like the human-facing
+           * site, and a slug is a path segment — cache-busting the
+           * query string would do nothing useful here.
+           */
+          return acquireWpJsonHtml(
+            url
           );
       }
     })();

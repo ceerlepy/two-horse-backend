@@ -5,7 +5,8 @@ import rawConfig
 export type ExpertHtmlAcquisitionStage =
   | "cf-scrape"
   | "cf-content"
-  | "http";
+  | "http"
+  | "wp-json";
 
 
 export type ExpertDiscoveryStage =
@@ -216,7 +217,8 @@ const HTML_STAGES =
   new Set<string>([
     "cf-scrape",
     "cf-content",
-    "http"
+    "http",
+    "wp-json"
   ]);
 
 
