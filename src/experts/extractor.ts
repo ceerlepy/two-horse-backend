@@ -974,16 +974,35 @@ export async function extractExperts(
       continue;
     }
 
-    const selfStated =
-      normalizeExpertSearchText(
-        document.semanticText
-      ).match(
-        /altili\s+ganyan\s+(\d{1,2})\s*\.?\s*kosu/
+    /*
+     * A day with more than one Altılı Ganyan sequence states
+     * each one's own start race (e.g. "... 2. Altılı Ganyan
+     * 4. Koşu ile saat 19.00 ekranlara gelecektir."). Matching
+     * "altılı ganyan N. koşu" without checking for that leading
+     * sequence number would grab the SECOND sequence's start
+     * race and misapply it as the first sequence's — only a
+     * match with no leading sequence digit, or an explicit "1.",
+     * is actually about the first sequence.
+     */
+    const selfStatedMatches =
+      [
+        ...normalizeExpertSearchText(
+          document.semanticText
+        ).matchAll(
+          /(?:(\d{1,2})\s+)?altili\s+ganyan\s+(\d{1,2})\s*\.?\s*kosu/g
+        )
+      ];
+
+    const firstSequenceMatch =
+      selfStatedMatches.find(
+        match =>
+          !match[1] ||
+          Number(match[1]) === 1
       );
 
     const raceNumber =
-      selfStated
-        ? Number(selfStated[1])
+      firstSequenceMatch
+        ? Number(firstSequenceMatch[2])
         : NaN;
 
     if (
