@@ -570,11 +570,16 @@ async function processSource(
       });
 
 
-      if (
-        !validated.length ||
-        validated.length !==
-          raw.length
-      ) {
+      /*
+       * validateExpertPicks already dropped whatever failed to
+       * resolve to a real canonical runner (ganyan_canavari's
+       * İstanbul confirmed this live: 6 of 7 extracted picks
+       * matched real runners, 1 didn't). Persist that verified
+       * subset rather than discarding all of it over the one
+       * AI-noise pick — only a batch with NOTHING verified is
+       * worth rejecting outright.
+       */
+      if (!validated.length) {
         await recordExpertRefreshTrace(
           env,
           source.source_key,
