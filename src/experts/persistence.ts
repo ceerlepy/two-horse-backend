@@ -148,21 +148,35 @@ export async function replaceExpertPicksForDate(
   /*
    * D1 batch = one fail-closed transactional boundary.
    *
-   * Old source/day rows are removed only in the same batch
-   * that writes the complete validated replacement.
+   * Scoped to the cities present in `picks` only: a city that
+   * failed extraction this run (and so isn't in `picks`) keeps
+   * whatever rows it already had rather than being wiped out by
+   * a sibling city's successful replacement.
    */
+  const cities =
+    [...new Set(
+      picks.map(
+        pick =>
+          pick.city
+      )
+    )];
+
   const statements:
-    D1PreparedStatement[] = [
-      env.DB.prepare(`
-        DELETE FROM expert_predictions
-        WHERE race_date = ?
-          AND source_key = ?
-      `)
-        .bind(
-          raceDate,
-          sourceKey
-        )
-    ];
+    D1PreparedStatement[] =
+      cities.map(
+        city =>
+          env.DB.prepare(`
+            DELETE FROM expert_predictions
+            WHERE race_date = ?
+              AND source_key = ?
+              AND city = ?
+          `)
+            .bind(
+              raceDate,
+              sourceKey,
+              city
+            )
+      );
 
 
   for (const pick of picks) {
