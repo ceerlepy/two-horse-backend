@@ -36,7 +36,7 @@ describe(
 
 
     it(
-      "uses tighter cadence near the next race, and hourly far from it",
+      "uses tighter cadence near the next race, and every 6 hours far from it",
       () => {
         expect(
           expertCheckIntervalMs(
@@ -73,9 +73,10 @@ describe(
 
         /*
          * Hours from the next race, nothing about a source's
-         * content changes meaningfully in 15 minutes -- checking
-         * hourly instead is the same freshness for a quarter of
-         * the Workers AI / Browser Rendering cost.
+         * content changes meaningfully in 15 minutes -- a few
+         * checks spread across the day catch a late-published
+         * card without paying for Workers AI / Browser Rendering
+         * every 15 minutes all day.
          */
         expect(
           expertCheckIntervalMs(
@@ -83,7 +84,7 @@ describe(
           )
         )
           .toBe(
-            60 *
+            360 *
             60_000
           );
       }
@@ -107,7 +108,7 @@ describe(
 
         expect(
           expertCheckIntervalMs(121)
-        ).toBe(60 * 60_000);
+        ).toBe(360 * 60_000);
       }
     );
 
