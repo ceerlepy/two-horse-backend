@@ -45,6 +45,10 @@ import {
 } from "./coupons/repository";
 
 import {
+  recalibrateSixFoldProbabilities
+} from "./coupons/calibration";
+
+import {
   logger,
   observed
 } from "./observability/logger";
@@ -124,6 +128,15 @@ async function runScheduledPipeline(
     "coupons.evaluate",
     () =>
       evaluatePendingSixFoldCoupons(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "coupons.recalibrate",
+    () =>
+      recalibrateSixFoldProbabilities(
         env
       )
   );
