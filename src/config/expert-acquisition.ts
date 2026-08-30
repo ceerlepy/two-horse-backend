@@ -209,7 +209,8 @@ const DISCOVERY_STAGES =
     "cf-scrape",
     "cf-links",
     "cf-content",
-    "http"
+    "http",
+    "wp-json"
   ]);
 
 

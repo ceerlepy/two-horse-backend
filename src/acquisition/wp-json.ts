@@ -3,6 +3,108 @@ import type {
 } from "./types";
 
 /*
+ * Discovery counterpart to acquireWpJsonHtml: when the site's
+ * listing/landing pages are themselves behind the same challenge
+ * that blocks individual articles, the wp-json search endpoint can
+ * still return candidate article links (confirmed live against
+ * bankotahminler.com: ?search=Adana / ?search=İstanbul both return
+ * today's real articles as clean JSON while every listing page
+ * fetch is challenged). Returns plain URLs so they flow through
+ * the exact same URL-evidence candidate scoring as the cf-links
+ * discovery stage — no separate scoring path to maintain.
+ */
+export async function acquireWpJsonSearchLinks(
+  landingUrl: string,
+  cities: string[],
+  options: { timeoutMs?: number } = {}
+): Promise<{ links: string[] }> {
+  const timeoutMs =
+    options.timeoutMs ?? 10_000;
+
+  const origin =
+    new URL(landingUrl).origin;
+
+  const links =
+    new Set<string>();
+
+  for (const city of cities) {
+    const controller =
+      new AbortController();
+
+    const timer =
+      setTimeout(
+        () => controller.abort(),
+        timeoutMs
+      );
+
+    try {
+      const apiUrl =
+        `${origin}/wp-json/wp/v2/posts` +
+        `?search=${encodeURIComponent(city)}` +
+        `&per_page=10&_fields=id,date,link,title`;
+
+      const response =
+        await fetch(
+          apiUrl,
+          {
+            signal:
+              controller.signal,
+
+            headers: {
+              "user-agent":
+                "TwoHorse/1.0 (+expert-acquisition)",
+
+              accept:
+                "application/json"
+            }
+          }
+        );
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const contentType =
+        response.headers.get(
+          "content-type"
+        ) ??
+        "";
+
+      if (
+        !contentType.includes(
+          "application/json"
+        )
+      ) {
+        continue;
+      }
+
+      const posts:any =
+        await response.json();
+
+      if (!Array.isArray(posts)) {
+        continue;
+      }
+
+      for (const post of posts) {
+        if (typeof post?.link === "string") {
+          links.add(post.link);
+        }
+      }
+
+    } catch {
+      continue;
+
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    links:[...links]
+  };
+}
+
+/*
  * Some WordPress sites put bot protection (Cloudflare WAF,
  * Turnstile challenge) in front of the human-facing pages but
  * leave the built-in `/wp-json/wp/v2/posts` REST API wide open —

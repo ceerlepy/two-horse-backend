@@ -25,6 +25,10 @@ import {
 } from "../acquisition/cloudflare-links";
 
 import {
+  acquireWpJsonSearchLinks
+} from "../acquisition/wp-json";
+
+import {
   selectExpertCandidateUrlsWithWorkersAi
 } from "./workers-ai-discovery";
 
@@ -1230,6 +1234,35 @@ async function acquireDiscoveryStageCandidates(
       await acquireCfLinks(
         env,
         landingUrl
+      );
+
+
+    return {
+      candidates:
+        candidatesFromUrls(
+          sourceKey,
+          landingUrl,
+          acquired.links,
+          raceDate,
+          cities
+        ),
+
+      metadata: {
+        linkCount:
+          acquired.links.length
+      }
+    };
+  }
+
+
+  if (
+    stage ===
+    "wp-json"
+  ) {
+    const acquired =
+      await acquireWpJsonSearchLinks(
+        landingUrl,
+        cities
       );
 
 
