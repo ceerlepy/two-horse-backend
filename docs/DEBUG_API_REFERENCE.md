@@ -847,7 +847,7 @@ sampleCount, predictedAvgCoverage, actualHitRate
 temperature — optimizeSixFoldCoupons'a geçirilen güncel değer
 status — "insufficient-data" | "partial" | "calibrated"
 
-MIN_CALIBRATION_SAMPLES (50) altında sampleCount ise temperature hep
+SIXFOLD_CALIBRATION_CONFIG.minSamples (50) altında sampleCount ise temperature hep
 varsayılan (14) kalır — bu bug değildir, henüz yeterli değerlendirilmiş
 kupon yoktur.
 
