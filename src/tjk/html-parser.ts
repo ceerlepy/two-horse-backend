@@ -53,9 +53,19 @@ function parseAgf(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+/*
+ * TJK's own hrefs on this page are relative (e.g.
+ * "../../Query/ConnectedPage/AtKosuBilgileri?..."), so resolving
+ * them against the bare domain root instead of the actual page this
+ * HTML came from silently produces a wrong, unfetchable path (missing
+ * the "/TR/YarisSever" prefix the real site lives under) -- every
+ * runner's horseProfileUrl/jockeyProfileUrl was affected until this
+ * was caught building the horse-video feature that depends on it.
+ */
 function anchorHref(
   $: cheerio.CheerioAPI,
-  cell: cheerio.Cheerio<any>
+  cell: cheerio.Cheerio<any>,
+  baseUrl: string
 ): string | null {
   const anchor =
     cell.find("a[href]").first();
@@ -76,7 +86,7 @@ function anchorHref(
   try {
     return new URL(
       href,
-      "https://www.tjk.org"
+      baseUrl
     ).toString();
   } catch {
     return null;
@@ -278,7 +288,8 @@ function headerIndexes(
 
 function parseRunnerTable(
   $: cheerio.CheerioAPI,
-  table: cheerio.Cheerio<any>
+  table: cheerio.Cheerio<any>,
+  baseUrl: string
 ): TjkRunner[] {
   const indexes = headerIndexes($, table);
 
@@ -369,14 +380,16 @@ function parseRunnerTable(
       horseProfileUrl:
         anchorHref(
           $,
-          nameCell
+          nameCell,
+          baseUrl
         ),
 
       jockeyProfileUrl:
         jockeyCell
           ? anchorHref(
               $,
-              jockeyCell
+              jockeyCell,
+              baseUrl
             )
           : null
     });
@@ -591,7 +604,8 @@ function parseSurface(text: string): {
  */
 export function parseTjkMeetingPage(
   html: string,
-  city: string
+  city: string,
+  pageUrl: string = "https://www.tjk.org"
 ): TjkMeeting {
   const $ = cheerio.load(html);
 
@@ -767,7 +781,7 @@ export function parseTjkMeetingPage(
         try {
           return new URL(
             href,
-            "https://www.tjk.org"
+            pageUrl
           ).toString();
         } catch {
           return null;
@@ -792,7 +806,7 @@ export function parseTjkMeetingPage(
       return;
     }
 
-    const runners = parseRunnerTable($, table);
+    const runners = parseRunnerTable($, table, pageUrl);
 
     if (runners.length) {
       runnerTables.push(runners);
