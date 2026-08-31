@@ -32,7 +32,7 @@ describe(
   "global coupon optimizer",
   () => {
     it(
-      "stays within budget and maximum dominates",
+      "stays within budget and the top budget tier dominates survival probability",
       () => {
         const coupons =
           optimizeSixFoldCoupons({
@@ -58,12 +58,13 @@ describe(
           );
         }
 
-        const maximum =
-          coupons.find(
-            item =>
-              item.profile ===
-              "maximum-coverage"
-          )!;
+        const topTier =
+          coupons.reduce(
+            (best, item) =>
+              item.budgetTl > best.budgetTl
+                ? item
+                : best
+          );
 
         for (
           const coupon of coupons
@@ -72,7 +73,7 @@ describe(
             coupon
               .estimatedSurvivalProbability
           ).toBeLessThanOrEqual(
-            maximum
+            topTier
               .estimatedSurvivalProbability +
             1e-9
           );

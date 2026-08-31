@@ -3,12 +3,6 @@ import {
 } from "./types";
 
 
-export type CouponProfile =
-  | "cautious"
-  | "balanced"
-  | "maximum-coverage";
-
-
 export interface CouponRunner {
   horseNumber: number;
   horseName?: string | null;
@@ -43,8 +37,15 @@ export interface CouponLegSelection {
 
 
 export interface OptimizedSixFoldCoupon {
+  /*
+   * A label for this coupon's budget tier -- see
+   * COUPON_BUDGET_LADDER_CONFIG below. Historically this held a
+   * spend-strategy name ("cautious"/"balanced"/"maximum-coverage");
+   * it is kept as a string field (DB column name unchanged) but now
+   * holds the tier's budget amount as text, e.g. "500", "1300".
+   */
   profile:
-    CouponProfile;
+    string;
 
   targetBudgetTl:
     number;
@@ -91,15 +92,89 @@ interface PreparedLeg {
 }
 
 
-const PROFILE_FRACTIONS:
-Record<
-  CouponProfile,
-  number
-> = {
-  cautious: 0.45,
-  balanced: 0.80,
-  "maximum-coverage": 1
-};
+/*
+ * A user's budget field is the CEILING they're willing to spend, not
+ * a single amount to spend in full -- this ladder turns that ceiling
+ * into several concrete coupons at increasing budgets, so someone
+ * can see what a small, cautious stake buys next to what their full
+ * budget buys, instead of only ever seeing one number.
+ *
+ * fixedTiersTl: always offered first, identical for every user
+ * regardless of their max budget (as long as they can afford them) --
+ * a stable "entry point" coupon size people can compare day to day.
+ *
+ * variableTierCount: how many more coupons fill the gap from the
+ * highest affordable fixed tier up to the user's own max budget,
+ * evenly spaced so the steps between them feel proportional rather
+ * than arbitrary. The last of these is always exactly the user's max
+ * budget (never overshoots it, never leaves it unused).
+ *
+ * roundToNearestTl: the 3 tiers strictly between the highest fixed
+ * tier and the max budget are rounded to a clean number; only the
+ * final (max-budget) tier is left exact.
+ */
+export const COUPON_BUDGET_LADDER_CONFIG = {
+  fixedTiersTl: [500, 750],
+  variableTierCount: 4,
+  roundToNearestTl: 50
+} as const;
+
+export function buildCouponBudgetLadder(
+  maxBudgetTl: number
+): number[] {
+  const fixedTiers =
+    COUPON_BUDGET_LADDER_CONFIG.fixedTiersTl.filter(
+      tier => tier <= maxBudgetTl
+    );
+
+  const baseTl =
+    fixedTiers.length
+      ? fixedTiers[fixedTiers.length - 1]
+      : 0;
+
+  const tiers: number[] = [...fixedTiers];
+
+  /*
+   * Tracked separately from tiers[tiers.length - 1]: when there are
+   * no fixed tiers yet (tiers is still empty), comparing a candidate
+   * against an empty array's last element (undefined) would make
+   * every "> " comparison false and silently drop every tier.
+   */
+  let lastValue = baseTl;
+
+  if (maxBudgetTl > baseTl) {
+    const count =
+      COUPON_BUDGET_LADDER_CONFIG.variableTierCount;
+
+    const step =
+      (maxBudgetTl - baseTl) / count;
+
+    for (let i = 1; i <= count; i += 1) {
+      const isLast = i === count;
+
+      const raw =
+        baseTl + step * i;
+
+      const value =
+        isLast
+          ? maxBudgetTl
+          : Math.round(
+              raw /
+              COUPON_BUDGET_LADDER_CONFIG.roundToNearestTl
+            ) *
+            COUPON_BUDGET_LADDER_CONFIG.roundToNearestTl;
+
+      if (value > lastValue) {
+        tiers.push(value);
+        lastValue = value;
+      }
+    }
+  }
+
+  return tiers.length
+    ? tiers
+    : [maxBudgetTl];
+}
 
 
 /*
@@ -508,36 +583,27 @@ function globallyOptimalCounts(
 }
 
 
-function optimizeProfile(
+function optimizeForBudgetTier(
   legs:
     PreparedLeg[],
-  profile:
-    CouponProfile,
-  budgetTl:
+  tierBudgetTl:
     number,
   unitPriceTl:
     number,
   multiplier:
     number
 ): OptimizedSixFoldCoupon {
-  const fraction =
-    PROFILE_FRACTIONS[
-      profile
-    ];
-
-  const targetBudgetTl =
-    Math.max(
-      unitPriceTl *
-        multiplier,
-      budgetTl *
-        fraction
-    );
-
+  /*
+   * Every tier spends up to its own full budget for the best
+   * achievable survival probability -- the ladder itself (which
+   * tier this is) is what expresses "cautious" vs "aggressive" now,
+   * not a fraction held back within a single budget. If this tier's
+   * budget can't afford even one combination, globallyOptimalCounts
+   * below throws BUDGET_BELOW_MINIMUM for it -- no artificial floor
+   * is applied here that would silently overspend the tier.
+   */
   const effectiveBudget =
-    Math.min(
-      budgetTl,
-      targetBudgetTl
-    );
+    tierBudgetTl;
 
   const counts =
     globallyOptimalCounts(
@@ -608,7 +674,8 @@ function optimizeProfile(
     );
 
   return {
-    profile,
+    profile:
+      String(tierBudgetTl),
 
     targetBudgetTl:
       Number(
@@ -618,7 +685,7 @@ function optimizeProfile(
 
     budgetTl:
       Number(
-        budgetTl.toFixed(2)
+        tierBudgetTl.toFixed(2)
       ),
 
     combinations:
@@ -636,7 +703,7 @@ function optimizeProfile(
     unusedBudgetTl:
       Number(
         (
-          budgetTl -
+          tierBudgetTl -
           cost.totalTl
         ).toFixed(2)
       ),
@@ -678,6 +745,12 @@ export function optimizeSixFoldCoupons(
   }
 ): OptimizedSixFoldCoupon[] {
   /*
+   * input.budgetTl is the user's MAX budget, a ceiling -- not a
+   * single amount to spend in full. See buildCouponBudgetLadder
+   * above: it is expanded into several coupons at increasing budget
+   * tiers (two fixed entry-point tiers, then evenly-spaced tiers up
+   * to and including this max), one per tier.
+   *
    * Shared by both TJK accumulator pools this system supports:
    * Altılı Ganyan (6 legs) and Beşli Ganyan (5 legs). Nothing below
    * this guard assumes a fixed leg count.
@@ -741,18 +814,16 @@ export function optimizeSixFoldCoupons(
         )
     );
 
-  return (
-    [
-      "cautious",
-      "balanced",
-      "maximum-coverage"
-    ] as CouponProfile[]
-  ).map(
-    profile =>
-      optimizeProfile(
+  const tiers =
+    buildCouponBudgetLadder(
+      input.budgetTl
+    );
+
+  return tiers.map(
+    tierBudgetTl =>
+      optimizeForBudgetTier(
         prepared,
-        profile,
-        input.budgetTl,
+        tierBudgetTl,
         input.unitPriceTl,
         multiplier
       )

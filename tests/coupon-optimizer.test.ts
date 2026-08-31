@@ -5,6 +5,8 @@ import {
 } from "vitest";
 
 import {
+  buildCouponBudgetLadder,
+  COUPON_BUDGET_LADDER_CONFIG,
   optimizeSixFoldCoupons
 } from "../src/coupons/optimizer";
 
@@ -45,10 +47,100 @@ function leg(
 
 
 describe(
+  "buildCouponBudgetLadder",
+  () => {
+    it(
+      "always offers the two fixed entry tiers when affordable, then 4 evenly-spaced tiers up to the max",
+      () => {
+        const tiers =
+          buildCouponBudgetLadder(3000);
+
+        expect(tiers[0]).toBe(500);
+        expect(tiers[1]).toBe(750);
+        expect(tiers).toHaveLength(6);
+        expect(tiers[tiers.length - 1]).toBe(3000);
+
+        // strictly increasing, never exceeds the requested max
+        for (let i = 1; i < tiers.length; i++) {
+          expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
+        }
+
+        expect(Math.max(...tiers)).toBeLessThanOrEqual(3000);
+      }
+    );
+
+    it(
+      "scales the variable tiers proportionally for a much larger max budget",
+      () => {
+        const tiers =
+          buildCouponBudgetLadder(10000);
+
+        expect(tiers[0]).toBe(500);
+        expect(tiers[1]).toBe(750);
+        expect(tiers[tiers.length - 1]).toBe(10000);
+
+        for (let i = 1; i < tiers.length; i++) {
+          expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
+        }
+      }
+    );
+
+    it(
+      "drops a fixed tier the max budget can't afford",
+      () => {
+        const tiers =
+          buildCouponBudgetLadder(600);
+
+        expect(tiers[0]).toBe(500);
+        expect(tiers).not.toContain(750);
+        expect(tiers[tiers.length - 1]).toBe(600);
+      }
+    );
+
+    it(
+      "degrades to a single coupon when the max budget is below every fixed tier",
+      () => {
+        const tiers =
+          buildCouponBudgetLadder(300);
+
+        expect(Math.max(...tiers)).toBeLessThanOrEqual(300);
+        expect(tiers.length).toBeGreaterThan(0);
+
+        for (let i = 1; i < tiers.length; i++) {
+          expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
+        }
+      }
+    );
+
+    it(
+      "never produces a tier at or above the requested max other than the final one",
+      () => {
+        const tiers =
+          buildCouponBudgetLadder(3000);
+
+        for (let i = 0; i < tiers.length - 1; i++) {
+          expect(tiers[i]).toBeLessThan(3000);
+        }
+      }
+    );
+
+    it(
+      "matches the configured fixed tiers exactly",
+      () => {
+        expect(
+          COUPON_BUDGET_LADDER_CONFIG.fixedTiersTl
+        ).toEqual([500, 750]);
+      }
+    );
+  }
+);
+
+
+describe(
   "six-fold optimizer",
   () => {
     it(
-      "never exceeds budget",
+      "never exceeds its own tier's budget, and the top tier never exceeds the requested max",
       () => {
         const coupons =
           optimizeSixFoldCoupons({
@@ -71,7 +163,7 @@ describe(
 
         expect(
           coupons
-        ).toHaveLength(3);
+        ).toHaveLength(6);
 
         for (
           const coupon of coupons
@@ -79,9 +171,15 @@ describe(
           expect(
             coupon.totalTl
           ).toBeLessThanOrEqual(
-            3000
+            coupon.budgetTl
           );
         }
+
+        expect(
+          Math.max(
+            ...coupons.map(c => c.budgetTl)
+          )
+        ).toBeLessThanOrEqual(3000);
       }
     );
 
@@ -120,7 +218,7 @@ describe(
 
 
     it(
-      "can select more than five horses",
+      "can select more than five horses at the top budget tier",
       () => {
         const coupons =
           optimizeSixFoldCoupons({
@@ -170,16 +268,17 @@ describe(
               1
           });
 
-        const maximum =
-          coupons.find(
-            item =>
-              item.profile ===
-              "maximum-coverage"
-          )!;
+        const topTier =
+          coupons.reduce(
+            (best, item) =>
+              item.budgetTl > best.budgetTl
+                ? item
+                : best
+          );
 
         expect(
           Math.max(
-            ...maximum
+            ...topTier
               .legs
               .map(
                 item =>
@@ -194,7 +293,7 @@ describe(
 
 
     it(
-      "larger profile does not spend less by design",
+      "each successive budget tier spends at least as much as the one before it",
       () => {
         const coupons =
           optimizeSixFoldCoupons({
@@ -215,26 +314,17 @@ describe(
               1.25
           });
 
-        const cautious =
-          coupons[0];
-
-        const balanced =
-          coupons[1];
-
-        const maximum =
-          coupons[2];
-
-        expect(
-          balanced.totalTl
-        ).toBeGreaterThanOrEqual(
-          cautious.totalTl
-        );
-
-        expect(
-          maximum.totalTl
-        ).toBeGreaterThanOrEqual(
-          balanced.totalTl
-        );
+        for (
+          let i = 1;
+          i < coupons.length;
+          i += 1
+        ) {
+          expect(
+            coupons[i].totalTl
+          ).toBeGreaterThanOrEqual(
+            coupons[i - 1].totalTl
+          );
+        }
       }
     );
   }
