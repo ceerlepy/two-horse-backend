@@ -21,6 +21,46 @@ export interface GlobalOutcomeRates {
 }
 
 
+/*
+ * Every tunable for entity-context learning (horse/jockey/pair)
+ * lives here, in one place -- same pattern as EXPERT_CHECK_CADENCE_
+ * TIERS in src/experts/policy.ts.
+ *
+ * contextPriors: per-entity-type (minSamples, fullReliabilityAt,
+ * blendWeight). Horse-jockey pair data is the sparsest, so it
+ * demands more evidence (a higher minSamples-to-fullReliability
+ * ratio) than a one-off win, and carries the smallest blend weight.
+ *
+ * relativeQualityWeights: winning matters most; top-3 stabilises a
+ * noisy sparse sample.
+ *
+ * rawSignalScale / rawSignalClamp: how much a relativeQuality of,
+ * say, 1.2 (20% better than baseline) turns into before reliability
+ * shrinkage -- (quality-1)*rawSignalScale, clamped to +/-rawSignalClamp.
+ *
+ * finalAdjustmentClamp: the outer production safety boundary, after
+ * blending and the runtime safety scale -- race-day model remains
+ * primary.
+ */
+export const LEARNING_ADJUSTMENT_CONFIG = {
+  contextPriors: {
+    horse: { minSamples: 6, fullReliabilityAt: 20, blendWeight: 0.50 },
+    jockey: { minSamples: 20, fullReliabilityAt: 80, blendWeight: 0.30 },
+    pair: { minSamples: 5, fullReliabilityAt: 15, blendWeight: 0.20 }
+  },
+
+  relativeQualityWeights: {
+    win: 0.60,
+    top3: 0.40
+  },
+
+  rawSignalScale: 20,
+  rawSignalClamp: 12,
+
+  finalAdjustmentClamp: 5
+} as const;
+
+
 function learnedSignal(
   prior:
     ContextPrior | null,
@@ -58,8 +98,10 @@ function learnedSignal(
    * top-3 stabilises a noisy sparse sample.
    */
   const relativeQuality =
-    0.60 * winRatio +
-    0.40 * top3Ratio;
+    LEARNING_ADJUSTMENT_CONFIG.relativeQualityWeights.win *
+      winRatio +
+    LEARNING_ADJUSTMENT_CONFIG.relativeQualityWeights.top3 *
+      top3Ratio;
 
   /*
    * quality=1 => neutral.
@@ -72,9 +114,9 @@ function learnedSignal(
       (
         relativeQuality -
         1
-      ) * 20,
-      -12,
-      12
+      ) * LEARNING_ADJUSTMENT_CONFIG.rawSignalScale,
+      -LEARNING_ADJUSTMENT_CONFIG.rawSignalClamp,
+      LEARNING_ADJUSTMENT_CONFIG.rawSignalClamp
     );
 
   /*
@@ -127,20 +169,29 @@ export function applyLearningAdjustment(
   baseScore: number;
   learningAdjustment: number;
 } {
+  const horseConfig =
+    LEARNING_ADJUSTMENT_CONFIG.contextPriors.horse;
+
+  const jockeyConfig =
+    LEARNING_ADJUSTMENT_CONFIG.contextPriors.jockey;
+
+  const pairConfig =
+    LEARNING_ADJUSTMENT_CONFIG.contextPriors.pair;
+
   const horse =
     learnedSignal(
       input.horse,
       input.global,
-      6,
-      20
+      horseConfig.minSamples,
+      horseConfig.fullReliabilityAt
     );
 
   const jockey =
     learnedSignal(
       input.jockey,
       input.global,
-      20,
-      80
+      jockeyConfig.minSamples,
+      jockeyConfig.fullReliabilityAt
     );
 
   /*
@@ -151,8 +202,8 @@ export function applyLearningAdjustment(
     learnedSignal(
       input.pair,
       input.global,
-      5,
-      15
+      pairConfig.minSamples,
+      pairConfig.fullReliabilityAt
     );
 
   const available =
@@ -161,21 +212,21 @@ export function applyLearningAdjustment(
         ? null
         : {
             value: horse,
-            weight: 0.50
+            weight: horseConfig.blendWeight as number
           },
 
       jockey == null
         ? null
         : {
             value: jockey,
-            weight: 0.30
+            weight: jockeyConfig.blendWeight as number
           },
 
       pair == null
         ? null
         : {
             value: pair,
-            weight: 0.20
+            weight: pairConfig.blendWeight as number
           }
     ]
       .filter(
@@ -236,8 +287,8 @@ export function applyLearningAdjustment(
       clamp(
         combined *
           safetyScale,
-        -5,
-        5
+        -LEARNING_ADJUSTMENT_CONFIG.finalAdjustmentClamp,
+        LEARNING_ADJUSTMENT_CONFIG.finalAdjustmentClamp
       ),
       2
     );
@@ -269,11 +320,25 @@ export function applyLearningAdjustment(
 
 
 /*
- * Expert calibration changes only that source's
- * own expert weight.
+ * Expert calibration changes only that source's own expert weight,
+ * comparing its overall (not per-category) hit rate against the
+ * global runner average -- see EXPERT_CATEGORY_CALIBRATION_CONFIG
+ * in expert-category.ts for its narrower, per-category sibling.
  *
  * Never more than +/-15%.
  */
+export const EXPERT_WEIGHT_CONFIG = {
+  minSampleSize: 30,
+  fullReliabilityAt: 150,
+
+  relativeQualityWeights: {
+    win: 0.65,
+    top3: 0.35
+  },
+
+  adjustmentCap: 0.15
+} as const;
+
 export function expertWeightMultiplier(
   input: {
     sampleSize: number;
@@ -285,7 +350,8 @@ export function expertWeightMultiplier(
 ): number {
   if (
     input == null ||
-    input.sampleSize < 30
+    input.sampleSize <
+      EXPERT_WEIGHT_CONFIG.minSampleSize
   ) {
     return 1;
   }
@@ -303,18 +369,27 @@ export function expertWeightMultiplier(
       : 1;
 
   const relative =
-    0.65 *
+    EXPERT_WEIGHT_CONFIG.relativeQualityWeights.win *
       winRatio +
-    0.35 *
+    EXPERT_WEIGHT_CONFIG.relativeQualityWeights.top3 *
       top3Ratio;
 
   const reliability =
     clamp(
       (
         input.sampleSize -
-        29
+        (
+          EXPERT_WEIGHT_CONFIG.minSampleSize -
+          1
+        )
       ) /
-      121,
+      (
+        EXPERT_WEIGHT_CONFIG.fullReliabilityAt -
+        (
+          EXPERT_WEIGHT_CONFIG.minSampleSize -
+          1
+        )
+      ),
       0,
       1
     );
@@ -325,10 +400,10 @@ export function expertWeightMultiplier(
         relative -
         1
       ) *
-        0.15 *
+        EXPERT_WEIGHT_CONFIG.adjustmentCap *
         reliability,
-      -0.15,
-      0.15
+      -EXPERT_WEIGHT_CONFIG.adjustmentCap,
+      EXPERT_WEIGHT_CONFIG.adjustmentCap
     );
 
   return round(
