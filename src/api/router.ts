@@ -29,6 +29,14 @@ import { ingestOfficialResults } from "../results/service";
 import { buildOfficialResultsUrl } from "../results/url";
 import { repairHistoricalDates } from "../results/historical-date-repair";
 import { getHorseVideos } from "../horses/service";
+import {
+  resolveSession,
+  loginWithGoogle,
+  loginWithPassword,
+  toPublicUser,
+  verifyPurchaseAndUpgrade
+} from "../membership/service";
+import { TIER_LIMITS } from "../membership/tier";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -48,13 +56,65 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  );
 
  if(url.pathname==="/api/health") return json({ok:true,app:env.APP_NAME,version:env.APP_VERSION,timestamp:new Date().toISOString()});
+
+ if(url.pathname==="/api/auth/google" && request.method==="POST") {
+  try {
+   const body=await request.json<any>();
+   const idToken=String(body?.idToken ?? "");
+   if(!idToken.trim()) return json({ok:false,error:"ID_TOKEN_REQUIRED"},400);
+   const {token,user}=await loginWithGoogle(env,idToken);
+   return json({ok:true,token,user});
+  } catch(e) {
+   return json({ok:false,error:errorMessage(e)},401);
+  }
+ }
+
+ if(url.pathname==="/api/auth/login" && request.method==="POST") {
+  try {
+   const body=await request.json<any>();
+   const email=String(body?.email ?? "");
+   const password=String(body?.password ?? "");
+   if(!email.trim() || !password) return json({ok:false,error:"EMAIL_AND_PASSWORD_REQUIRED"},400);
+   const {token,user}=await loginWithPassword(env,email,password);
+   return json({ok:true,token,user});
+  } catch(e) {
+   return json({ok:false,error:errorMessage(e)},401);
+  }
+ }
+
+ if(url.pathname==="/api/auth/me" && request.method==="GET") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  return json({ok:true,user:toPublicUser(session.user)});
+ }
+
+ if(url.pathname==="/api/billing/verify-purchase" && request.method==="POST") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  try {
+   const body=await request.json<any>();
+   const productId=String(body?.productId ?? "");
+   const purchaseToken=String(body?.purchaseToken ?? "");
+   if(!productId.trim() || !purchaseToken.trim()) return json({ok:false,error:"PRODUCT_ID_AND_PURCHASE_TOKEN_REQUIRED"},400);
+   const user=await verifyPurchaseAndUpgrade(env,session.user.id,productId,purchaseToken);
+   return json({ok:true,user});
+  } catch(e) {
+   return json({ok:false,error:errorMessage(e)},400);
+  }
+ }
+
  if(url.pathname==="/api/today") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
   const meetings=await getToday(env);
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
-  return json({date:turkeyDate(),meetings:toPublicMeetings(meetings),servedFrom:"d1",refreshingInBackground:true});
+  return json({date:turkeyDate(),meetings:toPublicMeetings(meetings,session.tier),servedFrom:"d1",refreshingInBackground:true});
  }
  if(url.pathname==="/api/horses/videos") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  if(!TIER_LIMITS[session.tier].canViewHorseVideos) return json({ok:false,error:"TIER_UPGRADE_REQUIRED"},403);
   const raceDate=url.searchParams.get("raceDate") ?? turkeyDate();
   const city=url.searchParams.get("city");
   const raceNumber=Number(url.searchParams.get("raceNumber"));
@@ -67,6 +127,19 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   return json(result);
  }
  if(url.pathname==="/api/coupons/generate") {
+  const couponSession=
+   request.method==="POST"
+    ? null
+    : await resolveSession(request,env);
+
+  if(request.method!=="POST" && !couponSession) {
+   return json({ok:false,error:"AUTH_REQUIRED"},401);
+  }
+
+  if(couponSession && !TIER_LIMITS[couponSession.tier].canGenerateCoupons) {
+   return json({ok:false,error:"TIER_UPGRADE_REQUIRED"},403);
+  }
+
   try {
    let city=
     url.searchParams.get(
@@ -168,6 +241,19 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     },400);
    }
 
+   if(couponSession) {
+    const maxBudgetTl=
+     TIER_LIMITS[couponSession.tier].maxCouponBudgetTl;
+
+    if(budgetTl>maxBudgetTl) {
+     return json({
+      ok:false,
+      error:"TIER_BUDGET_CAP_EXCEEDED",
+      maxBudgetTl
+     },403);
+    }
+   }
+
    const result=
     pool==="fivefold"
      ? await generateFiveFoldCoupons(
@@ -212,10 +298,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  }
 
  if(url.pathname==="/api/history") {
+  const historySession=await resolveSession(request,env);
+  if(!historySession) return json({ok:false,error:"AUTH_REQUIRED"},401);
   const limit=Math.max(1,Math.min(50,Math.floor(Number(url.searchParams.get("limit"))||20)));
   const offset=Math.max(0,Math.floor(Number(url.searchParams.get("offset"))||0));
   const {entries,total}=await getHistory(env,{limit,offset});
-  return json({history:toPublicHistory(entries),total,limit,offset});
+  return json({history:toPublicHistory(entries,historySession.tier),total,limit,offset});
  }
  if(url.pathname==="/api/admin/repair-historical-dates" && request.method==="POST") {
   try {

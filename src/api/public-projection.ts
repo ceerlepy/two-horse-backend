@@ -26,8 +26,24 @@
  * had (not who they were from), so the count is kept explicitly
  * rather than just deleting the array out from under it.
  */
+import type {
+  MembershipTier
+} from "../membership/tier";
+
+import {
+  stripPremiumRunnerSignals,
+  stripPremiumRaceSignals
+} from "../membership/tier";
+
+/*
+ * Free-tier callers see raw TJK program data (schedule, runner
+ * identity, form) but never the proprietary analysis layer
+ * (model score, expert consensus, market/field signals, race
+ * uncertainty, coupon strategy) -- that is the paid product.
+ */
 export function toPublicHistory(
-  entries: any[]
+  entries: any[],
+  tier: MembershipTier = "premium"
 ): any[] {
   return entries.map(
     entry => {
@@ -36,7 +52,7 @@ export function toPublicHistory(
         ...publicEntry
       } = entry;
 
-      return {
+      const withCount = {
         ...publicEntry,
 
         expertPredictionCount:
@@ -44,13 +60,32 @@ export function toPublicHistory(
             ? expertPredictions.length
             : 0
       };
+
+      if (
+        tier !== "free" ||
+        !Array.isArray(
+          withCount.runners
+        )
+      ) {
+        return withCount;
+      }
+
+      return {
+        ...withCount,
+
+        runners:
+          withCount.runners.map(
+            stripPremiumRunnerSignals
+          )
+      };
     }
   );
 }
 
 
 export function toPublicMeetings(
-  meetings: any[]
+  meetings: any[],
+  tier: MembershipTier = "premium"
 ): any[] {
   return meetings.map(
     meeting => ({
@@ -58,22 +93,35 @@ export function toPublicMeetings(
 
       races:
         (meeting.races ?? []).map(
-          (race: any) => ({
-            ...race,
+          (race: any) => {
+            const publicRace =
+              tier === "free"
+                ? stripPremiumRaceSignals(
+                    race
+                  )
+                : race;
 
-            runners:
-              (race.runners ?? []).map(
-                (runner: any) => {
-                  const {
-                    expertPredictions,
-                    shadowModelScore,
-                    ...publicRunner
-                  } = runner;
+            return {
+              ...publicRace,
 
-                  return publicRunner;
-                }
-              )
-          })
+              runners:
+                (race.runners ?? []).map(
+                  (runner: any) => {
+                    const {
+                      expertPredictions,
+                      shadowModelScore,
+                      ...publicRunner
+                    } = runner;
+
+                    return tier === "free"
+                      ? stripPremiumRunnerSignals(
+                          publicRunner
+                        )
+                      : publicRunner;
+                  }
+                )
+            };
+          }
         )
     })
   );

@@ -51,6 +51,44 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      - name: Sync SESSION_JWT_SECRET to Worker
+        shell: bash
+        run: |
+          test -n "$SESSION_JWT_SECRET" || {
+            echo "SESSION_JWT_SECRET GitHub secret is missing -- membership/login cannot work without it"
+            exit 1
+          }
+
+          printf '%s' "$SESSION_JWT_SECRET" | npx wrangler secret put SESSION_JWT_SECRET
+        env:
+          SESSION_JWT_SECRET: ${{ secrets.SESSION_JWT_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Sync Google Sign-In / Play Billing secrets to Worker
+        shell: bash
+        run: |
+          # These three are only needed once Google Sign-In and real Play
+          # purchases are configured. Until then this step is a no-op so
+          # it never blocks a deploy of unrelated backend changes.
+          if [ -n "$GOOGLE_CLIENT_ID" ]; then
+            printf '%s' "$GOOGLE_CLIENT_ID" | npx wrangler secret put GOOGLE_CLIENT_ID
+          fi
+
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" | npx wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON
+          fi
+
+          if [ -n "$PLAY_PACKAGE_NAME" ]; then
+            printf '%s' "$PLAY_PACKAGE_NAME" | npx wrangler secret put PLAY_PACKAGE_NAME
+          fi
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          PLAY_PACKAGE_NAME: ${{ secrets.PLAY_PACKAGE_NAME }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy Worker
         run: npx wrangler deploy
         env:

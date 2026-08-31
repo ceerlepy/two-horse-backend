@@ -10,12 +10,13 @@
     "types": "wrangler types"
   },
   "devDependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4",
-    "wrangler": "^4.0.0",
-    "@cloudflare/puppeteer": "1.4.0"
+    "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "cheerio": "^1.1.2"
+    "cheerio": "^1.1.2",
+    "jose": "^6.2.10"
   }
 }

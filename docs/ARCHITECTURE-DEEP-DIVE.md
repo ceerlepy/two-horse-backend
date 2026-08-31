@@ -2201,3 +2201,82 @@ prodüksiyon hatası: `horse_profile_url` göreli linkler yanlış temel
 adrese göre çözüldüğü için hep 403 veren kırık URL'ler içeriyordu —
 `src/tjk/html-parser.ts`'te düzeltildi (artık gerçek sayfa URL'sine
 göre çözülüyor), canlıda doğrulandı.
+
+---
+
+# 63. Üyelik sistemi (Free / Gold / Premium) — 2026-08-31 eklendi
+
+Login artık **zorunlu**: `src/membership/` altındaki modüller kimlik
+doğrulama, oturum ve katman (tier) mantığının tamamını taşıyor;
+`src/api/router.ts` içinde `/api/today`, `/api/coupons/generate`
+(GET), `/api/horses/videos`, `/api/history` artık geçerli bir oturum
+olmadan `401 AUTH_REQUIRED` döndürüyor. (POST `/api/coupons/generate`
+zaten ayrı bir mekanizmayla — `ADMIN_TOKEN` — korunuyordu, o yol
+değişmedi.)
+
+**Giriş yöntemleri**: `POST /api/auth/google` (Google ID token'ını
+`jose`'nin `createRemoteJWKSet` ile Google'ın gerçek JWKS'ine karşı
+doğrular — imza, `iss`, `aud`, `exp` hepsi kontrol edilir, hiçbir şey
+istemciden güvenilerek kabul edilmez) ve `POST /api/auth/login`
+(e-posta+şifre — şu an sadece elle eklenen/`manual` hesaplar için,
+örn. seed edilen admin hesabı). İkisi de kendi imzaladığımız, 30 gün
+geçerli bir HS256 oturum JWT'si (`SESSION_JWT_SECRET`) döndürür.
+Oturum JWT'si sadece `sub` (kullanıcı id) taşır — tier JWT içine
+gömülmez, her istekte D1'den taze okunur; aksi halde bir kullanıcının
+tier'ı düşürüldüğünde eski token süresi dolana kadar eski hakları
+kullanmaya devam edebilirdi.
+
+**Tier hesaplama** (`membership/tier.ts`, `effectiveTier`): DB'deki
+`tier` kolonu bayat olabilir (arka planda hiçbir cron onu düşürmüyor)
+— bu yüzden her okuma, o an geçerli tier'ı `tier_source`'a göre
+YENİDEN hesaplar: `manual` asla süresi dolmaz (seed edilen admin
+hesabı böyle); `trial`/`play_subscription` kendi `..._ends_at` /
+`..._expires_at` alanına bakar, geçmişse `free`'ye düşer — DB'de
+yazan tier ne olursa olsun.
+
+**Katmanlar** (`TIER_LIMITS`):
+- **Free**: TJK'nin ham program verisi (program, at kimliği, form)
+  serbest; kupon üretemez, at videosu göremez. `/api/today` ve
+  `/api/history` yanıtlarından `modelScore`, `expertConsensus`,
+  `marketMovement`, `fieldSignal`, `uncertainty`, `couponStrategy`
+  alanları (`public-projection.ts`'teki `stripPremiumRunnerSignals`/
+  `stripPremiumRaceSignals`) tamamen çıkarılıyor — yani ücretsiz
+  kullanıcı bizim asıl analiz katmanımızı hiç görmüyor.
+- **Gold**: Tüm analiz sinyalleri açık; kupon üretebilir ama tavan
+  bütçe 1500 TL ile sınırlı (`maxCouponBudgetTl`) — daha yüksek istek
+  `403 TIER_BUDGET_CAP_EXCEEDED` döner. At videosu hâlâ kilitli.
+- **Premium**: Sınırsız (kupon tavanı `Infinity`), at videosu dahil
+  her şey açık.
+
+Yeni kullanıcı Google ile ilk kez giriş yaptığında otomatik olarak
+**7 günlük Premium deneme** başlıyor (`TRIAL_DAYS`); süre dolunca
+`effectiveTier` otomatik `free`'ye düşürüyor, ayrı bir iş/cron
+gerekmiyor.
+
+**Play Billing doğrulaması**: `POST /api/billing/verify-purchase`
+istemcinin "satın aldım" iddiasına asla güvenmiyor — Play Developer
+API'nin `purchases.subscriptionsv2` uç noktasını, bir servis
+hesabının JWT-bearer OAuth2 akışıyla (`play-billing.ts`, yine
+`jose`) sorgulayıp aboneliğin gerçekten aktif olduğunu doğruladıktan
+sonra kullanıcının tier'ını günceller. `productId -> tier` eşlemesi
+(`PRODUCT_TIER_MAP`: `gold_monthly`→gold, `premium_monthly`→premium)
+Play Console'da oluşturulacak ürün ID'leriyle birebir eşleşmek
+zorunda.
+
+**Şifre saklama**: bcrypt yerine Node'un yerleşik `crypto.scrypt`'i
+kullanıldı (`nodejs_compat` zaten açık, ekstra bağımlılık gerekmedi).
+Kod: `scrypt:N:r:p:saltHex:hashHex` — self-describing, ileride
+parametre güçlendirmesi eski hash'leri bozmaz. Seed edilen admin
+hesabının (`veyseltosun.vt@gmail.com`, `manual`/`premium`, süresiz)
+şifresinin düz metni hiçbir zaman repoya yazılmadı; hash bu ortamda
+tek seferlik hesaplanıp doğrudan `migrations/0030_membership_seed_
+admin.sql`'e gömüldü.
+
+**Deploy gereksinimi**: `SESSION_JWT_SECRET` olmadan hiçbir oturum
+doğrulanamaz (`deploy.yml`'de `ADMIN_TOKEN` ile birebir aynı desende
+zorunlu GitHub secret; eksikse deploy adımı kasıtlı olarak başarısız
+olur ki eski kod canlıda kalsın, yarı-bozuk bir sürüm hiç yayınlanmasın).
+`GOOGLE_CLIENT_ID` / `GOOGLE_SERVICE_ACCOUNT_JSON` / `PLAY_PACKAGE_NAME`
+opsiyonel — onlar olmadan da deploy geçer, sadece Google girişi ve
+gerçek satın alma doğrulaması o secret'lar eklenene kadar
+`_NOT_CONFIGURED` hatası döner.
