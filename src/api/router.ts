@@ -28,6 +28,7 @@ import {
 import { ingestOfficialResults } from "../results/service";
 import { buildOfficialResultsUrl } from "../results/url";
 import { repairHistoricalDates } from "../results/historical-date-repair";
+import { getHorseVideos } from "../horses/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -52,6 +53,18 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
   return json({date:turkeyDate(),meetings:toPublicMeetings(meetings),servedFrom:"d1",refreshingInBackground:true});
+ }
+ if(url.pathname==="/api/horses/videos") {
+  const raceDate=url.searchParams.get("raceDate") ?? turkeyDate();
+  const city=url.searchParams.get("city");
+  const raceNumber=Number(url.searchParams.get("raceNumber"));
+  const horseNumber=Number(url.searchParams.get("horseNumber"));
+  if(!city || !Number.isInteger(raceNumber) || raceNumber<=0 || !Number.isInteger(horseNumber) || horseNumber<=0) {
+   return json({error:"INVALID_PARAMS"},400);
+  }
+  const result=await getHorseVideos(env,raceDate,city,raceNumber,horseNumber);
+  if("error" in result) return json(result,404);
+  return json(result);
  }
  if(url.pathname==="/api/coupons/generate") {
   try {
