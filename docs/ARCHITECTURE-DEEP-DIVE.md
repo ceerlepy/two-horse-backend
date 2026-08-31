@@ -2139,6 +2139,37 @@ taşınan ama kullanılmayan bir veri. Bu zararlı değil (yanlış bir şey
 yapmıyor) ama isim çağrışımı yanıltıcı olabilir — ileride bilinçli
 bir karar olarak ya optimizer'a bağlanmalı ya da kaldırılmalı.
 
+## 61.5 Bütçe merdiveni (budget ladder) — 3 profil yerine N bütçe kademesi
+
+2026-08-31'de eklendi: kullanıcının girdiği `budgetTl` artık "tam
+harcanacak tek bütçe" değil, bir TAVAN. `buildCouponBudgetLadder`
+(`optimizer.ts`) bu tavanı birden fazla somut kupona böler:
+
+- İki sabit kademe her zaman önce gelir: **500 TL ve 750 TL**
+  (kullanıcının tavanı bunları karşılıyorsa) — herkes için aynı,
+  günden güne karşılaştırılabilir bir "giriş noktası".
+- Ardından, en yüksek uygun sabit kademeden kullanıcının tavanına
+  kadar **4 eşit aralıklı** kademe daha eklenir; sonuncusu her zaman
+  tam olarak tavanın kendisi (`step = (tavan - 750) / 4`).
+- Ortadaki 3 kademe 50 TL'nin katına yuvarlanır (temiz sayılar için);
+  ilk iki sabit kademe ve son kademe (tavanın kendisi) yuvarlanmaz.
+
+Örnek — tavan 3000 TL: **500, 750, 1300, 1900, 2450, 3000** (6 kupon).
+Örnek — tavan 10.000 TL: **500, 750, 3050, 5400, 7700, 10000** (6 kupon,
+adımlar orantılı büyür).
+
+Her kademe kendi bütçesini `optimizeForBudgetTier` ile TAM olarak
+harcayabildiği kadar harcar (eski "cautious/balanced/maximum-coverage"
+üç-profil sistemi kaldırıldı — artık "temkinlilik" ayrı bir kesir
+değil, doğrudan HANGİ bütçe kademesine bakıldığı). `profile` alanı
+(DB kolonu dahil, geriye dönük uyumluluk için adı değişmedi) artık
+strateji adı değil, o kademenin bütçe miktarını metin olarak taşıyor
+(ör. `"1300"`).
+
+Tavan, en düşük sabit kademeden (500 TL) küçükse merdiven tek kupona
+düşer (`buildCouponBudgetLadder` boş kalırsa `[tavan]` döner) —
+zarif bir kenar durumu, hata fırlatmaz.
+
 ---
 
 # 62. Beşli Ganyan ve at videosu özellikleri (2026-08-31 eklemeleri)
