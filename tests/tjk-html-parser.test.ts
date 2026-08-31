@@ -189,6 +189,59 @@ describe("TJK city parser", () => {
     );
   });
 
+  it("resolves a relative horse profile href against the real page URL, not the bare domain", () => {
+    /*
+     * TJK's name-cell links are relative
+     * ("../../Query/ConnectedPage/AtKosuBilgileri?..."), not
+     * absolute. Resolving that against just "https://www.tjk.org"
+     * (no path) silently drops the "/TR/YarisSever" prefix the real
+     * site lives under, producing a URL that 404s -- this is exactly
+     * what shipped to production until it was caught building the
+     * horse-video feature, which depends on fetching this URL.
+     */
+    const relativeHtml = `
+      <html>
+        <body>
+          <h3>1. Koşu 17.00</h3>
+          <h3>1200 Kum</h3>
+
+          <table>
+            <tr>
+              <th>No</th>
+              <th>At İsmi</th>
+              <th>Jokey</th>
+            </tr>
+
+            <tr>
+              <td>1</td>
+              <td>
+                <a href="../../Query/ConnectedPage/AtKosuBilgileri?1=1&QueryParameter_AtId=94999&Era=today">
+                  SELLYBOY
+                </a>
+              </td>
+              <td>JOKEY A</td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const meeting =
+      parseTjkMeetingPage(
+        relativeHtml,
+        "Bursa",
+        "https://www.tjk.org/TR/YarisSever/Info/Sehir/GunlukYarisProgrami?SehirId=4"
+      );
+
+    expect(
+      meeting.races[0]
+        .runners[0]
+        .horseProfileUrl
+    ).toBe(
+      "https://www.tjk.org/TR/YarisSever/Query/ConnectedPage/AtKosuBilgileri?1=1&QueryParameter_AtId=94999&Era=today"
+    );
+  });
+
   it("keeps runner number/name pairs intact", () => {
     const meeting =
       parseTjkMeetingPage(

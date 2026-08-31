@@ -833,7 +833,8 @@ async function meetingThroughFourStages(
         const parsed =
           parseTjkMeetingPage(
             httpResult.html,
-            city
+            city,
+            url
           );
 
         assertCompleteMeeting(parsed);
@@ -873,7 +874,7 @@ async function meetingThroughFourStages(
       diagnostics,
       async () => {
         const meeting =
-          parseTjkMeetingPage(html, city);
+          parseTjkMeetingPage(html, city, url);
 
         assertCompleteMeeting(meeting);
         return meeting;
@@ -900,7 +901,7 @@ async function meetingThroughFourStages(
       diagnostics,
       async () => {
         const meeting =
-          parseTjkMeetingPage(html, city);
+          parseTjkMeetingPage(html, city, url);
 
         assertCompleteMeeting(meeting);
         return meeting;
