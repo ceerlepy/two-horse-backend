@@ -1727,6 +1727,92 @@ Eşik altında multiplier = 1 (etkisiz). Üstünde reliability
 Bir source genelde iyi ama belirli bir kategoride sıradan olabilir —
 bu mekanizma bunu ayrı ayrı yakalar.
 
+### 54.2.1 İşlenmiş örnek — afa / "rival"
+
+Canlı veri (2026-08-30): afa'nın "rival" pickleri 69 örnek, kazanma
+%21.74, ilk-3 %47.83. Tüm kaynakların "rival" ortalaması (123 örnek):
+kazanma %17.07, ilk-3 %47.15.
+
+**1. Oranlar** — her metrik kendi ortalamasına bölünür (oran > 1 =
+ortalamadan iyi):
+
+```
+winRatio  = 0.2174 / 0.1707 = 1.2735
+top3Ratio = 0.4783 / 0.4715 = 1.0144
+```
+
+**2. Ağırlıklı ortalama** — kazanma tahmini daha değerli/daha az
+gürültülü olduğu için %65 pay alır, ilk-3 küçük örneklerdeki
+gürültüyü dengeleyen ikincil sinyal olarak %35 pay alır:
+
+```
+kalite = 0.65 × 1.2735 + 0.35 × 1.0144
+       = 0.8278 + 0.3550
+       = 1.1828   (→ ortalamadan %18.28 daha iyi)
+```
+
+**3. Güven (reliability)** — minSamples("rival") = 30. 69 örnek bu
+eşiğin 39 üstünde; +1 eşiği tam karşılayan örnek sıfır güvenle
+başlamasın diye; /100 çünkü "minSamples'in 100 üstünde tam güven"
+kuralı var (yani 30+100=130 örnekte %100):
+
+```
+güven = (69 - 30 + 1) / 100 = 40/100 = 0.40
+```
+
+**4. Düzeltme** — (kalite-1) sapmayı sıfır-merkezli hale getirir;
+×0.12 mekanizmanın MUTLAK tavanıdır (sapma ne kadar büyük olursa
+olsun bu kategori-kalibrasyonu ağırlığı en fazla %12 değiştirebilir);
+×güven o tavanın ne kadarının gerçekten hak edildiğini belirler:
+
+```
+düzeltme = (1.1828 - 1) × 0.12 × 0.40
+         = 0.1828 × 0.12 × 0.40
+         = 0.0088   (round, 4 ondalık)
+```
+
+**5. Çarpan:**
+
+```
+çarpan = 1 + 0.0088 = 1.0088
+```
+
+afa'nın rival oyu, konsensüs hesaplanırken diğer kaynaklara göre
+**binde 8.8 daha ağır** sayılır — küçük ama gerçek, ve iki ayrı
+mekanizma (sabit tavan + örnek-sayısına-göre-güven) sayesinde asla
+tek bir iyi/kötü seriden abartıya kaçamaz.
+
+### 54.2.2 Neden ±%12 (kaynak seviyesindeki ±%15'ten küçük)?
+
+Bu bilinçli bir sıralama, hata değil: kaynak-seviyesi kalibrasyon
+(54.1) bir source'un TÜM picklerine (yüzlerce örnek olabilir)
+dayanır — daha geniş, daha az gürültülü bir sinyal, o yüzden ±%15
+tavanı var. Kategori-seviyesi kalibrasyon (54.2) aynı source'un TEK
+bir kategorisine (örn. sadece "rival" pickleri) dayanır — daha dar,
+doğası gereği daha gürültülü bir dilim, o yüzden tavanı daha düşük
+(±%12) tutulmuştur: **ne kadar ince taneli (granular) bir sinyalse,
+tavanı o kadar düşük olmalı.**
+
+Bu iki sayı için literatürde tek bir "endüstri standardı" yoktur —
+bu, published bir ML metodu değil, sistemin kendi empirical-shrinkage
+tasarımıdır. %12 seçimi şu üç gözlemle savunulabilir:
+(1) reliability rampası zaten çoğu durumda tavana hiç yaklaşmıyor —
+gerçek etkiler genelde tavanın çok altında kalıyor (bu örnekte olduğu
+gibi: tavan %12 iken gerçekleşen etki sadece %0.88);
+(2) veri hacmi hâlâ küçük (toplam ~200 etiketlenmiş yarış) — büyük
+bir tavan, erken/şanslı bir seriyi kalıcı ağırlık avantajına
+çevirebilir;
+(3) kaynak-seviyesi tavanın (%15) altında kalması gereken bir sayı
+olduğu için üst sınırı zaten %15'tir.
+
+Sonuç: %12 düşük değil, **kasıtlı ve tutarlı şekilde muhafazakâr** —
+gerçek dünya sonuçlarıyla doğrulama imkânı olmadan (backend
+kapatılacağı için) bu turda değiştirilmedi. İleride daha fazla
+etiketlenmiş yarış birikirse ve gerçek performans verisiyle "%12
+gerçekten çok mu düşük" sorusu ölçülebilirse, tek satırlık bir
+değişiklikle (SIXFOLD_CALIBRATION_CONFIG'teki maxTemperatureShift
+gibi, ama bu expert-category.ts'teki sabit) yükseltilebilir.
+
 ## 54.3 At/jokey/çift bağlam öncülleri (context priors)
 
 En granüler seviye: "bu at, bu şehir + bu pist + bu mesafe bandında
