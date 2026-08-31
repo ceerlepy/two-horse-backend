@@ -1944,7 +1944,7 @@ uygulamanın veri modeliyle ilgisi yok.
 expertCheckIntervalMs, yarışa kalan süreye göre bir tier tablosu
 kullanır — sabit if/else zinciri değil, tek bir dizi:
 
->2 saat  → 360 dk (6 saat)
+>2 saat  → 120 dk (2 saat)
 2-1 saat → 15 dk
 1 saat-30 dk → 10 dk
 <30 dk   → 5 dk
@@ -1954,11 +1954,13 @@ scrape basamağı) tüketebilir — ikisi de faturalanır. Yarışa uzakken
 sık kontrol hiçbir tazelik kazandırmaz; bir source'un yayınladığı
 içerik saatler içinde anlamlı şekilde değişmez.
 
-6 saatlik tier iki kısıt arasında bir denge: "yarışa 2 saatten uzakken
+2 saatlik tier iki kısıt arasında bir denge: "yarışa 2 saatten uzakken
 hiç kontrol etme" maliyeti en aza indirir ama sabahtan geç yayınlanan
 bir kartın saatlerce keşfedilmemiş kalmasına yol açabilir — bu
 uygulamanın temel değeri günün uzman tahminlerini göstermek, yalnızca
-son 2 saatte açanlara değil. 6 saat, günde birkaç kontrol garantiler.
+son 2 saatte açanlara değil. 2 saat, önceki 6 saatlik tiere göre
+sabah/öğlen yayınlanan bir kartı çok daha erken yakalar, günde de
+yeterince sık kontrol garantiler.
 
 Bu tablo aynı zamanda expertFailureBackoffMs ile birlikte çalışır:
 art arda başarısız bir source, kendi ayrı backoff'una girer (15/30/60
@@ -2013,3 +2015,158 @@ gerektirir, bu da mobil app'in veri sözleşmesini değiştirir.
 Bölüm 50'deki beş plane modeli hâlâ geçerli; bu eklemeler o modelin
 FEATURE PLANE (bölüm 51-53), LEARNING PLANE (bölüm 54, 56) ve CONTROL
 PLANE (bölüm 55, 57-59) katmanlarını derinleştirir, değiştirmez.
+
+---
+
+# 61. Kupon optimizer'ın leg başına at sayısı seçimi — derinlemesine
+
+Bölüm 31-32'nin kısa özetini burada gerçek canlı verilerle, adım adım
+açıyoruz. Soru şu: neden bir kuponun bir ayağında (leg) tek at
+seçiliyor, bir başka ayağında 9 at seçiliyor — bu gerçekten yarışın
+kendi verisine mi dayanıyor, yoksa gelişigüzel mi?
+
+**Cevap: gerçekten veriye dayanıyor, ve mekanizma iki katmanlı.**
+
+## 61.1 Katman 1 — her ayağın kendi "at başına kazanma olasılığı" dağılımı
+
+`optimizer.ts`'deki `runnerProbabilities` fonksiyonu, o ayaktaki her
+atın ham model skorunu (form, HP, AGF, uzman konsensüsü, piyasa
+hareketi gibi bileşenlerden üretilen `score`) bir softmax ile
+olasılığa çevirir:
+
+```
+weight(at) = exp((score(at) - enYüksekSkor) / temperature)
+             × (0.60 + 0.40 × confidence(at))
+
+probability(at) = weight(at) / Σ weight(tüm atlar)
+```
+
+Burada iki şey doğrudan yarışın gerçek verisinden geliyor:
+
+- **score farkı**: bir at diğerlerinden çok daha yüksek skorluysa
+  (form/HP/uzman/piyasa hepsi onu işaret ediyorsa), `exp(...)` terimi
+  onun olasılığını agresifçe yükseltir, geri kalanları bastırır —
+  dağılım "sivri" (bir favoriye yığılmış) olur.
+- **score'lar birbirine yakınsa** (yarış gerçekten belirsizse),
+  `exp(...)` terimleri birbirine yakın kalır — dağılım "yayvan"
+  (çok ata yayılmış) olur.
+- **confidence** (bkz. bölüm 29) düşükse, o atın ağırlığı ekstra
+  küçültülür — modelin kendisi de o attan emin değilse, dağılım daha
+  da yayvanlaşır.
+
+`temperature` sabit değil — `coupons/calibration.ts`'deki
+`currentSixFoldTemperature`/`currentFiveFoldTemperature`'dan gelir ve
+sistemin kendi geçmiş kupon sonuçlarına göre kalibre edilir (bkz.
+bölüm 56).
+
+## 61.2 Katman 2 — bütçe altında, TÜM ayaklar birlikte, kombinasyonel optimizasyon
+
+Tek başına olasılık dağılımı yeterli değil — asıl soru "bu bütçeyle
+hangi ayakta kaç at seçersem, kuponun TÜMÜNÜN kazanma ihtimalini
+(survivalProbability = tüm ayakların coverage'larının ÇARPIMI)
+maksimize ederim" sorusu. Bu `globallyOptimalCounts`'ın işi:
+ayakları ikiye bölüp (meet-in-the-middle), bütçeye sığan tüm
+kombinasyon sayılarını tarayıp, çarpım-olasılığı en yüksek olan
+dağılımı bulur (bkz. bölüm 32).
+
+Kritik nokta: bir ayağa **1 at daha eklemek**, o ayağın kendi
+coverage'ını artırır ama toplam kombinasyon sayısını (=maliyeti)
+DİĞER TÜM AYAKLARIN mevcut at sayılarıyla çarparak büyütür. Yani:
+
+- Zaten sivri bir dağılımı olan ayakta (bir favori %60+ olasılık
+  taşıyorsa) ikinci bir at eklemek coverage'ı belki %60'tan %75'e
+  çıkarır — küçük kazanç, ama maliyeti 2 katına katlar. Optimizer
+  bunu genelde "değmez" bulur, 1 at ile bırakır.
+- Yayvan dağılımlı ayakta ilk birkaç at coverage'ı hızla yükseltir
+  (%25 → %40 → %50 gibi) — marjinal kazanç yüksek, optimizer bu
+  ayağa daha fazla at "yatırır".
+
+## 61.3 Gerçek canlı örnek (2026-08-31, Elazığ, Beşli Ganyan, cautious profil)
+
+Bu tam olarak canlı üretimden çekilmiş, uydurulmamış bir örnek:
+
+**Koşu 5 — optimizer 1 at seçti:**
+
+```
+#1 EMOHELİL   score=70.81  probability=0.632
+```
+
+Tek at %63.2 olasılık taşıyor — ikinci en iyi at bu listede bile yok
+çünkü payı ihmal edilebilir düzeyde küçük. Buraya 2. at eklemek
+kuponun toplam maliyetini ikiye katlardı, coverage'a katkısı düşük
+olurdu. Optimizer haklı olarak 1 at ile bırakıyor.
+
+**Koşu 8 — optimizer 9 at seçti:**
+
+```
+#2 SEDERİ GÜZELİ   score=59.12  probability=0.258
+#1 FİRİYOZA        score=53.00  probability=0.166
+#3 LEZGİNTAY       score=47.40  probability=0.111
+#4 GÜZELBİLGE      score=43.16  probability=0.075
+#8 CANŞİLAN        score=41.04  probability=0.071
+#10 SON KRALİÇE     score=40.16  probability=0.060
+#5 NARLIGÖL        score=39.03  probability=0.056
+#6 ELİFNAZ HANIM   score=38.06  probability=0.057
+#7 GÜNÇİÇEK        score=38.01  probability=0.057
+```
+
+En iyi at bile sadece %25.8 — yani bu koşuda model "belirgin bir
+favori yok" diyor, skorlar birbirine çok yakın. Tek at ile coverage
+%26 civarında kalırdı; optimizer, bütçenin izin verdiği ölçüde bu
+ayağa çok daha fazla at "yatırarak" coverage'ı %91'e (bu kuponun
+gerçek `coverageProbability` değeri) çıkarıyor — çünkü marjinal
+kazanç burada çok yüksek.
+
+Aynı kuponun diğer ayakları (Koşu 4: 5 at, Koşu 6: 5 at, Koşu 7: 2
+at) bu ikisinin arasında, kendi dağılımlarının sivri/yayvanlığına
+göre.
+
+**Sonuç: evet, at sayısı ayaktan ayağa gerçekten o günün gerçek model
+skorlarına göre değişiyor — uydurma ya da sabit bir kural değil.**
+
+## 61.4 Dürüst bir not: `uncertainty` alanı şu an optimizer'ı etkilemiyor
+
+Kod incelemesinde şu bulundu: `CouponLegInput.uncertainty` (skor
+hesaplamasındaki `expansionPressure`'dan geliyor, bkz. bölüm 29-30)
+her ayak için taşınıyor ve `prepareLeg`'de 0-1 aralığına
+clamp'leniyor, ama `selectedCoverage`, `survivalProbability`,
+`enumerateHalf`, `globallyOptimalCounts` fonksiyonlarının HİÇBİRİ bu
+alanı okumuyor. Yani bölüm 61.1-61.3'te anlatılan risk-duyarlı
+davranış TAMAMEN olasılık dağılımının şeklinden (score farkı +
+confidence) geliyor — ayrı, açık bir "bu yarış riskli" sinyalinden
+değil. `uncertainty` alanı şu anda optimizer'a hiçbir etkisi olmayan,
+taşınan ama kullanılmayan bir veri. Bu zararlı değil (yanlış bir şey
+yapmıyor) ama isim çağrışımı yanıltıcı olabilir — ileride bilinçli
+bir karar olarak ya optimizer'a bağlanmalı ya da kaldırılmalı.
+
+---
+
+# 62. Beşli Ganyan ve at videosu özellikleri (2026-08-31 eklemeleri)
+
+**Beşli Ganyan**: TJK'nin canlı program sayfasında Altılı Ganyan'ın
+("1./2. 6'LI GANYAN Bu koşudan başlar") birebir yapısal ikizi olarak
+"1./2. 5'Lİ GANYAN" işareti bulunduğu doğrulandıktan sonra eklendi
+(`src/tjk/html-parser.ts`'teki `FIVE_FOLD_MARKER_RE`). Altılı'nın
+optimizer/kalibrasyon kodunun geneli zaten leg sayısından bağımsızdı;
+sadece `optimizer.ts`'nin tek sabit kontrolü (`legs.length !== 6`)
+5 veya 6'ya gevşetildi. Pencere çözümleme, snapshot kaydı,
+değerlendirme ve olasılık kalibrasyonu Altılı'dan tamamen ayrı
+tablolarla (`fivefold_*`) ve fonksiyonlarla yürüyor — böylece 5'li
+havuzun kendi isabet oranı 6'lı ile hiç karışmıyor. `/api/coupons/
+generate?pool=fivefold` ile erişiliyor. Not: TJK'nin Beşli Ganyan
+için ayrı bir kombinasyon fiyatı yayınladığı bir kaynak
+bulunamadı — `fiveFoldUnitPrice` şimdilik Altılı'nın fiyatını
+kullanıyor, kodda açıkça "doğrulanmadı" diye işaretli.
+
+**At videosu**: TJK'nin program sayfasındaki at isim linki
+(`runners.horse_profile_url`, zaten her parse'ta toplanıyordu) atın
+`AtKosuBilgileri` (geçmiş yarış tablosu) sayfasına gidiyor; o sayfada
+her koşulan yarış satırında bir `videoAnchor` linki var
+(`/Info/YarisVideoAt/At?AtKodu=..&KosuKodu=..`). `src/horses/
+video-archive.ts` bu sayfayı TEK istekle çekip en yeni 3 videoyu
+çıkarıyor, `horse_video_cache` tablosunda 12 saat önbellekliyor,
+`/api/horses/videos` ile sunuyor. Bunu kurarken bulunan ayrı bir
+prodüksiyon hatası: `horse_profile_url` göreli linkler yanlış temel
+adrese göre çözüldüğü için hep 403 veren kırık URL'ler içeriyordu —
+`src/tjk/html-parser.ts`'te düzeltildi (artık gerçek sayfa URL'sine
+göre çözülüyor), canlıda doğrulandı.
