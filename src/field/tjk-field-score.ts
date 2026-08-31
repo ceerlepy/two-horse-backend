@@ -7,6 +7,48 @@ import type {
   TjkFieldHistoryRow
 } from "./tjk-performance-parser";
 
+/*
+ * Every tunable for this feature lives here, in one place -- same
+ * pattern as EXPERT_CHECK_CADENCE_TIERS in src/experts/policy.ts.
+ *
+ * finishPositionScores: a finish position's raw contribution to the
+ * field score, 1st place strongest down to a shared "unplaced/
+ * unknown" floor for position 0 or anything outside 1-9.
+ *
+ * recencyWeights: how much each of a horse's most recent races
+ * (index 0 = newest) counts toward the blended score; also caps how
+ * many past races are considered at all (its length).
+ *
+ * reliabilityDivisor: sample count needed to fully trust the raw
+ * blended score instead of shrinking it toward a neutral 50 -- see
+ * scoreTjkFieldHistory below.
+ */
+export const TJK_FIELD_SCORE_CONFIG = {
+  finishPositionScores: {
+    1: 100,
+    2: 86,
+    3: 74,
+    4: 63,
+    5: 53,
+    6: 44,
+    7: 36,
+    8: 29,
+    9: 23
+  } as Record<number, number>,
+
+  unplacedScore: 15,
+
+  recencyWeights: [
+    1.00,
+    0.85,
+    0.70,
+    0.55,
+    0.40
+  ],
+
+  reliabilityDivisor: 3
+} as const;
+
 function finishScore(
   position:
     number | null
@@ -17,51 +59,15 @@ function finishScore(
     return null;
   }
 
-  switch (
-    position
-  ) {
-    case 1:
-      return 100;
-
-    case 2:
-      return 86;
-
-    case 3:
-      return 74;
-
-    case 4:
-      return 63;
-
-    case 5:
-      return 53;
-
-    case 6:
-      return 44;
-
-    case 7:
-      return 36;
-
-    case 8:
-      return 29;
-
-    case 9:
-      return 23;
-
-    case 0:
-      return 15;
-
-    default:
-      return 15;
-  }
+  return (
+    TJK_FIELD_SCORE_CONFIG
+      .finishPositionScores[position] ??
+    TJK_FIELD_SCORE_CONFIG.unplacedScore
+  );
 }
 
-const RECENCY_WEIGHTS = [
-  1.00,
-  0.85,
-  0.70,
-  0.55,
-  0.40
-];
+const RECENCY_WEIGHTS =
+  TJK_FIELD_SCORE_CONFIG.recencyWeights;
 
 export interface TjkFieldScore {
   score: number | null;
@@ -143,7 +149,8 @@ export function scoreTjkFieldHistory(
    */
   const reliability =
     clamp(
-      usable.length / 3,
+      usable.length /
+        TJK_FIELD_SCORE_CONFIG.reliabilityDivisor,
       0,
       1
     );
