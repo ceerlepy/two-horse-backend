@@ -41,11 +41,13 @@ import {
 } from "./results/runtime";
 
 import {
-  evaluatePendingSixFoldCoupons
+  evaluatePendingSixFoldCoupons,
+  evaluatePendingFiveFoldCoupons
 } from "./coupons/repository";
 
 import {
-  recalibrateSixFoldProbabilities
+  recalibrateSixFoldProbabilities,
+  recalibrateFiveFoldProbabilities
 } from "./coupons/calibration";
 
 import {
@@ -137,6 +139,24 @@ async function runScheduledPipeline(
     "coupons.recalibrate",
     () =>
       recalibrateSixFoldProbabilities(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "coupons.evaluate.fivefold",
+    () =>
+      evaluatePendingFiveFoldCoupons(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "coupons.recalibrate.fivefold",
+    () =>
+      recalibrateFiveFoldProbabilities(
         env
       )
   );

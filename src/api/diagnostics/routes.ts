@@ -1599,6 +1599,19 @@ export async function routeDiagnostics(
         WHERE id = 1
       `).first<any>();
 
+    const fivefoldCalibration =
+      await env.DB.prepare(`
+        SELECT
+          sample_count,
+          predicted_avg_coverage,
+          actual_hit_rate,
+          temperature,
+          status,
+          updated_at
+        FROM fivefold_probability_calibration
+        WHERE id = 1
+      `).first<any>();
+
     const officialResults =
       await env.DB.prepare(`
         SELECT
@@ -1741,6 +1754,9 @@ export async function routeDiagnostics(
       sixfoldCouponHealth,
       sixfoldCalibration:
         sixfoldCalibration ?? null,
+
+      fivefoldCalibration:
+        fivefoldCalibration ?? null,
 
       officialResults,
 

@@ -22,6 +22,12 @@ export const tjkMeetingJsonSchema = {
               type: "integer"
             }
           },
+          fivefoldStartNumbers: {
+            type: "array",
+            items: {
+              type: "integer"
+            }
+          },
           runners: {
             type: "array",
             items: {

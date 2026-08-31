@@ -17,7 +17,7 @@ import {
 import { getHistory } from "../history/service";
 import { refreshHorseForms } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
-import { generateSixFoldCoupons } from "../coupons/service";
+import { generateSixFoldCoupons, generateFiveFoldCoupons } from "../coupons/service";
 import { adminAuthFailure } from "./auth";
 import { logger } from "../observability/logger";
 import { systemDiagnosticResponse } from "./system-diagnostics";
@@ -94,6 +94,11 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
      ) ?? "1"
     );
 
+   let pool=
+    url.searchParams.get(
+     "pool"
+    ) ?? "sixfold";
+
    if(
     request.method==="POST"
    ) {
@@ -124,6 +129,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
       body?.multiplier ??
       multiplier
      );
+
+    pool=
+     String(
+      body?.pool ??
+      pool
+     );
    }
 
    if(
@@ -147,21 +158,48 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     },400);
    }
 
+   if(
+    pool!=="sixfold" &&
+    pool!=="fivefold"
+   ) {
+    return json({
+     ok:false,
+     error:"INVALID_POOL"
+    },400);
+   }
+
    const result=
-    await generateSixFoldCoupons(
-     env,
-     {
-      city,
-      budgetTl,
-      sixfold,
-      multiplier,
-      persistSnapshot:
-       request.method==="POST"
-     }
-    );
+    pool==="fivefold"
+     ? await generateFiveFoldCoupons(
+        env,
+        {
+         city,
+         budgetTl,
+         fivefold:sixfold,
+         multiplier,
+         persistSnapshot:
+          request.method==="POST"
+        }
+       )
+     : await generateSixFoldCoupons(
+        env,
+        {
+         city,
+         budgetTl,
+         sixfold,
+         multiplier,
+         persistSnapshot:
+          request.method==="POST"
+        }
+       );
 
    return json({
     ok:true,
+    pool,
+    windowNumber:
+     pool==="fivefold"
+      ?(result as any).fivefold
+      :(result as any).sixfold,
     ...result
    });
 

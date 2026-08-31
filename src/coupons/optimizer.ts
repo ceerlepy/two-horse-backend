@@ -677,11 +677,17 @@ export function optimizeSixFoldCoupons(
       number;
   }
 ): OptimizedSixFoldCoupon[] {
+  /*
+   * Shared by both TJK accumulator pools this system supports:
+   * Altılı Ganyan (6 legs) and Beşli Ganyan (5 legs). Nothing below
+   * this guard assumes a fixed leg count.
+   */
   if (
+    input.legs.length !== 5 &&
     input.legs.length !== 6
   ) {
     throw new Error(
-      "SIX_FOLD_REQUIRES_6_LEGS"
+      "GANYAN_POOL_REQUIRES_5_OR_6_LEGS"
     );
   }
 

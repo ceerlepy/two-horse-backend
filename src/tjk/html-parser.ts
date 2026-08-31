@@ -433,8 +433,27 @@ function directText(
 }
 
 
-function parseSixFoldStartNumbers(
-  $: cheerio.CheerioAPI
+/*
+ * TJK prints a start-of-window marker inside the corresponding
+ * race's own section, e.g.:
+ *
+ *   1. 6'LI GANYAN Bu koşudan başlar
+ *   2. 6'LI GANYAN Bu koşudan başlar
+ *
+ * A day that runs only a single window of a pool omits the leading
+ * "1."/"2." entirely (observed live for both 5'Lİ GANYAN and the
+ * unrelated 7'Lİ GANYAN) -- in that case it is that pool's sole
+ * (first) window for the day.
+ */
+const SIX_FOLD_MARKER_RE =
+  /\b([12])\s*\.\s*6\s*['’]?\s*LI\s+GANYAN\b.*\bbu\s+koşudan\s+başlar\b/iu;
+
+const FIVE_FOLD_MARKER_RE =
+  /(?:\b([12])\s*\.\s*)?5\s*['’]?\s*Lİ\s+GANYAN\b/iu;
+
+function parseGanyanStartNumbers(
+  $: cheerio.CheerioAPI,
+  markerPattern: RegExp
 ): Map<number, number[]> {
   const result =
     new Map<
@@ -448,12 +467,6 @@ function parseSixFoldStartNumbers(
 
   /*
    * Walk DOM in document order.
-   *
-   * TJK prints the six-fold marker inside the
-   * corresponding race section:
-   *
-   *   1. 6'LI GANYAN Bu koşudan başlar
-   *   2. 6'LI GANYAN Bu koşudan başlar
    *
    * We intentionally inspect each element's own
    * text node rather than .text(), preventing a
@@ -492,15 +505,17 @@ function parseSixFoldStartNumbers(
 
       const marker =
         text.match(
-          /\b([12])\s*\.\s*6\s*['’]?\s*LI\s+GANYAN\b.*\bbu\s+koşudan\s+başlar\b/iu
+          markerPattern
         );
 
       if (!marker) {
         return;
       }
 
-      const sixfold =
-        Number(marker[1]);
+      const windowNumber =
+        marker[1]
+          ? Number(marker[1])
+          : 1;
 
       const set =
         result.get(
@@ -509,7 +524,7 @@ function parseSixFoldStartNumbers(
         new Set<number>();
 
       set.add(
-        sixfold
+        windowNumber
       );
 
       result.set(
@@ -581,8 +596,15 @@ export function parseTjkMeetingPage(
   const $ = cheerio.load(html);
 
   const sixfoldStarts =
-    parseSixFoldStartNumbers(
-      $
+    parseGanyanStartNumbers(
+      $,
+      SIX_FOLD_MARKER_RE
+    );
+
+  const fivefoldStarts =
+    parseGanyanStartNumbers(
+      $,
+      FIVE_FOLD_MARKER_RE
     );
 
   const headers: Array<{
@@ -804,6 +826,12 @@ export function parseTjkMeetingPage(
 
       sixfoldStartNumbers:
         sixfoldStarts.get(
+          headers[index]
+            .raceNumber
+        ) ?? [],
+
+      fivefoldStartNumbers:
+        fivefoldStarts.get(
           headers[index]
             .raceNumber
         ) ?? [],
