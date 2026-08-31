@@ -47,6 +47,9 @@ Ana semantic architecture kitabı.
 - sixfold probability self-calibration
 - mobile payload discipline
 - refresh cadence as cost policy
+- coupon optimizer per-leg selection-count mechanism (worked example)
+- fivefold ganyan (Beşli Ganyan)
+- horse video archive
 
 ## 2. DEBUG_API_REFERENCE.md
 

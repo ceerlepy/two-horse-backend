@@ -36,7 +36,7 @@ describe(
 
 
     it(
-      "uses tighter cadence near the next race, and every 6 hours far from it",
+      "uses tighter cadence near the next race, and every 2 hours far from it",
       () => {
         expect(
           expertCheckIntervalMs(
@@ -84,7 +84,7 @@ describe(
           )
         )
           .toBe(
-            360 *
+            120 *
             60_000
           );
       }
@@ -108,7 +108,7 @@ describe(
 
         expect(
           expertCheckIntervalMs(121)
-        ).toBe(360 * 60_000);
+        ).toBe(120 * 60_000);
       }
     );
 

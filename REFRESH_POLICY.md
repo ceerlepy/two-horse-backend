@@ -29,7 +29,7 @@ Expert acquisition exists only for upcoming pre-race decisions.
 Refresh cadence is a tier table (`EXPERT_CHECK_CADENCE_TIERS` in
 `src/experts/policy.ts`), nearest-tier-first, not a fixed interval:
 
-- more than 120 minutes before the next race: every 6 hours;
+- more than 120 minutes before the next race: every 2 hours;
 - 60 through 120 minutes: every 15 minutes;
 - 30 through 60 minutes: every 10 minutes;
 - 0 through 30 minutes: every 5 minutes;
@@ -38,12 +38,13 @@ Refresh cadence is a tier table (`EXPERT_CHECK_CADENCE_TIERS` in
 Both Browser Rendering and Workers AI are billed per use, and nothing
 about a source's published content changes meaningfully in 15 minutes
 hours before a card starts, so the far tier is deliberately sparse. It
-is 6 hours rather than "twice a day" because the interval is measured
+is 2 hours rather than "twice a day" because the interval is measured
 as elapsed-time-since-last-check on a 5-minute cron, which has no
 wall-clock awareness — a fixed interval is what that model can enforce
-cleanly. 6 hours still gives several checks across a full racing day,
-so a source that publishes its card late morning isn't undiscovered
-until the tighter tiers kick in 2 hours before the first race.
+cleanly. 2 hours still gives several checks across a full racing day
+while keeping a source that publishes its card mid-morning for an
+evening card from sitting undiscovered for up to 6 hours, until the
+tighter tiers kick in 2 hours before the first race.
 
 When no upcoming canonical race exists, expert acquisition performs no
 Browser Run work and no Workers AI semantic work.
