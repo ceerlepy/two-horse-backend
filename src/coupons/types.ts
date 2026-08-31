@@ -57,6 +57,23 @@ export function sixFoldUnitPrice(
     : 1.25;
 }
 
+/*
+ * TJK does not publish a separately-listed combination price for
+ * Beşli Ganyan anywhere this codebase could find (no rules/pricing
+ * page for it was locatable during implementation). This reuses
+ * Altılı Ganyan's real published per-combination price as the best
+ * available estimate, since TJK's Ganyan-family pools have
+ * historically shared a base unit -- but it is NOT independently
+ * confirmed for this specific pool. Treat any total shown for a
+ * Beşli coupon as provisional until TJK's real 5'Lİ Ganyan price is
+ * confirmed and this is corrected if it differs.
+ */
+export function fiveFoldUnitPrice(
+  options: SixFoldPriceOptions = {}
+): number {
+  return sixFoldUnitPrice(options);
+}
+
 export function calculateCouponCost(
   input: CouponCostInput
 ): CouponCost {

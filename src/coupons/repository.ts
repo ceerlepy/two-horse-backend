@@ -7,7 +7,8 @@ import type {
 } from "./optimizer";
 
 import type {
-  SixFoldWindow
+  SixFoldWindow,
+  FiveFoldWindow
 } from "./windows";
 
 
@@ -545,6 +546,509 @@ export async function evaluatePendingSixFoldCoupons(
           : 0,
 
         hitLegs === 5
+          ? 1
+          : 0,
+
+        row.id
+      )
+      .run();
+
+    evaluated += 1;
+  }
+
+  return {
+    evaluated
+  };
+}
+
+
+/*
+ * Beşli Ganyan (5-leg) mirror of the six-fold functions above.
+ * Kept as separate functions/tables rather than parameterizing the
+ * six-fold ones, so this addition carries zero risk to the already
+ * live six-fold pipeline.
+ */
+export async function upsertFiveFoldWindows(
+  env: Env,
+  input: {
+    raceDate: string;
+    city: string;
+    windows:
+      FiveFoldWindow[];
+  }
+): Promise<void> {
+  const now =
+    new Date()
+      .toISOString();
+
+  const activeNumbers =
+    [...new Set(
+      input.windows
+        .map(
+          window =>
+            Number(
+              window.fivefold
+            )
+        )
+        .filter(
+          value =>
+            value === 1 ||
+            value === 2
+        )
+    )];
+
+  if (
+    activeNumbers.length
+  ) {
+    const placeholders =
+      activeNumbers
+        .map(() => "?")
+        .join(",");
+
+    await env.DB.prepare(`
+      DELETE FROM fivefold_windows
+      WHERE race_date = ?
+        AND city = ?
+        AND fivefold_number
+          NOT IN (${placeholders})
+    `)
+      .bind(
+        input.raceDate,
+        input.city,
+        ...activeNumbers
+      )
+      .run();
+  } else {
+    await env.DB.prepare(`
+      DELETE FROM fivefold_windows
+      WHERE race_date = ?
+        AND city = ?
+    `)
+      .bind(
+        input.raceDate,
+        input.city
+      )
+      .run();
+  }
+
+  for (
+    const window of
+    input.windows
+  ) {
+    await env.DB.prepare(`
+      INSERT INTO fivefold_windows(
+        race_date,
+        city,
+        fivefold_number,
+        start_race,
+        end_race,
+        source,
+        updated_at
+      )
+      VALUES(
+        ?,?,?,?,?,?,?
+      )
+      ON CONFLICT(
+        race_date,
+        city,
+        fivefold_number
+      )
+      DO UPDATE SET
+        start_race =
+          excluded.start_race,
+        end_race =
+          excluded.end_race,
+        source =
+          excluded.source,
+        updated_at =
+          excluded.updated_at
+    `)
+      .bind(
+        input.raceDate,
+        input.city,
+        window.fivefold,
+        window.startRace,
+        window.endRace,
+        window.source,
+        now
+      )
+      .run();
+  }
+}
+
+
+export async function persistFiveFoldCoupons(
+  env: Env,
+  input: {
+    raceDate: string;
+    city: string;
+    fivefold: number;
+    startRace: number;
+    endRace: number;
+    coupons:
+      OptimizedSixFoldCoupon[];
+  }
+): Promise<void> {
+  const generatedAt =
+    new Date()
+      .toISOString();
+
+  for (
+    const coupon of
+    input.coupons
+  ) {
+    const selections =
+      coupon.legs.map(
+        leg => ({
+          raceNumber:
+            leg.raceNumber,
+
+          horseNumbers:
+            leg.horses.map(
+              horse =>
+                horse.horseNumber
+            ),
+
+          coverageProbability:
+            leg.coverageProbability
+        })
+      );
+
+    const selectionsJson =
+      JSON.stringify(
+        selections
+      );
+
+    const snapshotKey =
+      [
+        input.raceDate,
+        input.city,
+        input.fivefold,
+        coupon.profile,
+        coupon.budgetTl,
+        coupon.totalTl,
+        coupon.combinations,
+        coupon.unitPriceTl,
+        coupon.multiplier,
+        selectionsJson
+      ].join("|");
+
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO fivefold_coupon_snapshots(
+        race_date,
+        city,
+        fivefold_number,
+        profile,
+
+        start_race,
+        end_race,
+
+        budget_tl,
+        total_tl,
+        combinations,
+        unit_price_tl,
+        multiplier,
+
+        selections_json,
+
+        estimated_survival_probability,
+
+        generated_at,
+        snapshot_key
+      )
+
+      SELECT
+        ?,?,?,?,
+        ?,?,
+        ?,?,?,?,?,
+        ?,
+        ?,
+        ?,?
+
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM fivefold_coupon_snapshots existing
+        WHERE
+          existing.race_date = ?
+          AND existing.city = ?
+          AND existing.fivefold_number = ?
+          AND existing.profile = ?
+          AND existing.budget_tl = ?
+          AND existing.total_tl = ?
+          AND existing.combinations = ?
+          AND existing.unit_price_tl = ?
+          AND existing.multiplier = ?
+          AND existing.selections_json = ?
+      )
+
+    `)
+      .bind(
+        input.raceDate,
+        input.city,
+        input.fivefold,
+        coupon.profile,
+
+        input.startRace,
+        input.endRace,
+
+        coupon.budgetTl,
+        coupon.totalTl,
+        coupon.combinations,
+        coupon.unitPriceTl,
+        coupon.multiplier,
+
+        selectionsJson,
+
+        coupon
+          .estimatedSurvivalProbability,
+
+        generatedAt,
+        snapshotKey,
+
+        input.raceDate,
+        input.city,
+        input.fivefold,
+        coupon.profile,
+        coupon.budgetTl,
+        coupon.totalTl,
+        coupon.combinations,
+        coupon.unitPriceTl,
+        coupon.multiplier,
+        selectionsJson
+      )
+      .run();
+  }
+}
+
+
+interface PendingFiveFoldCoupon {
+  id: number;
+  race_date: string;
+  city: string;
+  selections_json: string;
+}
+
+
+export const FIVEFOLD_STALE_AFTER_DAYS =
+  SIXFOLD_STALE_AFTER_DAYS;
+
+export async function evaluatePendingFiveFoldCoupons(
+  env: Env
+): Promise<{
+  evaluated: number;
+}> {
+  const rows =
+    await env.DB.prepare(`
+      SELECT
+        id,
+        race_date,
+        city,
+        selections_json
+
+      FROM fivefold_coupon_snapshots
+
+      WHERE evaluated_at
+        IS NULL
+
+        AND unresolved_reason
+          IS NULL
+    `)
+      .all<PendingFiveFoldCoupon>();
+
+  let evaluated = 0;
+
+  for (
+    const row of
+    rows.results ?? []
+  ) {
+    let selections:
+      Array<{
+        raceNumber: number;
+        horseNumbers: number[];
+        coverageProbability?: number;
+      }>;
+
+    try {
+      selections =
+        JSON.parse(
+          row.selections_json
+        );
+    } catch {
+      continue;
+    }
+
+    if (
+      !Array.isArray(
+        selections
+      ) ||
+      selections.length !== 5
+    ) {
+      continue;
+    }
+
+    const winners =
+      await env.DB.prepare(`
+        SELECT
+          lr.race_number,
+          lrf.horse_number
+
+        FROM learning_races lr
+
+        JOIN learning_runner_features lrf
+          ON lrf.race_date =
+               lr.race_date
+         AND lrf.city =
+               lr.city
+         AND lrf.race_number =
+               lr.race_number
+
+        WHERE
+          lr.race_date = ?
+          AND lr.city = ?
+          AND lrf.finish_position = 1
+      `)
+        .bind(
+          row.race_date,
+          row.city
+        )
+        .all<any>();
+
+    const winnerMap =
+      new Map<
+        number,
+        number
+      >();
+
+    for (
+      const winner of
+      winners.results ?? []
+    ) {
+      winnerMap.set(
+        Number(
+          winner.race_number
+        ),
+        Number(
+          winner.horse_number
+        )
+      );
+    }
+
+    const allResolved =
+      selections.every(
+        leg =>
+          winnerMap.has(
+            Number(
+              leg.raceNumber
+            )
+          )
+      );
+
+    if (!allResolved) {
+      await env.DB.prepare(`
+        UPDATE fivefold_coupon_snapshots
+        SET unresolved_reason = 'RESULTS_UNAVAILABLE'
+        WHERE id = ?
+          AND race_date <
+            date(
+              'now',
+              ?
+            )
+      `)
+        .bind(
+          row.id,
+          `-${FIVEFOLD_STALE_AFTER_DAYS} days`
+        )
+        .run();
+
+      continue;
+    }
+
+    let hitLegs = 0;
+
+    const calibrationSamples:
+      D1PreparedStatement[] = [];
+
+    const recordedAt =
+      new Date()
+        .toISOString();
+
+    for (
+      const leg of
+      selections
+    ) {
+      const winner =
+        winnerMap.get(
+          Number(
+            leg.raceNumber
+          )
+        );
+
+      const legHit =
+        winner != null &&
+        leg.horseNumbers
+          .map(Number)
+          .includes(
+            winner
+          );
+
+      if (legHit) {
+        hitLegs += 1;
+      }
+
+      if (
+        typeof leg.coverageProbability ===
+        "number"
+      ) {
+        calibrationSamples.push(
+          env.DB.prepare(`
+            INSERT INTO fivefold_leg_calibration_samples(
+              snapshot_id,
+              race_number,
+              predicted_probability,
+              hit,
+              recorded_at
+            )
+            VALUES(?,?,?,?,?)
+          `)
+            .bind(
+              row.id,
+              leg.raceNumber,
+              leg.coverageProbability,
+              legHit ? 1 : 0,
+              recordedAt
+            )
+        );
+      }
+    }
+
+    if (calibrationSamples.length) {
+      await env.DB.batch(
+        calibrationSamples
+      );
+    }
+
+    await env.DB.prepare(`
+      UPDATE fivefold_coupon_snapshots
+
+      SET
+        evaluated_at = ?,
+        hit_legs = ?,
+        five_of_five = ?,
+        four_of_five = ?
+
+      WHERE id = ?
+    `)
+      .bind(
+        new Date()
+          .toISOString(),
+
+        hitLegs,
+
+        hitLegs === 5
+          ? 1
+          : 0,
+
+        hitLegs === 4
           ? 1
           : 0,
 

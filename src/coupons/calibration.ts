@@ -255,3 +255,110 @@ export async function currentSixFoldTemperature(
     ? temperature
     : DEFAULT_COUPON_TEMPERATURE;
 }
+
+
+/*
+ * Beşli Ganyan (5-leg) mirror of the two functions above. Reuses the
+ * same pure classifyCalibrationStatus/computeCalibratedTemperature
+ * math (already leg-count-agnostic) against its own sample/state
+ * tables, since a 5-leg pool's real hit-rate bias should not be
+ * blended with the 6-leg pool's.
+ */
+export async function recalibrateFiveFoldProbabilities(
+  env: Env
+): Promise<SixFoldCalibrationState> {
+  const row =
+    await env.DB.prepare(`
+      SELECT
+        COUNT(*) sample_count,
+        AVG(predicted_probability) predicted_avg,
+        AVG(hit) actual_hit_rate
+      FROM fivefold_leg_calibration_samples
+    `)
+      .first<any>();
+
+  const sampleCount =
+    Number(row?.sample_count ?? 0);
+
+  const predictedAvgCoverage =
+    Number(row?.predicted_avg ?? 0);
+
+  const actualHitRate =
+    Number(row?.actual_hit_rate ?? 0);
+
+  const temperature =
+    computeCalibratedTemperature({
+      sampleCount,
+      predictedAvgCoverage,
+      actualHitRate
+    });
+
+  const status =
+    classifyCalibrationStatus(
+      sampleCount
+    );
+
+  const now =
+    new Date()
+      .toISOString();
+
+  await env.DB.prepare(`
+    INSERT INTO fivefold_probability_calibration(
+      id,
+      sample_count,
+      predicted_avg_coverage,
+      actual_hit_rate,
+      temperature,
+      status,
+      updated_at
+    )
+    VALUES(1, ?, ?, ?, ?, ?, ?)
+
+    ON CONFLICT(id)
+    DO UPDATE SET
+      sample_count = excluded.sample_count,
+      predicted_avg_coverage = excluded.predicted_avg_coverage,
+      actual_hit_rate = excluded.actual_hit_rate,
+      temperature = excluded.temperature,
+      status = excluded.status,
+      updated_at = excluded.updated_at
+  `)
+    .bind(
+      sampleCount,
+      predictedAvgCoverage,
+      actualHitRate,
+      temperature,
+      status,
+      now
+    )
+    .run();
+
+  return {
+    temperature,
+    status,
+    sampleCount
+  };
+}
+
+
+export async function currentFiveFoldTemperature(
+  env: Env
+): Promise<number> {
+  const row =
+    await env.DB.prepare(`
+      SELECT temperature
+      FROM fivefold_probability_calibration
+      WHERE id = 1
+    `)
+      .first<any>();
+
+  const temperature =
+    Number(
+      row?.temperature ??
+        DEFAULT_COUPON_TEMPERATURE
+    );
+
+  return Number.isFinite(temperature)
+    ? temperature
+    : DEFAULT_COUPON_TEMPERATURE;
+}

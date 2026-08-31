@@ -52,6 +52,12 @@ export interface RaceInput {
    */
   sixfoldStartNumbers?: number[];
 
+  /*
+   * Official TJK five-fold (Beşli Ganyan) start markers,
+   * same shape/semantics as sixfoldStartNumbers.
+   */
+  fivefoldStartNumbers?: number[];
+
   runners: RunnerInput[];
 }
 

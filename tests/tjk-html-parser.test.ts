@@ -283,3 +283,79 @@ describe("TJK city parser", () => {
     ).toThrow("TJK_NO_RACES");
   });
 });
+
+describe("TJK Ganyan pool start markers", () => {
+  function raceSection(
+    raceNumber: number,
+    time: string,
+    marker: string
+  ): string {
+    return `
+      <h3>${raceNumber}. Koşu ${time}</h3>
+      <h3>1200 Kum</h3>
+
+      <table>
+        <tr>
+          <th>No</th>
+          <th>At İsmi</th>
+          <th>Jokey</th>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><a>ALFA</a></td>
+          <td>JOKEY A</td>
+        </tr>
+      </table>
+
+      <div class="bahisTipiCard">
+        <h4>${marker}</h4>
+      </div>
+    `;
+  }
+
+  it("attaches numbered six-fold and five-fold markers to their own race", () => {
+    const html = `
+      <html><body>
+        ${raceSection(1, "17.00", "1. 6'LI GANYAN Bu koşudan başlar")}
+        ${raceSection(2, "17.30", "1. 5'Lİ GANYAN")}
+        ${raceSection(3, "18.00", "2. 6'LI GANYAN Bu koşudan başlar")}
+        ${raceSection(4, "18.30", "2. 5'Lİ GANYAN")}
+      </body></html>
+    `;
+
+    const meeting = parseTjkMeetingPage(html, "İstanbul");
+
+    expect(meeting.races[0].sixfoldStartNumbers).toEqual([1]);
+    expect(meeting.races[0].fivefoldStartNumbers).toEqual([]);
+
+    expect(meeting.races[1].fivefoldStartNumbers).toEqual([1]);
+    expect(meeting.races[1].sixfoldStartNumbers).toEqual([]);
+
+    expect(meeting.races[2].sixfoldStartNumbers).toEqual([2]);
+    expect(meeting.races[3].fivefoldStartNumbers).toEqual([2]);
+  });
+
+  it("treats an unnumbered five-fold marker as window 1 (a day with only one 5'Lİ Ganyan sequence)", () => {
+    const html = `
+      <html><body>
+        ${raceSection(1, "17.00", "5'Lİ GANYAN")}
+      </body></html>
+    `;
+
+    const meeting = parseTjkMeetingPage(html, "İstanbul");
+
+    expect(meeting.races[0].fivefoldStartNumbers).toEqual([1]);
+  });
+
+  it("does not confuse the unrelated 'SIRALI 5 Lİ BAHİS' single-race bet type with a 5'Lİ Ganyan marker", () => {
+    const html = `
+      <html><body>
+        ${raceSection(1, "17.00", "SIRALI 5 Lİ BAHİS")}
+      </body></html>
+    `;
+
+    const meeting = parseTjkMeetingPage(html, "İstanbul");
+
+    expect(meeting.races[0].fivefoldStartNumbers).toEqual([]);
+  });
+});

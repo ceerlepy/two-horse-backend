@@ -168,10 +168,11 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
         track,
         performance_url,
         sixfold_start_numbers_json,
+        fivefold_start_numbers_json,
         updated_at
       )
         VALUES(
-          ?,?,?,?,?,?,?,?,?,
+          ?,?,?,?,?,?,?,?,?,?,
           CURRENT_TIMESTAMP
         )
         ON CONFLICT(
@@ -187,6 +188,8 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
           performance_url=excluded.performance_url,
           sixfold_start_numbers_json=
             excluded.sixfold_start_numbers_json,
+          fivefold_start_numbers_json=
+            excluded.fivefold_start_numbers_json,
           updated_at=CURRENT_TIMESTAMP`)
         .bind(
           date,
@@ -199,6 +202,10 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
           race.performanceUrl ?? null,
           JSON.stringify(
             race.sixfoldStartNumbers ??
+            []
+          ),
+          JSON.stringify(
+            race.fivefoldStartNumbers ??
             []
           )
         ));
