@@ -69,8 +69,22 @@ export function expertCheckIntervalMs(
  *
  * Backoff stays bounded so a recovered source can rejoin.
  *
- * Near the next race we shorten the cap.
+ * Near the next race we shorten the cap. Same tier-table shape as
+ * EXPERT_CHECK_CADENCE_TIERS above -- first matching tier wins.
  */
+export const EXPERT_FAILURE_BACKOFF_CONFIG = {
+  failureTiers: [
+    { maxFailures: 1, minutes: 15 },
+    { maxFailures: 2, minutes: 30 },
+    { maxFailures: Infinity, minutes: 60 }
+  ],
+
+  nearRaceCaps: [
+    { maxMinutes: 30, capMinutes: 10 },
+    { maxMinutes: 120, capMinutes: 20 }
+  ]
+} as const;
+
 export function expertFailureBackoffMs(
   consecutiveFailures:
     number,
@@ -96,39 +110,34 @@ export function expertFailureBackoffMs(
   }
 
 
-  let minutes =
-    failures ===
-      1
-      ? 15
+  const failureTier =
+    EXPERT_FAILURE_BACKOFF_CONFIG.failureTiers.find(
+      candidate =>
+        failures <=
+        candidate.maxFailures
+    ) ??
+    EXPERT_FAILURE_BACKOFF_CONFIG.failureTiers[
+      EXPERT_FAILURE_BACKOFF_CONFIG.failureTiers.length - 1
+    ];
 
-      : failures ===
-          2
-        ? 30
-        : 60;
+  let minutes: number =
+    failureTier.minutes;
 
 
-  if (
-    minutesToNextRace !==
-      null &&
-    minutesToNextRace <=
-      30
-  ) {
+  const nearRaceCap =
+    minutesToNextRace !== null
+      ? EXPERT_FAILURE_BACKOFF_CONFIG.nearRaceCaps.find(
+          candidate =>
+            minutesToNextRace <=
+            candidate.maxMinutes
+        )
+      : undefined;
+
+  if (nearRaceCap) {
     minutes =
       Math.min(
         minutes,
-        10
-      );
-
-  } else if (
-    minutesToNextRace !==
-      null &&
-    minutesToNextRace <=
-      120
-  ) {
-    minutes =
-      Math.min(
-        minutes,
-        20
+        nearRaceCap.capMinutes
       );
   }
 

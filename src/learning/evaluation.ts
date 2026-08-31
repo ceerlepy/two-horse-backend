@@ -21,7 +21,124 @@ interface EvaluationRow {
 }
 
 
-const MIN_GATE_RACES = 100;
+/*
+ * Every tunable for the learning health gate lives here, in one
+ * place -- same pattern as EXPERT_CHECK_CADENCE_TIERS in
+ * src/experts/policy.ts.
+ *
+ * minGateRaces: production learning stays OFF (scale 0) until the
+ * shadow model has this many official race outcomes to evaluate
+ * against. Shadow scoring itself still runs at scale=1 regardless,
+ * evaluated independently.
+ *
+ * degradeThresholds / reduceThresholds: require agreement between
+ * multiple metrics (a rate delta AND a mean-rank gain) before
+ * throttling learning -- one noisy metric alone cannot disable it.
+ * degrade is checked first and wins if both its conditions hold.
+ */
+export const LEARNING_GATE_CONFIG = {
+  minGateRaces: 100,
+
+  degradeThresholds: {
+    top1Delta: -0.02,
+    rankGain: -0.15
+  },
+
+  reduceThresholds: {
+    top3Delta: -0.03,
+    rankGain: -0.10
+  },
+
+  scales: {
+    healthy: 1,
+    degraded: 0.25,
+    reduced: 0.50,
+    insufficientData: 0
+  }
+} as const;
+
+
+export interface LearningGateMetrics {
+  races: number;
+  baseTop1: number;
+  learnedTop1: number;
+  baseTop3: number;
+  learnedTop3: number;
+  baseRank: number;
+  learnedRank: number;
+}
+
+export interface LearningGateOutcome {
+  scale: number;
+  status: string;
+}
+
+export function computeLearningGateOutcome(
+  metrics: LearningGateMetrics
+): LearningGateOutcome {
+  if (
+    metrics.races <
+    LEARNING_GATE_CONFIG.minGateRaces
+  ) {
+    return {
+      scale:
+        LEARNING_GATE_CONFIG.scales
+          .insufficientData,
+      status: "insufficient-data"
+    };
+  }
+
+  const top1Delta =
+    metrics.learnedTop1 -
+    metrics.baseTop1;
+
+  const top3Delta =
+    metrics.learnedTop3 -
+    metrics.baseTop3;
+
+  /*
+   * Positive means learning improved winner rank.
+   */
+  const rankGain =
+    metrics.baseRank -
+    metrics.learnedRank;
+
+  if (
+    top1Delta <=
+      LEARNING_GATE_CONFIG.degradeThresholds
+        .top1Delta &&
+    rankGain <=
+      LEARNING_GATE_CONFIG.degradeThresholds
+        .rankGain
+  ) {
+    return {
+      scale:
+        LEARNING_GATE_CONFIG.scales.degraded,
+      status: "learning-degraded"
+    };
+  }
+
+  if (
+    top3Delta <=
+      LEARNING_GATE_CONFIG.reduceThresholds
+        .top3Delta &&
+    rankGain <=
+      LEARNING_GATE_CONFIG.reduceThresholds
+        .rankGain
+  ) {
+    return {
+      scale:
+        LEARNING_GATE_CONFIG.scales.reduced,
+      status: "learning-reduced"
+    };
+  }
+
+  return {
+    scale:
+      LEARNING_GATE_CONFIG.scales.healthy,
+    status: "healthy"
+  };
+}
 
 
 export async function evaluateLearningModel(
@@ -173,66 +290,26 @@ export async function evaluateLearningModel(
       0
     );
 
-  /*
-   * Production learning stays OFF until the
-   * shadow model has enough official outcomes.
-   *
-   * Shadow scoring itself still runs at scale=1
-   * and is evaluated independently.
-   */
-  let scale = 0;
-  let status =
-    "insufficient-data";
+  const gateOutcome =
+    computeLearningGateOutcome({
+      races,
+      baseTop1,
+      learnedTop1,
+      baseTop3,
+      learnedTop3,
+      baseRank,
+      learnedRank
+    });
 
-  if (
-    races >=
-    MIN_GATE_RACES
-  ) {
-    const top1Delta =
-      learnedTop1 -
-      baseTop1;
-
-    const top3Delta =
-      learnedTop3 -
-      baseTop3;
-
-    /*
-     * Positive means learning improved winner rank.
-     */
-    const rankGain =
-      baseRank -
-      learnedRank;
-
-    scale = 1;
-    status = "healthy";
-
-    /*
-     * Require agreement between multiple metrics.
-     * One noisy metric cannot disable learning.
-     */
-    if (
-      top1Delta <= -0.02 &&
-      rankGain <= -0.15
-    ) {
-      scale = 0.25;
-      status =
-        "learning-degraded";
-    } else if (
-      top3Delta <= -0.03 &&
-      rankGain <= -0.10
-    ) {
-      scale = 0.50;
-      status =
-        "learning-reduced";
-    }
-  }
-
-  scale =
+  const scale =
     clamp(
-      scale,
+      gateOutcome.scale,
       0,
       1
     );
+
+  const status =
+    gateOutcome.status;
 
   await env.DB.prepare(`
     INSERT INTO learning_model_state(

@@ -6,6 +6,29 @@ import {
   turkeyDate
 } from "../shared";
 
+/*
+ * TTL values are deliberately slightly below the desired cadence
+ * because cron itself fires every 5m. Ordered farthest-first; the
+ * first tier whose minMinutes the actual gap exceeds wins.
+ *
+ * > 6h       -> ~60m
+ * 3h - 6h    -> ~30m
+ * 90m - 3h   -> ~15m
+ * <= 90m     -> liveWindowTtlMs (every 5m cron tick)
+ */
+export const TJK_MARKET_REFRESH_CONFIG = {
+  noProgramYetTtlMs: 29 * 60 * 1000,
+  noUpcomingRaceTtlMs: 59 * 60 * 1000,
+
+  distanceTiers: [
+    { minMinutes: 360, ttlMs: 59 * 60 * 1000, reason: "far" as const },
+    { minMinutes: 180, ttlMs: 29 * 60 * 1000, reason: "approaching" as const },
+    { minMinutes: 90, ttlMs: 14 * 60 * 1000, reason: "near" as const }
+  ],
+
+  liveWindowTtlMs: 4 * 60 * 1000
+} as const;
+
 export interface AdaptiveTjkPolicy {
   ttlMs: number;
 
@@ -44,7 +67,7 @@ export async function adaptiveTjkPolicy(
   if (!meeting) {
     return {
       ttlMs:
-        29 * 60 * 1000,
+        TJK_MARKET_REFRESH_CONFIG.noProgramYetTtlMs,
 
       nextRaceMinutes:
         null,
@@ -73,7 +96,7 @@ export async function adaptiveTjkPolicy(
   if (!next?.starts_at) {
     return {
       ttlMs:
-        59 * 60 * 1000,
+        TJK_MARKET_REFRESH_CONFIG.noUpcomingRaceTtlMs,
 
       nextRaceMinutes:
         null,
@@ -95,57 +118,28 @@ export async function adaptiveTjkPolicy(
       60_000
     );
 
-  /*
-   * TTL values are deliberately slightly below the
-   * desired cadence because cron itself fires every 5m.
-   *
-   * > 6h       -> ~60m
-   * 3h - 6h    -> ~30m
-   * 90m - 3h   -> ~15m
-   * <= 90m     -> every 5m cron tick
-   */
-  if (minutes > 360) {
+  const tier =
+    TJK_MARKET_REFRESH_CONFIG.distanceTiers.find(
+      candidate =>
+        minutes > candidate.minMinutes
+    );
+
+  if (tier) {
     return {
       ttlMs:
-        59 * 60 * 1000,
+        tier.ttlMs,
 
       nextRaceMinutes:
         minutes,
 
       reason:
-        "far"
-    };
-  }
-
-  if (minutes > 180) {
-    return {
-      ttlMs:
-        29 * 60 * 1000,
-
-      nextRaceMinutes:
-        minutes,
-
-      reason:
-        "approaching"
-    };
-  }
-
-  if (minutes > 90) {
-    return {
-      ttlMs:
-        14 * 60 * 1000,
-
-      nextRaceMinutes:
-        minutes,
-
-      reason:
-        "near"
+        tier.reason
     };
   }
 
   return {
     ttlMs:
-      4 * 60 * 1000,
+      TJK_MARKET_REFRESH_CONFIG.liveWindowTtlMs,
 
     nextRaceMinutes:
       minutes,
