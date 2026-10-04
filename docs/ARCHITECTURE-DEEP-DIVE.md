@@ -2280,3 +2280,25 @@ olur ki eski kod canlıda kalsın, yarı-bozuk bir sürüm hiç yayınlanmasın)
 opsiyonel — onlar olmadan da deploy geçer, sadece Google girişi ve
 gerçek satın alma doğrulaması o secret'lar eklenene kadar
 `_NOT_CONFIGURED` hatası döner.
+
+---
+
+# 64. /api/today kompakt projeksiyon (2026-10-04)
+
+/api/today artık varsayılan olarak `toCompactMeetings`
+(src/api/compact-projection.ts) üzerinden döner: yalnızca Android
+parser'ının (TwoHorseApi.kt parseRace/parseHorse) okuduğu alanlar
+kalır, ondalıklar 4 haneye yuvarlanır. Atılanlar uygulamanın hiç
+okumadığı alanlardır: her runner'da tekrarlanan race_date/city/
+race_number/updated_at, profil URL'leri ve id'ler, aggregator'ın
+weighted* ara toplamları, modelScore.availableWeight/configuredWeight
+toplamları, marketMovement.score ve fieldSignal.score'un
+market_score/field_score kopyaları. Ekranda görünen hiçbir veri
+değişmez.
+
+`/api/today?view=full` eski (yalnızca redakte edilmiş) tam şekli
+döndürür. Kupon üreticisi ve öğrenme hattı getToday()'i doğrudan
+okur; bu projeksiyondan etkilenmez.
+
+Uygulamaya yeni bir alan eklenirse compact-projection.ts'teki
+anahtar listesine de eklenmelidir — yoksa sunucu onu göndermez.
