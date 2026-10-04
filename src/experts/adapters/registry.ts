@@ -38,6 +38,10 @@ import {
   afaAdapter
 } from "./afa";
 
+import {
+  puanliAltiliBultenAdapter
+} from "./puanli-altili-bulten";
+
 
 const registeredAdapters:
   ExpertAdapter[] = [
@@ -48,7 +52,8 @@ const registeredAdapters:
     yarisAnaliziAdapter,
     istinyeGanyanAdapter,
     ganyanCanavariAdapter,
-    afaAdapter
+    afaAdapter,
+    puanliAltiliBultenAdapter
   ];
 
 
