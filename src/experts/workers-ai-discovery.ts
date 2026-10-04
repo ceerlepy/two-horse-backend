@@ -3,6 +3,10 @@ import type {
 } from "../env";
 
 import {
+  cachedAiRun
+} from "./ai-response-cache";
+
+import {
   DEFAULT_EXPERT_AI_MODEL
 } from "./workers-ai-extraction";
 
@@ -179,9 +183,13 @@ Yalnız JSON schema data döndür.
 `.trim();
 
 
-  const raw:any =
-    await env.AI.run(
-      model as any,
+  const {
+    raw,
+    cacheHit
+  } =
+    await cachedAiRun(
+      env,
+      model,
       {
         messages: [
           {
@@ -214,7 +222,18 @@ Yalnız JSON schema data döndür.
 
         temperature:
           0
-      } as any
+      },
+      candidate => {
+        try {
+          parseResponse(
+            candidate
+          );
+
+          return true;
+        } catch {
+          return false;
+        }
+      }
     );
 
 
@@ -229,8 +248,12 @@ Yalnız JSON schema data döndür.
         DISCOVERY_MAX_OUTPUT_TOKENS,
 
       usage:
-        raw?.usage ??
-        null
+        cacheHit
+          ? null
+          : raw?.usage ??
+            null,
+
+      cacheHit
     }
   };
 }

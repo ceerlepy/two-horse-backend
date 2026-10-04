@@ -91,7 +91,21 @@ export const yarisDergisiAdapter =
       "kombine bahis",
       "kombine-bahis",
       "yurt dışı",
-      "yurt-disi"
+      "yurt-disi",
+      "ahır tahsis",
+      "ahir-tahsis"
+    ],
+
+    requiredTerms:[
+      "tahmin",
+      "banko",
+      "altılı",
+      "analiz",
+      "favori",
+      "sürpriz",
+      "kupon",
+      "ganyan",
+      "yorum"
     ],
 
     listingCardContext:

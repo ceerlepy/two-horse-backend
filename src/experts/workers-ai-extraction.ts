@@ -10,6 +10,10 @@ import type {
   RawExpertExtraction
 } from "./raw-extraction";
 
+import {
+  cachedAiRun
+} from "./ai-response-cache";
+
 
 export const DEFAULT_EXPERT_AI_MODEL =
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -50,6 +54,9 @@ export interface WorkersAiExpertResult {
 
     usage:
       unknown;
+
+    cacheHit:
+      boolean;
   };
 }
 
@@ -216,10 +223,14 @@ export async function extractExpertJsonWithWorkersAi(
     );
 
 
-  const raw:
-    any =
-    await env.AI.run(
-      model as any,
+  const {
+    raw,
+    cacheHit
+  } =
+    await cachedAiRun(
+      env,
+
+      model,
 
       {
         messages: [
@@ -260,7 +271,19 @@ export async function extractExpertJsonWithWorkersAi(
 
         temperature:
           0
-      } as any
+      },
+
+      candidate => {
+        try {
+          parseWorkersAiExpertResponse(
+            candidate
+          );
+
+          return true;
+        } catch {
+          return false;
+        }
+      }
     );
 
 
@@ -288,8 +311,12 @@ export async function extractExpertJsonWithWorkersAi(
         true,
 
       usage:
-        raw?.usage ??
-        null
+        cacheHit
+          ? null
+          : raw?.usage ??
+            null,
+
+      cacheHit
     }
   };
 }
