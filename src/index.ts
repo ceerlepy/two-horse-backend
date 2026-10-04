@@ -55,6 +55,10 @@ import {
   observed
 } from "./observability/logger";
 
+import {
+  cleanupAiResponseCache
+} from "./experts/ai-response-cache";
+
 
 async function runScheduledPipeline(
   env: Env
@@ -184,6 +188,15 @@ async function runScheduledPipeline(
     "history.cleanup",
     () =>
       cleanup(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "ai-cache.cleanup",
+    () =>
+      cleanupAiResponseCache(
         env
       )
   );
