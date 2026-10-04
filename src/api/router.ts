@@ -29,6 +29,7 @@ import { ingestOfficialResults } from "../results/service";
 import { buildOfficialResultsUrl } from "../results/url";
 import { repairHistoricalDates } from "../results/historical-date-repair";
 import { getHorseVideos } from "../horses/service";
+import { getRaceTraining } from "../training/service";
 import {
   resolveSession,
   loginWithGoogle,
@@ -125,6 +126,18 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   const result=await getHorseVideos(env,raceDate,city,raceNumber,horseNumber);
   if("error" in result) return json(result,404);
   return json(result);
+ }
+ if(url.pathname==="/api/races/training") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  const raceDate=url.searchParams.get("raceDate") ?? turkeyDate();
+  const city=url.searchParams.get("city");
+  const raceNumber=Number(url.searchParams.get("raceNumber"));
+  if(!city || !Number.isInteger(raceNumber) || raceNumber<=0) return json({error:"INVALID_PARAMS"},400);
+  const result=await getRaceTraining(env,raceDate,city,raceNumber);
+  // Training videos follow the same tier rule as race videos.
+  const canViewVideos=TIER_LIMITS[session.tier].canViewHorseVideos;
+  return json({...result,horses:result.horses.map(h=>({...h,videoUrl:canViewVideos?h.videoUrl:null}))});
  }
  if(url.pathname==="/api/coupons/generate") {
   const couponSession=
