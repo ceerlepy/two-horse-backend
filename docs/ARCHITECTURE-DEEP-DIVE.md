@@ -2341,3 +2341,23 @@ agfPercent, recentForm}]}]}]}`.
 **Sonraki aşama**: banko_tahminler `/ai-tahmin/<tarih>-<hipodrom>/`
 yurt dışı sayfalarını bu toplantılarla eşlemek
 (`excludedCandidateTerms` içindeki "ai tahmin"/"yurt dışı" filtresi).
+
+---
+
+# 66. Puanlı Altılı Bülten (Blogger) — deterministik kaynak
+
+`puanlialtilibulten.com` ölü; site `puanlialtilibulten.blogspot.com`
+adresine taşınmış ve her toplantı için ücretsiz "<Şehir> - GG.AA.YYYY -
+<Gün> - Altılı Bülten" yazısı yayınlıyor (1–2 gün önceden). Her koşu
+bir HTML tablosu: B.Puan, "<no> <AT> <takı>", yaş, kilo, jokey, St, HK.
+
+- Hedef bulma: Blogger JSON feed (`feeds/posts/summary?alt=json`),
+  başlık tarih + şehir ile eşleşir; "Accurace" yazıları puansız, alınmaz.
+- Çıkarım: Workers AI kullanılmaz. `parsePuanliBulten` koşu başına en
+  yüksek puanı `favorite`, sonraki ikiyi `rival` yapar; yorum "B.Puan N".
+- Kod: `src/experts/adapters/puanli-altili-bulten.ts`, extractor'da
+  kaynağa özel erken dönüş. Migration 0035 kaynağı yeni adresle açar.
+
+Diğer iki kaynak (2026-10-04 kontrolü): `yildizlibulten.com` bir otel
+sitesine yönleniyor, `www` DNS kaydı yok → kapalı. `yaris_analizi`
+günün yazısını yarıştan önce yalnız VIP'e açıyor → kapalı.
