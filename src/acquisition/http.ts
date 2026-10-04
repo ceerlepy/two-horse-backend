@@ -8,6 +8,31 @@ export interface HttpFetchOptions {
   userAgent?: string;
 }
 
+/*
+ * TJK answers its dynamic pages (AtKosuBilgileri, AtPerformans,
+ * Karsilastirma, idmanpistiDetay) only after a ~50 s stall when the
+ * user-agent is not browser-like; the same request with a browser UA
+ * returns in under a second (measured 2026-10-04, cold cache both
+ * ways). Every TJK caller with a short timeout was therefore timing
+ * out and falling back to Browser Rendering.
+ */
+export const TJK_BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/124.0 Safari/537.36";
+
+export function defaultUserAgentFor(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === "tjk.org" || host.endsWith(".tjk.org")) {
+      return TJK_BROWSER_USER_AGENT;
+    }
+  } catch {
+    // fall through to the project UA
+  }
+  return "TwoHorse/1.0 (+race-analysis)";
+}
+
 export async function acquireHttpHtml(
   url: string,
   options: HttpFetchOptions = {}
@@ -41,7 +66,7 @@ export async function acquireHttpHtml(
           headers: {
             "user-agent":
               options.userAgent ??
-              "TwoHorse/1.0 (+race-analysis)"
+              defaultUserAgentFor(url)
           },
 
           /*

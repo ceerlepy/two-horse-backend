@@ -51,6 +51,14 @@ import {
 } from "./coupons/calibration";
 
 import {
+  refreshTrainingIfDue
+} from "./training/service";
+
+import {
+  refreshForeignMeetingsIfDue
+} from "./foreign/service";
+
+import {
   logger,
   observed
 } from "./observability/logger";
@@ -89,6 +97,24 @@ async function runScheduledPipeline(
     "field.refresh",
     () =>
       refreshFieldSignalsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "foreign.refresh",
+    () =>
+      refreshForeignMeetingsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "training.refresh",
+    () =>
+      refreshTrainingIfDue(
         env
       )
   );
