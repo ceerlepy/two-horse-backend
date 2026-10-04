@@ -36,22 +36,11 @@ describe(
 
 
     it(
-      "uses tighter cadence near the next race, and every 2 hours far from it",
+      "uses tighter cadence near the next race, and every 3 hours far from it",
       () => {
         expect(
           expertCheckIntervalMs(
             20
-          )
-        )
-          .toBe(
-            5 *
-            60_000
-          );
-
-
-        expect(
-          expertCheckIntervalMs(
-            45
           )
         )
           .toBe(
@@ -62,29 +51,40 @@ describe(
 
         expect(
           expertCheckIntervalMs(
+            45
+          )
+        )
+          .toBe(
+            20 *
+            60_000
+          );
+
+
+        expect(
+          expertCheckIntervalMs(
             90
           )
         )
           .toBe(
-            15 *
+            60 *
             60_000
           );
 
 
         /*
          * Hours from the next race, nothing about a source's
-         * content changes meaningfully in 15 minutes -- a few
+         * content changes meaningfully in an hour -- a few
          * checks spread across the day catch a late-published
          * card without paying for Workers AI / Browser Rendering
-         * every 15 minutes all day.
+         * every hour all day.
          */
         expect(
           expertCheckIntervalMs(
-            180
+            240
           )
         )
           .toBe(
-            120 *
+            180 *
             60_000
           );
       }
@@ -96,19 +96,19 @@ describe(
       () => {
         expect(
           expertCheckIntervalMs(30)
-        ).toBe(5 * 60_000);
-
-        expect(
-          expertCheckIntervalMs(60)
         ).toBe(10 * 60_000);
 
         expect(
-          expertCheckIntervalMs(120)
-        ).toBe(15 * 60_000);
+          expertCheckIntervalMs(60)
+        ).toBe(20 * 60_000);
 
         expect(
-          expertCheckIntervalMs(121)
-        ).toBe(120 * 60_000);
+          expertCheckIntervalMs(180)
+        ).toBe(60 * 60_000);
+
+        expect(
+          expertCheckIntervalMs(181)
+        ).toBe(180 * 60_000);
       }
     );
 

@@ -1944,10 +1944,13 @@ uygulamanın veri modeliyle ilgisi yok.
 expertCheckIntervalMs, yarışa kalan süreye göre bir tier tablosu
 kullanır — sabit if/else zinciri değil, tek bir dizi:
 
->2 saat  → 120 dk (2 saat)
-2-1 saat → 15 dk
-1 saat-30 dk → 10 dk
-<30 dk   → 5 dk
+>3 saat  → 180 dk (3 saat)
+3-1 saat → 60 dk
+1 saat-30 dk → 20 dk
+<30 dk   → 10 dk
+
+(2026-10-04'te kullanıcı isteğiyle seyreltildi: uzmanlar yorumu bir kez
+yazar, nadiren değiştirir. AGF/TJK sıklığı ayrıdır ve değişmedi.)
 
 Her check hem Workers AI (extraction) hem Browser Rendering (puppeteer/
 scrape basamağı) tüketebilir — ikisi de faturalanır. Yarışa uzakken
