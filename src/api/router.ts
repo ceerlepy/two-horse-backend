@@ -30,6 +30,7 @@ import { buildOfficialResultsUrl } from "../results/url";
 import { repairHistoricalDates } from "../results/historical-date-repair";
 import { getHorseVideos } from "../horses/service";
 import { getRaceTraining } from "../training/service";
+import { getForeignMeetings, refreshForeignMeetingsIfDue } from "../foreign/service";
 import {
   resolveSession,
   loginWithGoogle,
@@ -126,6 +127,14 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   const result=await getHorseVideos(env,raceDate,city,raceNumber,horseNumber);
   if("error" in result) return json(result,404);
   return json(result);
+ }
+ if(url.pathname==="/api/foreign") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  const date=url.searchParams.get("raceDate") ?? turkeyDate();
+  const meetings=await getForeignMeetings(env,date);
+  if(date===turkeyDate()) ctx.waitUntil(refreshForeignMeetingsIfDue(env).then(()=>undefined).catch(console.error));
+  return json({date,meetings,servedFrom:"d1"});
  }
  if(url.pathname==="/api/races/training") {
   const session=await resolveSession(request,env);

@@ -2313,3 +2313,31 @@ tarayıcı UA'sıyla aynı istek <1 sn. Bu yüzden 8–12 sn timeout'lu TJK
 çağrıları (alan sinyalleri, at videoları) sürekli zaman aşımına düşüp
 Browser Rendering'e kayıyordu. `acquireHttpHtml` artık tjk.org için
 varsayılan olarak tarayıcı UA'sı gönderiyor (`defaultUserAgentFor`).
+
+---
+
+# 65. Yurt dışı (YD) koşuları — 1. aşama
+
+TJK günlük program sayfası yurt dışı koşuları "(YD n)" etiketiyle
+listeliyor (ör. "Longchamp Fransa (YD 3)") ve her biri için yerli
+koşularla aynı tabloyu veriyor: atlar, jokey, kilo, AGF, son 6 yarış.
+Mevcut `parseTjkMeetingPage` bu sayfaları değişiklik yapmadan okuyor.
+
+**Ayrı depolama**: `foreign_meetings` (`migrations/0034`) — toplantı
+başına sıkıştırılmış program JSON'u. Yerli `races`/`runners`
+tablolarına bilinçli olarak yazılmıyor; uzman, alan sinyali,
+öğrenme, AGF snapshot ve kupon akışları bu tabloları okuyor ve hiçbiri
+yurt dışı kartlar için kurulmadı. `/api/today` boyutu da etkilenmiyor.
+
+**Kod**: `src/foreign/discovery.ts` (YD linkleri + ülke),
+`src/foreign/service.ts`. Cron adımı `foreign.refresh`, 20 dk TTL,
+`refresh_state` anahtarı `foreign.program`.
+
+**API**: `GET /api/foreign?raceDate=` (oturum gerekli) →
+`{date, meetings:[{city, country, ydOrder, fetchedAt, races:[{raceNumber,
+time, distanceMeters, track, runners:[{number, name, jockey, weight,
+agfPercent, recentForm}]}]}]}`.
+
+**Sonraki aşama**: banko_tahminler `/ai-tahmin/<tarih>-<hipodrom>/`
+yurt dışı sayfalarını bu toplantılarla eşlemek
+(`excludedCandidateTerms` içindeki "ai tahmin"/"yurt dışı" filtresi).
