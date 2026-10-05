@@ -2291,7 +2291,7 @@ gerçek satın alma doğrulaması o secret'lar eklenene kadar
 - **Kayıt**: `POST /api/auth/register {email,password,displayName?}`.
   E-posta formatı ve 8–128 karakter şifre kontrol edilir; aynı e-posta
   `409 EMAIL_ALREADY_REGISTERED`. Hesap `email_verified=0` ile açılır
-  (migration 0039). Aynı e-postayla daha sonra Google girişi yapılırsa
+  (migration 0042). Aynı e-postayla daha sonra Google girişi yapılırsa
   hesaplar birleşir ve doğrulanmamış hesabın şifresi silinir: başkasının
   e-postasıyla önceden kayıt olan biri o hesaba şifreyle girmeye devam
   edemez.

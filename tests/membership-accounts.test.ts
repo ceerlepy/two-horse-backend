@@ -27,7 +27,7 @@ function testEnv(): any {
   return {
     DB: createSqliteD1([
       "migrations/0029_membership.sql",
-      "migrations/0039_membership_signup.sql"
+      "migrations/0042_membership_signup.sql"
     ]),
     SESSION_JWT_SECRET: "test-only-session-secret-not-real"
   };
