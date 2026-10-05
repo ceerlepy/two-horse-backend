@@ -71,6 +71,10 @@ import {
 } from "./foreign/service";
 
 import {
+  refreshValueModel
+} from "./value-model/service";
+
+import {
   logger,
   observed
 } from "./observability/logger";
@@ -154,6 +158,15 @@ async function runScheduledPipeline(
     "form.refresh",
     () =>
       refreshHorseForms(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "value-model.refresh",
+    () =>
+      refreshValueModel(
         env
       )
   );
