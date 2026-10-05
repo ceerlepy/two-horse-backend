@@ -76,6 +76,10 @@ import {
 } from "./afa-completeness";
 
 
+import {
+  parsePuanliBulten
+} from "./adapters/puanli-altili-bulten";
+
 export interface ExtractedExperts {
   extraction:
     ExpertExtractionInput;
@@ -941,6 +945,36 @@ export async function extractExperts(
       targetCities,
       raceDate
     );
+
+
+  /*
+   * Puanlı Altılı Bülten publishes a scored table per race; read it
+   * directly instead of spending Workers AI on structured data.
+   */
+  if (
+    sourceKey ===
+      "puanli_altili_bulten"
+  ) {
+    return finalizeExtraction(
+      parsePuanliBulten(
+        document.acquired.html,
+        targetCities[0]
+      ),
+
+      `${document.stage}-deterministic-score-table`,
+
+      {
+        acquisition:{
+          stage:
+            document.stage,
+
+          bodyLength:
+            document.acquired
+              .bodyLength
+        }
+      }
+    );
+  }
 
 
   /*

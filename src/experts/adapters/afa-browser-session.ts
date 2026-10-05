@@ -1588,6 +1588,9 @@ export async function acquireAfaBrowserSession(
     const fingerprints =
       new Map<string,number>();
 
+    const skippedRaces:
+      unknown[] = [];
+
     for (
       const raceNumber of races
     ) {
@@ -1874,17 +1877,24 @@ export async function acquireAfaBrowserSession(
       }
 
       if (!panel) {
-        throw new Error(
-          "AFA_RACE_TRANSITION_NOT_CONFIRMED:" +
-          JSON.stringify(
-            lastTransitionDiagnostics ?? {
-              city,
-              raceNumber,
-              reason:
-                "NO_USEFUL_TRANSITION_PANEL"
-            }
-          )
+        /*
+         * One race whose panel never rendered (live: Bursa R6,
+         * Şanlıurfa R5 on 2026-10-04) used to throw and discard
+         * every other, already verified race of the city. Skip
+         * only that race; the verified panels still go through
+         * extraction, and a race with no panel simply has no AFA
+         * pick, exactly like a source that skipped it.
+         */
+        skippedRaces.push(
+          lastTransitionDiagnostics ?? {
+            city,
+            raceNumber,
+            reason:
+              "NO_USEFUL_TRANSITION_PANEL"
+          }
         );
+
+        continue;
       }
 
       const fingerprint =
@@ -1901,11 +1911,13 @@ export async function acquireAfaBrowserSession(
       });
     }
 
-    if (
-      panels.length !== races.length
-    ) {
+    if (!panels.length) {
       throw new Error(
-        "AFA_RACE_PANEL_INCOMPLETE"
+        "AFA_RACE_TRANSITION_NOT_CONFIRMED:" +
+        JSON.stringify({
+          city,
+          skippedRaces
+        })
       );
     }
 
@@ -1937,6 +1949,8 @@ export async function acquireAfaBrowserSession(
 
         panelCount:
           panels.length,
+
+        skippedRaces,
 
         panelFingerprints:
           panels.map(

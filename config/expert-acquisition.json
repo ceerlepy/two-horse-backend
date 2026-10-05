@@ -369,6 +369,33 @@
       "excludedCandidateTerms": [],
       "canonicalOutputPolicy": "strict",
       "directPageDatePolicy": "target-date"
+    },
+    "puanli_altili_bulten": {
+      "host": "puanlialtilibulten.blogspot.com",
+      "mode": "article",
+      "promptProfile": "generic",
+      "rootIsEditorial": false,
+      "preflightRequiresCity": true,
+      "entryUrls": [
+        "https://puanlialtilibulten.blogspot.com/"
+      ],
+      "navigationLabels": [
+        "Altılı Bülten"
+      ],
+      "contextBoostTerms": [
+        "Altılı Bülten"
+      ],
+      "preferredPathRules": [
+        {
+          "kind": "contains",
+          "value": "altl-bulten",
+          "score": 5
+        }
+      ],
+      "allowYearlessDateEvidence": false,
+      "excludedCandidateTerms": [
+        "accurace"
+      ]
     }
   }
 }

@@ -8,25 +8,24 @@
  * source's content changes meaningfully hours before a card starts.
  * Tune cost/freshness here, nowhere else.
  *
- * The far tier is 2 hours: this table only ever fires once a race is
+ * The far tier is 3 hours: this table only ever fires once a race is
  * already scheduled for today (no upcoming race = no checks at all,
  * see below), and a fixed elapsed-time interval is what a 5-minute
  * cron can enforce cleanly -- true calendar times ("check at 08:00
  * and 14:00") would need wall-clock-aware logic this table doesn't
- * have. 2 hours means a source that publishes its card mid-morning
- * for an evening card is discovered within 2 hours instead of
- * possibly sitting undiscovered for up to 6 -- this app's whole
- * point is showing today's expert picks as soon as they exist, not
- * just for whoever opens it in the last 2 hours before post.
+ * have. Experts publish a card once and rarely revise it, so even the
+ * last half hour checks every 10 minutes, not every cron tick. 3 hours
+ * still discovers a mid-morning card well before the 1-hour tier
+ * starts 3 hours before the first race.
  */
 export const EXPERT_CHECK_CADENCE_TIERS: Array<{
   maxMinutes: number;
   intervalMinutes: number;
 }> = [
-  { maxMinutes: 30, intervalMinutes: 5 },
-  { maxMinutes: 60, intervalMinutes: 10 },
-  { maxMinutes: 120, intervalMinutes: 15 },
-  { maxMinutes: Infinity, intervalMinutes: 120 }
+  { maxMinutes: 30, intervalMinutes: 10 },
+  { maxMinutes: 60, intervalMinutes: 20 },
+  { maxMinutes: 180, intervalMinutes: 60 },
+  { maxMinutes: Infinity, intervalMinutes: 180 }
 ];
 
 export function expertCheckIntervalMs(

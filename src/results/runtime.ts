@@ -17,11 +17,58 @@ interface PendingMeeting {
 }
 
 
+/*
+ * A meeting becomes eligible once its LAST race started this long
+ * ago, so TJK has published final results for the whole card.
+ */
 const RESULT_DELAY_MINUTES =
-  5;
+  45;
 
+/*
+ * A failed meeting is retried at most once per this interval.
+ */
 const RETRY_MINUTES =
-  10;
+  60;
+
+/*
+ * Automatic retries stop after this many days. Older gaps are
+ * repaired only through the explicit backfill endpoint, instead of
+ * paying for browser + AI acquisition on every cron forever (live
+ * D1 still retried 2026-08-22 meetings on 2026-10-04).
+ */
+const MAX_AUTOMATIC_RETRY_DAYS =
+  3;
+
+/*
+ * Each meeting costs an HTTP fetch plus Browser Rendering (and an
+ * AI fallback). Doing a whole backlog in one tick made those calls
+ * compete with each other and fail together; a small batch per
+ * 5-minute tick spreads them out.
+ */
+const MAX_MEETINGS_PER_RUN =
+  2;
+
+
+function isoMinutesAgo(
+  minutes: number
+): string {
+  return new Date(
+    Date.now() -
+    minutes * 60_000
+  ).toISOString();
+}
+
+
+function isoDateDaysAgo(
+  days: number
+): string {
+  return new Date(
+    Date.now() -
+    days * 86_400_000
+  )
+    .toISOString()
+    .slice(0, 10);
+}
 
 
 export async function ingestOfficialResultsDue(
@@ -31,9 +78,17 @@ export async function ingestOfficialResultsDue(
   labelledRaces: number;
   labelledRunners: number;
 }> {
+  /*
+   * starts_at and last_attempt_at are stored as ISO strings
+   * ("2026-09-30T09:00:00.000Z"). They used to be compared with
+   * SQLite datetime() ("2026-09-30 09:00:00"); because "T" sorts
+   * after " ", same-day rows always looked "in the future", so a
+   * meeting was only ever tried once per UTC day and a failure was
+   * not retried until the next day. Compare ISO with ISO instead.
+   */
   const pending =
     await env.DB.prepare(`
-      SELECT DISTINCT
+      SELECT
         lr.race_date,
         lr.city
 
@@ -42,11 +97,7 @@ export async function ingestOfficialResultsDue(
       WHERE
         lr.labelled_at IS NULL
 
-        AND lr.starts_at <=
-          datetime(
-            'now',
-            ?
-          )
+        AND lr.race_date >= ?
 
         AND NOT EXISTS (
           SELECT 1
@@ -60,20 +111,33 @@ export async function ingestOfficialResultsDue(
             AND rr.city =
               lr.city
 
-            AND rr.last_attempt_at >
-              datetime(
-                'now',
-                ?
-              )
+            AND rr.last_attempt_at > ?
         )
 
-      ORDER BY
+      GROUP BY
         lr.race_date,
         lr.city
+
+      HAVING
+        MAX(lr.starts_at) <= ?
+
+      ORDER BY
+        lr.race_date DESC,
+        lr.city
+
+      LIMIT ?
     `)
       .bind(
-        `-${RESULT_DELAY_MINUTES} minutes`,
-        `-${RETRY_MINUTES} minutes`
+        isoDateDaysAgo(
+          MAX_AUTOMATIC_RETRY_DAYS
+        ),
+        isoMinutesAgo(
+          RETRY_MINUTES
+        ),
+        isoMinutesAgo(
+          RESULT_DELAY_MINUTES
+        ),
+        MAX_MEETINGS_PER_RUN
       )
       .all<PendingMeeting>();
 

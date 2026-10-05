@@ -51,9 +51,21 @@ import {
 } from "./coupons/calibration";
 
 import {
+  refreshTrainingIfDue
+} from "./training/service";
+
+import {
+  refreshForeignMeetingsIfDue
+} from "./foreign/service";
+
+import {
   logger,
   observed
 } from "./observability/logger";
+
+import {
+  cleanupAiResponseCache
+} from "./experts/ai-response-cache";
 
 
 async function runScheduledPipeline(
@@ -85,6 +97,24 @@ async function runScheduledPipeline(
     "field.refresh",
     () =>
       refreshFieldSignalsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "foreign.refresh",
+    () =>
+      refreshForeignMeetingsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "training.refresh",
+    () =>
+      refreshTrainingIfDue(
         env
       )
   );
@@ -184,6 +214,15 @@ async function runScheduledPipeline(
     "history.cleanup",
     () =>
       cleanup(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "ai-cache.cleanup",
+    () =>
+      cleanupAiResponseCache(
         env
       )
   );

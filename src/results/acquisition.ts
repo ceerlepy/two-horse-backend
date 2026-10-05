@@ -395,19 +395,46 @@ export async function acquireOfficialResults(
   } catch (
     deterministicError
   ) {
-    const semantic =
-      await extractOfficialResultsSemantic(
-        env,
+    let semantic:
+      Awaited<
+        ReturnType<
+          typeof extractOfficialResultsSemantic
+        >
+      >;
 
-        discovered.cityUrl,
+    try {
+      semantic =
+        await extractOfficialResultsSemantic(
+          env,
 
-        input.city,
-        input.raceDate
+          discovered.cityUrl,
+
+          input.city,
+          input.raceDate
+        );
+
+      validateOfficialResults(
+        semantic.value
       );
+    } catch (
+      semanticError
+    ) {
+      /*
+       * Keep BOTH failures. Previously only the semantic
+       * fallback's message survived (e.g. RESULT_NO_FINAL_RACES),
+       * which hid why the deterministic HTML path failed.
+       */
+      const message = (
+        value: unknown
+      ) =>
+        value instanceof Error
+          ? value.message
+          : String(value);
 
-    validateOfficialResults(
-      semantic.value
-    );
+      throw new Error(
+        `${message(semanticError)} | deterministic: ${message(deterministicError).slice(0, 600)} | url: ${discovered.cityUrl}`
+      );
+    }
 
     return {
       value:

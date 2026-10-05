@@ -1944,10 +1944,13 @@ uygulamanın veri modeliyle ilgisi yok.
 expertCheckIntervalMs, yarışa kalan süreye göre bir tier tablosu
 kullanır — sabit if/else zinciri değil, tek bir dizi:
 
->2 saat  → 120 dk (2 saat)
-2-1 saat → 15 dk
-1 saat-30 dk → 10 dk
-<30 dk   → 5 dk
+>3 saat  → 180 dk (3 saat)
+3-1 saat → 60 dk
+1 saat-30 dk → 20 dk
+<30 dk   → 10 dk
+
+(2026-10-04'te kullanıcı isteğiyle seyreltildi: uzmanlar yorumu bir kez
+yazar, nadiren değiştirir. AGF/TJK sıklığı ayrıdır ve değişmedi.)
 
 Her check hem Workers AI (extraction) hem Browser Rendering (puppeteer/
 scrape basamağı) tüketebilir — ikisi de faturalanır. Yarışa uzakken
@@ -2283,7 +2286,86 @@ gerçek satın alma doğrulaması o secret'lar eklenene kadar
 
 ---
 
-# 64. /api/today kompakt projeksiyon (2026-10-04)
+# 64. TJK idman bilgileri ve TJK kullanıcı ajanı
+
+**Kaynak**: TJK günlük programında her koşunun "İdman Bilgileri" sekmesi
+`/TR/YarisSever/Info/Karsilastirma/Karsilastirma?KosuKodu=..&KTip=5`
+parçasını yükler (`table#KosuIdmanGaloplari_table`): her at için son
+idman galobu, 2200m…200m ara dereceleri, tarih, pist, pist durumu,
+idman türü, hipodrom, idman jokeyi, detay ve video linki. Koşu kodu
+`races.performance_url` içindeki `QueryParameter_KKODU`'dan alınır;
+yeni şema alanı gerekmedi.
+
+**Kod**: `src/training/parser.ts` (sütunlar başlık metniyle bulunur),
+`src/training/service.ts`. Tablolar: `race_training`,
+`race_training_state` (`migrations/0033_race_training.sql`).
+Cron adımı `training.refresh`: bugünün henüz başlamamış koşularından
+en fazla 6'sı, 3 eşzamanlı; başarılı/boş koşular 6 saatte bir,
+hatalılar 30 dakikada bir yeniden denenir. Browser Rendering
+kullanılmaz.
+
+**API**: `GET /api/races/training?raceDate&city&raceNumber` (oturum
+gerekli, tüm üyelik seviyeleri). Cron koşuya henüz ulaşmadıysa tek
+seferlik canlı çekilir. `videoUrl` yalnızca `canViewHorseVideos`
+olan seviyeye döner (yarış videolarıyla aynı kural).
+
+**TJK kullanıcı ajanı (2026-10-04 ölçümü)**: TJK'nın dinamik sayfaları
+(AtKosuBilgileri, AtPerformans, Karsilastirma, idmanpistiDetay)
+tarayıcıya benzemeyen bir user-agent'a ~50 sn bekleyip cevap veriyor;
+tarayıcı UA'sıyla aynı istek <1 sn. Bu yüzden 8–12 sn timeout'lu TJK
+çağrıları (alan sinyalleri, at videoları) sürekli zaman aşımına düşüp
+Browser Rendering'e kayıyordu. `acquireHttpHtml` artık tjk.org için
+varsayılan olarak tarayıcı UA'sı gönderiyor (`defaultUserAgentFor`).
+
+---
+
+# 65. Yurt dışı (YD) koşuları — 1. aşama
+
+TJK günlük program sayfası yurt dışı koşuları "(YD n)" etiketiyle
+listeliyor (ör. "Longchamp Fransa (YD 3)") ve her biri için yerli
+koşularla aynı tabloyu veriyor: atlar, jokey, kilo, AGF, son 6 yarış.
+Mevcut `parseTjkMeetingPage` bu sayfaları değişiklik yapmadan okuyor.
+
+**Ayrı depolama**: `foreign_meetings` (`migrations/0034`) — toplantı
+başına sıkıştırılmış program JSON'u. Yerli `races`/`runners`
+tablolarına bilinçli olarak yazılmıyor; uzman, alan sinyali,
+öğrenme, AGF snapshot ve kupon akışları bu tabloları okuyor ve hiçbiri
+yurt dışı kartlar için kurulmadı. `/api/today` boyutu da etkilenmiyor.
+
+**Kod**: `src/foreign/discovery.ts` (YD linkleri + ülke),
+`src/foreign/service.ts`. Cron adımı `foreign.refresh`, 20 dk TTL,
+`refresh_state` anahtarı `foreign.program`.
+
+**API**: `GET /api/foreign?raceDate=` (oturum gerekli) →
+`{date, meetings:[{city, country, ydOrder, fetchedAt, races:[{raceNumber,
+time, distanceMeters, track, runners:[{number, name, jockey, weight,
+agfPercent, recentForm}]}]}]}`.
+
+**Sonraki aşama**: banko_tahminler `/ai-tahmin/<tarih>-<hipodrom>/`
+yurt dışı sayfalarını bu toplantılarla eşlemek
+(`excludedCandidateTerms` içindeki "ai tahmin"/"yurt dışı" filtresi).
+
+---
+
+# 66. Puanlı Altılı Bülten (Blogger) — deterministik kaynak
+
+`puanlialtilibulten.com` ölü; site `puanlialtilibulten.blogspot.com`
+adresine taşınmış ve her toplantı için ücretsiz "<Şehir> - GG.AA.YYYY -
+<Gün> - Altılı Bülten" yazısı yayınlıyor (1–2 gün önceden). Her koşu
+bir HTML tablosu: B.Puan, "<no> <AT> <takı>", yaş, kilo, jokey, St, HK.
+
+- Hedef bulma: Blogger JSON feed (`feeds/posts/summary?alt=json`),
+  başlık tarih + şehir ile eşleşir; "Accurace" yazıları puansız, alınmaz.
+- Çıkarım: Workers AI kullanılmaz. `parsePuanliBulten` koşu başına en
+  yüksek puanı `favorite`, sonraki ikiyi `rival` yapar; yorum "B.Puan N".
+- Kod: `src/experts/adapters/puanli-altili-bulten.ts`, extractor'da
+  kaynağa özel erken dönüş. Migration 0035 kaynağı yeni adresle açar.
+
+Diğer iki kaynak (2026-10-04 kontrolü): `yildizlibulten.com` bir otel
+sitesine yönleniyor, `www` DNS kaydı yok → kapalı. `yaris_analizi`
+günün yazısını yarıştan önce yalnız VIP'e açıyor → kapalı.
+
+# 67. /api/today kompakt projeksiyon (2026-10-04)
 
 /api/today artık varsayılan olarak `toCompactMeetings`
 (src/api/compact-projection.ts) üzerinden döner: yalnızca Android

@@ -154,6 +154,18 @@ export interface VerifiedArticlePlan {
   negativeTerms?:
     string[];
 
+  /*
+   * When set, a candidate's link text or URL PATH (the host is
+   * excluded: "yarisdergisi.com" would otherwise always match
+   * "yaris") must contain at least one of these terms. Without it
+   * a same-day news story from the same search page can win
+   * discovery (live 2026-10-04: Yarış Dergisi picked "2026-2027
+   * sonbahar kış dönemi için ahır tahsisleri başlıyor" and paid for
+   * three browser renders before extraction rejected it).
+   */
+  requiredTerms?:
+    string[];
+
   maxCandidates?:
     number;
 
@@ -1102,6 +1114,50 @@ export async function acquireHttpFirstArticleHtml(
 }
 
 
+export function hasRequiredTerms(
+  requiredTerms:
+    string[] | undefined,
+
+  linkText:
+    string,
+
+  url:
+    string
+):boolean {
+  if (!requiredTerms?.length) {
+    return true;
+  }
+
+  let path = "";
+
+  try {
+    path =
+      decodeURIComponent(
+        new URL(url).pathname
+      );
+  } catch {
+    path = url;
+  }
+
+  const titleMaterial =
+    normalizeExpertSearchText(
+      [
+        linkText,
+        path
+      ].join(" ")
+    );
+
+  return requiredTerms.some(
+    term =>
+      titleMaterial.includes(
+        normalizeExpertSearchText(
+          term
+        )
+      )
+  );
+}
+
+
 function looseCandidate(
   context:
     ExpertAdapterContext,
@@ -1324,6 +1380,16 @@ function looseCandidate(
           term
         )
     );
+
+  if (
+    !hasRequiredTerms(
+      plan.requiredTerms,
+      link.text,
+      link.url
+    )
+  ) {
+    return null;
+  }
 
   /*
    * HorsAI-style loose ranking:
