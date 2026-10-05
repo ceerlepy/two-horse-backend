@@ -105,3 +105,22 @@ describe("draw cell cache", () => {
     expect(calls).toEqual(["aggregate"]);
   });
 });
+
+describe("specialist figure", () => {
+  it("is the best figure on the same surface within 200 m, relative to the field", () => {
+    const run = (fig: number, surface: string, distanceMeters: number) =>
+      ({ raceDate: "2026-09-01", fig, won: false, pWin: 0.1, distanceMeters, surface, jockeyId: null, weight: null });
+    const ctx: FeatureContext = {
+      raceDate: "2026-10-05", distanceMeters: 1400, surface: "Kum", jockeys: new Map(), gallops: null,
+      history: new Map([
+        [1, [run(30, "Kum", 1200), run(50, "Çim", 1400), run(10, "Kum", 1600)]],
+        [2, [run(20, "Kum", 1700)]],
+        [3, [run(-10, "Kum", 1400)]]
+      ])
+    };
+    const runner = (horseId: number) =>
+      ({ horseNumber: horseId, horseId, jockeyId: null, weight: null, agfPercent: null, odds: null });
+    const f = computeFeatures(ctx, [runner(1), runner(2), runner(3)]);
+    expect(f.map(x => x.spec_best_rel)).toEqual([20, null, -20]);
+  });
+});

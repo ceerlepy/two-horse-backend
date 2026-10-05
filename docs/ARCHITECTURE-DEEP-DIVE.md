@@ -2542,3 +2542,18 @@ Denenip **kanıtlanmayan** ve bu yüzden eklenmeyen bilgiler: pedigri (baba A/E)
 - Kulvar hücreleri `value_model_cache` içinde gün başına 6 saat önbellekte tutuluyor.
 - Katsayılar `value-v2-2026-10-05`.
 
+## 71.2 v3: uzmanlık figürü (2026-10-05)
+
+Denenen dört parametre: pist durumu tercihi, uzmanlık, hipodrom geçmişi, jokey–antrenör ikilisi.
+
+**Kanıtlanan tek parametre `spec_best_rel`.**
+- Tanım: atın aynı pistte ve ±200 m mesafede koştuğu geçmiş yarışlardaki en iyi hız figürü, alan ortalamasına göre.
+- Test: 5 çeyreklik ileriye dönük test, 8.088 yarış. Log-loss kazancı +0,0026 ±0,0016. Kazanç 4 çeyrekte pozitif, 1'inde sıfır.
+
+**Kanıtlanmayanlar:**
+- Pist durumu tercihi: −0,0010 ±0,0009.
+- Hipodrom geçmişi: +0,0001.
+- Jokey–antrenör ikilisi: +0,0002.
+
+Yeni veri gerekmiyor; mevcut arşivdeki geçmiş koşulardan hesaplanıyor. Katsayılar `value-v3-2026-10-05`.
+
