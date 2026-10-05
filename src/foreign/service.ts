@@ -24,6 +24,7 @@ import {
 
 import {
   discoverForeignMeetingLinks,
+  raceDateOfForeignLink,
   type ForeignMeetingLink
 } from "./discovery";
 
@@ -140,7 +141,7 @@ export async function refreshForeignMeetingsIfDue(
               fetched_at = excluded.fetched_at
           `)
             .bind(
-              raceDate, link.city, link.country, link.ydOrder,
+              raceDateOfForeignLink(link.url) ?? raceDate, link.city, link.country, link.ydOrder,
               JSON.stringify(races), link.url, fetchedAt
             )
             .run();

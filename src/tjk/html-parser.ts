@@ -93,11 +93,21 @@ function anchorHref(
   }
 }
 
+/*
+ * Gear marks are rendered inside the name cell as
+ * <sup class="tooltipp">KG<a class="tooltiptextt">Kapalı gözlük ...</a></sup>.
+ * When a horse has no profile link (common on foreign "YD" cards) the
+ * first <a> in the cell is that tooltip, which used to become the
+ * horse's name. Read the name without the gear markup.
+ */
 function anchorText(
   $: cheerio.CheerioAPI,
   cell: cheerio.Cheerio<any>
 ): string | null {
-  const anchor = cell.find("a").first();
+  const copy = cell.clone();
+  copy.find("sup, .tooltipp, .tooltiptextt").remove();
+
+  const anchor = copy.find("a").first();
 
   if (!anchor.length) {
     return null;
@@ -323,7 +333,14 @@ function parseRunnerTable(
 
     const name =
       anchorText($, nameCell) ??
-      clean(nameCell.text())
+      clean(
+        nameCell
+          .clone()
+          .find("sup, .tooltipp, .tooltiptextt")
+          .remove()
+          .end()
+          .text()
+      )
         .replace(/\([^)]*\)/g, "")
         .trim();
 

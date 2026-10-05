@@ -16,7 +16,7 @@ import {
   summarizeExpertSourceHealth
 } from "../experts/source-repository";
 import { getHistory } from "../history/service";
-import { refreshHorseForms } from "../form/service";
+import { refreshHorseForms, getRaceForm } from "../form/service";
 import { refreshFieldSignalsIfDue } from "../field/service";
 import { generateSixFoldCoupons, generateFiveFoldCoupons } from "../coupons/service";
 import { adminAuthFailure } from "./auth";
@@ -149,6 +149,15 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   // Training videos follow the same tier rule as race videos.
   const canViewVideos=TIER_LIMITS[session.tier].canViewHorseVideos;
   return json({...result,horses:result.horses.map(h=>({...h,videoUrl:canViewVideos?h.videoUrl:null}))});
+ }
+ if(url.pathname==="/api/races/form") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  const raceDate=url.searchParams.get("raceDate") ?? turkeyDate();
+  const city=url.searchParams.get("city");
+  const raceNumber=Number(url.searchParams.get("raceNumber"));
+  if(!city || !Number.isInteger(raceNumber) || raceNumber<=0) return json({error:"INVALID_PARAMS"},400);
+  return json(await getRaceForm(env,raceDate,city,raceNumber));
  }
  if(url.pathname==="/api/coupons/generate") {
   const couponSession=

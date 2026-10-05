@@ -51,6 +51,18 @@ import {
 } from "./coupons/calibration";
 
 import {
+  refreshHorseForms
+} from "./form/service";
+
+import {
+  captureCouponSnapshotsDue
+} from "./coupons/capture";
+
+import {
+  captureBankoForeignPages
+} from "./foreign/banko";
+
+import {
   refreshTrainingIfDue
 } from "./training/service";
 
@@ -112,9 +124,36 @@ async function runScheduledPipeline(
 
   await observed(
     env,
+    "foreign.banko-pages",
+    () =>
+      captureBankoForeignPages(
+        env
+      )
+  );
+
+  await observed(
+    env,
     "training.refresh",
     () =>
       refreshTrainingIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "coupons.capture",
+    () =>
+      captureCouponSnapshotsDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "form.refresh",
+    () =>
+      refreshHorseForms(
         env
       )
   );

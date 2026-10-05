@@ -2384,3 +2384,50 @@ okur; bu projeksiyondan etkilenmez.
 
 Uygulamaya yeni bir alan eklenirse compact-projection.ts'teki
 anahtar listesine de eklenmelidir — yoksa sunucu onu göndermez.
+
+---
+
+# 68. At geçmişi toplayıcı (horse_form_history)
+
+Tablo 0005'ten beri vardı ama hiç dolmadı: toplayıcı yalnızca admin
+ucundan çalışıyordu ve aday sorgusu her seferinde alfabetik ilk 12
+atı seçiyordu. Artık cron adımı `form.refresh` bugünkü ve yarınki
+kartlardaki her at için TJK `AtKosuBilgileri` sayfasını düz HTTP ile
+(tarayıcı UA, ~1 sn) okur. Browser Rendering ve Workers AI kullanılmaz;
+eski `form/acquisition.ts` ve `form/semantic-extractor.ts` silindi.
+
+- `HORSE_FORM_CONFIG` (`src/form/service.ts`): günde bir yenileme,
+  hata sonrası 60 dk bekleme, tur başına 12 at, 3 paralel.
+- Sınırlı tablo: at başına en yeni 20 koşu tutulur, eskisi silinir.
+- 0036 ile eklenen alanlar: `finish_time` / `finish_time_seconds`
+  (Derece), `start_position` (St), `race_number`, `race_class`
+  (Kcins), `trainer`, `prize_tl`. Hız puanı ve sınıf analizi için.
+- İlk kez koşan atın sayfası "uygun veri bulunmamaktadır" satırı
+  gösterir; bu boş ama başarılı bir geçmiş sayılır.
+- API: `GET /api/races/form?raceDate&city&raceNumber` (oturum gerekli)
+  → `{horses:[{horseNumber, horseName, runs:[...]}]}`, at başına son 6.
+
+# 69. Kupon anlık görüntüleri cron'dan
+
+Önceden yalnızca admin POST'u kupon kaydediyordu (20 Ağustos'tan beri
+6 altılı, 0 beşli). `coupons.capture` adımı (`src/coupons/capture.ts`)
+her altılı/beşli penceresi için ilk ayaktan en fazla 15 dk önce, günde
+bir kez, 1500 TL tavanlı bütçe merdivenini kaydeder; mevcut
+`coupons.evaluate*` adımları son ayak sonuçlanınca puanlar. 365 günden
+eski anlık görüntüler ve ayak örnekleri silinir.
+
+# 70. Yurt dışı düzeltmeleri ve Banko AI sayfaları
+
+- Gece yarısından hemen sonra TJK ana sayfası hâlâ önceki günün YD
+  linklerini veriyor; tarih artık linkin `QueryParameter_Tarih`
+  değerinden alınıyor (`raceDateOfForeignLink`). 0037 yanlış tarihli
+  satırları siler.
+- Yurt dışı kartlarda profil linki olmayan atlarda ilk `<a>` takı
+  ipucuydu ("Kapalı gözlük takılacağını ifade eder.") ve at adı
+  sanılıyordu. Ad artık `sup.tooltipp` çıkarılarak okunuyor.
+- `foreign.banko-pages` (`src/foreign/banko.ts`): her YD toplantısı
+  için `bankotahminler.com/ai-tahmin/<gün>-<ay>-<yıl>-<slug>/`
+  sayfası Browser Rendering ile çekilip `foreign_expert_pages`
+  tablosuna yazılır (0038; tur başına 2 sayfa, toplantı başına en
+  fazla 4 deneme, 3 gün saklama). Seçimleri okuyan ayrıştırıcı bir
+  sonraki adım.
