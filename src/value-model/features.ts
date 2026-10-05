@@ -11,7 +11,7 @@ export const VALUE_MODEL_FEATURES = [
   "fig_best3_rel", "fig_last_rel", "n_prev", "jockey_ae", "jockey_upg", "horse_ae",
   "days_off", "dist_chg", "surf_chg", "wt_chg",
   "idm_best400_z30_rel", "idm_best800_z30_rel", "idm_last_z_rel", "idm_n30", "idm_days_last",
-  "agf_gny_ratio", "draw_ae_rel"
+  "agf_gny_ratio", "draw_ae_rel", "spec_best_rel"
 ] as const;
 
 export type FeatureName = typeof VALUE_MODEL_FEATURES[number];
@@ -76,6 +76,8 @@ export interface FeatureContext {
  */
 export const DRAW_SHRINK = 30;
 export const SPRINT_MAX_METRES = 1400;
+/* "Same trip" for the specialist figure: same surface, distance within this many metres. */
+export const SPEC_DISTANCE_METRES = 200;
 
 export function drawBucket(start: number): string {
   return start <= 2 ? "1-2" : start <= 4 ? "3-4" : start <= 7 ? "5-7" : "8+";
@@ -148,6 +150,9 @@ export function computeFeatures(ctx: FeatureContext, runners: FeatureRunner[]): 
     const h = (r.horseId != null ? ctx.history.get(r.horseId) : undefined) ?? [];
     const last = h.length ? h[h.length - 1] : null;
     const last3 = h.slice(-3).map(x => x.fig);
+    const sameTrip = h.filter(x =>
+      x.surface === ctx.surface && ctx.distanceMeters && x.distanceMeters &&
+      Math.abs(x.distanceMeters - ctx.distanceMeters) <= SPEC_DISTANCE_METRES);
 
     const today = r.jockeyId != null ? jockeyRates(ctx.jockeys.get(r.jockeyId)) : null;
     let lastJockeySr = today?.sr ?? null;
@@ -179,15 +184,16 @@ export function computeFeatures(ctx: FeatureContext, runners: FeatureRunner[]): 
       idm_best800_z30: maxOrNull(w30.map(g => gallopZ(g, 800))),
       idm_n30: prev ? w30.length : null,
       idm_days_last: lastGallop ? days(lastGallop.date, ctx.raceDate) : null,
-      draw_ae: drawAe(ctx, r.startPosition)
+      draw_ae: drawAe(ctx, r.startPosition),
+      spec_best: maxOrNull(sameTrip.map(x => x.fig))
     };
   });
 
-  const rel = (key: "fig_best3" | "fig_last" | "idm_last_z" | "idm_best400_z30" | "idm_best800_z30" | "draw_ae") =>
+  const rel = (key: "fig_best3" | "fig_last" | "idm_last_z" | "idm_best400_z30" | "idm_best800_z30" | "draw_ae" | "spec_best") =>
     relativeToField(raw.map(x => x[key]));
   const figBest3Rel = rel("fig_best3"), figLastRel = rel("fig_last");
   const idmLastRel = rel("idm_last_z"), idm400Rel = rel("idm_best400_z30"), idm800Rel = rel("idm_best800_z30");
-  const drawRel = rel("draw_ae");
+  const drawRel = rel("draw_ae"), specRel = rel("spec_best");
 
   return raw.map((x, i) => ({
     fig_best3_rel: figBest3Rel[i],
@@ -206,6 +212,7 @@ export function computeFeatures(ctx: FeatureContext, runners: FeatureRunner[]): 
     idm_n30: x.idm_n30,
     idm_days_last: x.idm_days_last,
     agf_gny_ratio: pAgf[i] != null && pGanyan[i] != null ? Math.log((pGanyan[i] as number) / (pAgf[i] as number)) : null,
-    draw_ae_rel: drawRel[i]
+    draw_ae_rel: drawRel[i],
+    spec_best_rel: specRel[i]
   }));
 }
