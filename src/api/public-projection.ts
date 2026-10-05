@@ -31,8 +31,11 @@ import type {
 } from "../membership/tier";
 
 import {
+  TIER_LIMITS,
   stripPremiumRunnerSignals,
-  stripPremiumRaceSignals
+  stripPremiumRaceSignals,
+  stripValueModelRace,
+  stripValueModelRunner
 } from "../membership/tier";
 
 /*
@@ -61,20 +64,39 @@ export function toPublicHistory(
             : 0
       };
 
+      const scoped =
+        TIER_LIMITS[tier].canViewValueModel
+          ? withCount
+          : stripValueModelRace(
+              withCount
+            );
+
       if (
-        tier !== "free" ||
         !Array.isArray(
-          withCount.runners
+          scoped.runners
         )
       ) {
-        return withCount;
+        return scoped;
+      }
+
+      if (tier !== "free") {
+        return TIER_LIMITS[tier].canViewValueModel
+          ? scoped
+          : {
+              ...scoped,
+
+              runners:
+                scoped.runners.map(
+                  stripValueModelRunner
+                )
+            };
       }
 
       return {
-        ...withCount,
+        ...scoped,
 
         runners:
-          withCount.runners.map(
+          scoped.runners.map(
             stripPremiumRunnerSignals
           )
       };
@@ -94,12 +116,22 @@ export function toPublicMeetings(
       races:
         (meeting.races ?? []).map(
           (race: any) => {
-            const publicRace =
+            const canViewValueModel =
+              TIER_LIMITS[tier].canViewValueModel;
+
+            const signalRace =
               tier === "free"
                 ? stripPremiumRaceSignals(
                     race
                   )
                 : race;
+
+            const publicRace =
+              canViewValueModel
+                ? signalRace
+                : stripValueModelRace(
+                    signalRace
+                  );
 
             return {
               ...publicRace,
@@ -113,11 +145,18 @@ export function toPublicMeetings(
                       ...publicRunner
                     } = runner;
 
-                    return tier === "free"
-                      ? stripPremiumRunnerSignals(
-                          publicRunner
-                        )
-                      : publicRunner;
+                    const signalRunner =
+                      tier === "free"
+                        ? stripPremiumRunnerSignals(
+                            publicRunner
+                          )
+                        : publicRunner;
+
+                    return canViewValueModel
+                      ? signalRunner
+                      : stripValueModelRunner(
+                          signalRunner
+                        );
                   }
                 )
             };

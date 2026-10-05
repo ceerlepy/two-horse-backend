@@ -2317,6 +2317,39 @@ gerçek satın alma doğrulaması o secret'lar eklenene kadar
 
 ---
 
+## 63.2 Paket içerikleri: Premium'a özel değer etiketi, kupon geçmişi, Gold günlük kupon hakkı (2026-10-05)
+
+`TIER_LIMITS` (`src/membership/tier.ts`) artık paketleri şöyle ayırıyor:
+
+| | Free | Gold | Premium |
+|---|---|---|---|
+| Kupon üretimi | yok | 1.500 TL bütçeye kadar, günde 10 farklı istek | sınırsız bütçe ve istek |
+| Kupon geçmişi (`GET /api/coupons/history`) | yok | yok | var |
+| Değer modeli (`runner.valueModel`, `race.valueModelStatus`) | yok | yok | var |
+| At ve idman videoları | var | var | var |
+
+- **Değer modeli** `toPublicMeetings` / `toPublicHistory` içinde
+  `canViewValueModel` false ise `stripValueModelRunner/Race` ile
+  çıkarılır; Gold diğer sinyalleri (model skoru, uzman, piyasa) görmeye
+  devam eder.
+- **Günlük kupon hakkı** `coupon_request_log` tablosunda (migration
+  0045) tutulur. Anahtar `şehir|havuz|pencere|bütçe`; aynı gün aynı
+  isteği tekrarlamak hak yemez. Hak yalnızca kupon başarıyla üretildikten
+  sonra yazılır (`recordCouponRequest`), sınır aşılırsa
+  `429 COUPON_DAILY_LIMIT_REACHED {limit, used}` döner. Hesap silinince
+  satırlar da silinir.
+- **Kupon geçmişi** `src/coupons/history.ts`: cron'un ilk ayaktan önce
+  dondurduğu (§69) altılı/beşli kupon basamakları, pencere ve bütçe
+  profili başına en erken (yarış öncesi) kayıt, sonuç gelince
+  `hitLegs` / `allLegsHit`. `days` 1-60 (varsayılan 30), en çok 400 satır.
+- **Videolar** TJK'nın kendi sayfalarına bağlantıdır (uygulama tjk.org'u
+  tarayıcıda açar, video barındırılmaz). Başkasının ücretsiz içeriğine
+  erişimi ücretli paketin parçası yapmak hukuken zayıf nokta olduğu için
+  tüm paketlere açıldı.
+- **Yıllık plan** Play Console'da aynı abonelik ürününe (`gold_monthly`,
+  `premium_monthly`) eklenen ikinci temel plan (`yearly`); ürün kimliği
+  değişmediği için sunucu doğrulaması aynı kalır.
+
 # 64. TJK idman bilgileri ve TJK kullanıcı ajanı
 
 **Kaynak**: TJK günlük programında her koşunun "İdman Bilgileri" sekmesi
