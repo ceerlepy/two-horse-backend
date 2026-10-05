@@ -79,6 +79,45 @@ function normalizeDate(
   );
 }
 
+/*
+ * TJK race time "1.49.18" = 1 min 49.18 s; "59.30" = 59.30 s.
+ */
+export function raceTimeSeconds(
+  value: string
+): number | null {
+  const match =
+    clean(value).match(
+      /^(?:(\d+)\.)?(\d{1,2})\.(\d{2})$/
+    );
+
+  if (!match) {
+    return null;
+  }
+
+  const seconds =
+    Number(match[1] ?? 0) * 60 +
+    Number(match[2]) +
+    Number(match[3]) / 100;
+
+  return seconds > 0
+    ? Math.round(seconds * 100) / 100
+    : null;
+}
+
+function prizeValue(
+  value: string
+): number | null {
+  const digits =
+    clean(value).replace(
+      /\D/g,
+      ""
+    );
+
+  return digits
+    ? Number(digits)
+    : null;
+}
+
 function headerIndexes(
   $: cheerio.CheerioAPI,
   table: cheerio.Cheerio<any>
@@ -146,6 +185,36 @@ function headerIndexes(
               header === "rt"
             ) {
               result.hp = index;
+            } else if (
+              header === "derece" ||
+              header === "time"
+            ) {
+              result.time = index;
+            } else if (
+              header === "st"
+            ) {
+              result.start = index;
+            } else if (
+              header.startsWith(
+                "k. no"
+              )
+            ) {
+              result.raceNumber = index;
+            } else if (
+              header === "kcins"
+            ) {
+              result.raceClass = index;
+            } else if (
+              header === "ant." ||
+              header === "antrenör"
+            ) {
+              result.trainer = index;
+            } else if (
+              /* tr-TR lowercases "Ikramiye" to "ıkramiye". */
+              header === "ıkramiye" ||
+              header === "ikramiye"
+            ) {
+              result.prize = index;
             }
           }
         );
@@ -272,6 +341,49 @@ export function parseHorseHistoryPage(
                 integerValue(
                   textAt(
                     indexes.hp
+                  )
+                ),
+
+              finishTime:
+                textAt(
+                  indexes.time
+                ) || null,
+
+              finishTimeSeconds:
+                raceTimeSeconds(
+                  textAt(
+                    indexes.time
+                  )
+                ),
+
+              startPosition:
+                integerValue(
+                  textAt(
+                    indexes.start
+                  )
+                ),
+
+              raceNumber:
+                integerValue(
+                  textAt(
+                    indexes.raceNumber
+                  )
+                ),
+
+              raceClass:
+                textAt(
+                  indexes.raceClass
+                ) || null,
+
+              trainer:
+                textAt(
+                  indexes.trainer
+                ) || null,
+
+              prizeTl:
+                prizeValue(
+                  textAt(
+                    indexes.prize
                   )
                 )
             });

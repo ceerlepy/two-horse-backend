@@ -48,6 +48,22 @@ function clean(value: unknown): string {
 }
 
 
+/*
+ * Race date from the link's QueryParameter_Tarih (dd/mm/yyyy). Just
+ * after midnight TJK's master page still lists the previous day's
+ * meetings, so the wall-clock date is not the card's date.
+ */
+export function raceDateOfForeignLink(url: string): string | null {
+  try {
+    const value = new URL(url).searchParams.get("QueryParameter_Tarih") ?? "";
+    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+
+
 export function countryOfForeignMeeting(city: string): string | null {
   const name = clean(city);
   for (const [re, country] of COUNTRY_SUFFIXES) {
