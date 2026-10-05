@@ -282,6 +282,34 @@ gibi version'lar behavior provenance sağlar.
 
 ---
 
+## src/foreign — calibrated AGF win probability
+
+Foreign (TJK "YD") cards live apart from the domestic pipeline
+(`foreign_meetings`, `service.ts`). The only model signal on them is
+`winProb` (0..1) per runner, computed at read time by
+`calibration.ts` from the runners' `agfPercent`:
+
+    q_i       = agf_i / Σ agf                      (runners with AGF)
+    slope     = βagf + βfield·(ln n − 2.2) + βcountry[group]
+    winProb_i = softmax_i(slope · ln max(q_i, 1e-4))
+
+This is model "b2" from `analysis/yurtdisi-model-2026-10-05`
+(`results/b2_coefficients.json`, refit on 19,941 races 2024-01..2026-10).
+Raw AGF overstates favourites and understates long shots; slope < 1
+flattens it, per country group (US, ZA, GB, FR, HK, IE, CA, AU, other —
+from the meeting name's country suffix) and field size. Walk-forward
+log-loss: raw AGF 1.7721 → b2 1.7631.
+
+Rules: runners without AGF get `null`; with fewer than 2 AGF runners or
+an AGF total under 80 every runner gets `null`. `winProb` is a Gold+
+model signal: `/api/foreign` adds it only when
+`TIER_LIMITS[tier].canViewFullSignals` (same gate as the foreign AI
+picks and, domestically, `modelScore`). Free users never receive it.
+Coefficients are a constant; to refresh, rerun `scripts/b2_export.py`
+and regenerate the constant in `calibration.ts`.
+
+---
+
 ## src/coupons
 
 Race ranking sonuçlarından oynanabilir kupon kombinasyonları üretir.
