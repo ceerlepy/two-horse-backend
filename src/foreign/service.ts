@@ -31,6 +31,11 @@ import type {
 } from "./banko-picks";
 
 import {
+  foreignCountryGroup,
+  withForeignWinProbs
+} from "./calibration";
+
+import {
   discoverForeignMeetingLinks,
   raceDateOfForeignLink,
   type ForeignMeetingLink
@@ -57,6 +62,8 @@ export interface ForeignRunner {
   weight: number | null;
   agfPercent: number | null;
   recentForm: string | null;
+  /* Calibrated AGF win probability (0..1); Gold+ only, see ./calibration.ts. */
+  winProb?: number | null;
 }
 
 export interface ForeignAiPick {
@@ -204,10 +211,11 @@ export async function refreshForeignMeetingsIfDue(
 export async function getForeignMeetings(
   env: Env,
   raceDate: string = turkeyDate(),
-  includeAiPicks = false
+  /* Gold+ model signals: AI picks/coupons and calibrated winProb. */
+  includeModelSignals = false
 ): Promise<ForeignMeeting[]> {
   const picksByCity =
-    includeAiPicks
+    includeModelSignals
       ? await getBankoForeignPicks(env, raceDate)
       : new Map<string, BankoPicks>();
 
@@ -246,13 +254,18 @@ export async function getForeignMeetings(
       });
     }
 
+    if (includeModelSignals) {
+      const group = foreignCountryGroup(row.city, row.country);
+      races = races.map(race => withForeignWinProbs(race, group));
+    }
+
     return {
       city: row.city,
       country: row.country ?? null,
       ydOrder: row.yd_order ?? null,
       races,
       fetchedAt: row.fetched_at,
-      ...(includeAiPicks ? { aiCoupons: picks?.coupons ?? [] } : {})
+      ...(includeModelSignals ? { aiCoupons: picks?.coupons ?? [] } : {})
     };
   });
 }
