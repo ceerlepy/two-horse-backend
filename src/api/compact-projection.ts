@@ -142,6 +142,16 @@ const FIELD_SIGNAL_KEYS = [
   "tjkSampleSize"
 ] as const;
 
+const VALUE_MODEL_KEYS = [
+  "probability",
+  "agfProbability",
+  "ganyanProbability",
+  "odds",
+  "valueRatio",
+  "label",
+  "variant"
+] as const;
+
 const UNCERTAINTY_KEYS = [
   "level",
   "score",
@@ -229,6 +239,15 @@ export function toCompactRunner(
     )
   );
 
+  assign(
+    out,
+    "valueModel",
+    pick(
+      runner?.valueModel,
+      VALUE_MODEL_KEYS
+    )
+  );
+
   return out;
 }
 
@@ -257,6 +276,12 @@ export function toCompactRace(
       race?.couponStrategy,
       COUPON_STRATEGY_KEYS
     )
+  );
+
+  assign(
+    out,
+    "valueModelStatus",
+    race?.valueModelStatus
   );
 
   out.runners =
