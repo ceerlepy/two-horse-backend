@@ -17,7 +17,7 @@ const CATEGORY =
   "https://www.horseturk.com/cat/at-yarisi-tahminleri/";
 
 
-function ownsArticle(
+export function ownsArticle(
   value:string
 ):boolean {
   try {
@@ -43,6 +43,13 @@ function ownsArticle(
       (
         path.includes(
           "at-yarisi-tahmin"
+        ) ||
+        /*
+         * Third title pattern seen live, e.g.
+         * at-yarislari-tahmin-diyarbakir-3-ekim-2026.
+         */
+        path.includes(
+          "at-yarislari-tahmin"
         ) ||
         path.includes(
           "altili-ganyan-tahmin"
