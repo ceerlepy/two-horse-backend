@@ -22,6 +22,7 @@ function baseUser(
     displayName: null,
     googleSub: null,
     passwordHash: null,
+    emailVerified: true,
     tier: "free",
     tierSource: "trial",
     trialStartedAt: null,

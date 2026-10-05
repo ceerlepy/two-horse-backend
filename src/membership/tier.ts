@@ -10,6 +10,7 @@ export interface UserRecord {
   displayName: string | null;
   googleSub: string | null;
   passwordHash: string | null;
+  emailVerified: boolean;
   tier: MembershipTier;
   tierSource: TierSource;
   trialStartedAt: string | null;
@@ -22,6 +23,13 @@ export interface UserRecord {
 }
 
 export const TRIAL_DAYS = 7;
+
+/*
+ * The tier a new account gets for its free trial week. It matches
+ * the plan the user is asked to buy when the trial ends (Gold), so
+ * the trial shows exactly what the subscription sells.
+ */
+export const TRIAL_TIER: MembershipTier = "gold";
 
 /*
  * Play Console subscription product IDs -> the tier they grant.
