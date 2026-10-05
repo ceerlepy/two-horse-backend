@@ -57,6 +57,13 @@ export interface NextDayRunner {
   hp: number | null;
   recent_form_raw: string | null;
   start_position: number | null;
+  /*
+   * Early expert picks (src/experts/next-day-service.ts): distinct
+   * sources with a positive pick, plus our own counts-only sentence.
+   * Attached at read time, never stored here; absent for free tier.
+   */
+  expertPickCount?: number;
+  expertSummary?: string;
 }
 
 export interface NextDayRace {
@@ -65,6 +72,13 @@ export interface NextDayRace {
   starts_at: string | null;
   distance_meters: number | null;
   track: string | null;
+  /*
+   * Altılı sequence numbers that start at this race (TJK's own
+   * "N. Altılı Ganyan" marker), so an expert's altılı-leg picks
+   * ("1. ayak") map to the right race. Absent on cards stored
+   * before this field existed.
+   */
+  sixfold_start_numbers?: number[];
   runners: NextDayRunner[];
 }
 
@@ -122,6 +136,8 @@ export function toNextDayProgram(
         starts_at: startsAtIso(date, race.time),
         distance_meters: race.distanceMeters ?? null,
         track: race.track ?? null,
+        sixfold_start_numbers: (race.sixfoldStartNumbers ?? [])
+          .filter(value => Number.isInteger(value) && value > 0),
         runners: race.runners.map(runner => ({
           horse_number: runner.number,
           horse_name: runner.name,

@@ -49,6 +49,7 @@ const program: TjkProgramInput = {
       distanceMeters: 1400,
       track: "Kum",
       performanceUrl: "https://www.tjk.org/perf",
+      sixfoldStartNumbers: [1],
       runners: [{
         number: 3,
         name: "RÜZGAR",
@@ -155,6 +156,7 @@ describe("refreshNextDayProgramIfDue", () => {
           starts_at: "2026-10-06T11:30:00.000Z",
           distance_meters: 1400,
           track: "Kum",
+          sixfold_start_numbers: [1],
           runners: [{
             horse_number: 3,
             horse_name: "RÜZGAR",

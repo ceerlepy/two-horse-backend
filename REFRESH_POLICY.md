@@ -41,6 +41,23 @@ in a `nextDay` field so the app is not empty overnight.
   snapshots: tomorrow's card is display-only until it becomes today's
   canonical program through the normal `tjk:program` refresh.
 
+## Next-day expert picks (D+1)
+
+Early expert picks for tomorrow's card, shown as "N uzman" counts.
+
+- Lease key `experts:next-day`, cron step `experts.next-day`
+  (`src/experts/next-day-service.ts`), after `program.next-day`.
+- Window: 18:00–24:00 Turkey time, and only when `next_day_programs` has
+  the D+1 row. Outside it the step only prunes past rows.
+- Allowlist: `puanli_altili_bulten`, `horseturk`, `istinye_ganyan`
+  (needs D+1 date evidence, never today's page), `ganyan_canavari`.
+- Per source and D+1 date: checked at most every 60 min
+  (`next_day_expert_state.checked_at`); Workers AI only when the fetched
+  bundle's content hash changed. Failures are retried next cadence.
+- HTTP only, Browser Rendering blocked. Writes only
+  `next_day_expert_picks` / `next_day_expert_state`; rows with
+  `race_date` before today are pruned on every run.
+
 ## Expert and comment sources
 
 Expert acquisition exists only for upcoming pre-race decisions.

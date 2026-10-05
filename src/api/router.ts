@@ -5,6 +5,7 @@ import { toPublicMeetings, toPublicHistory } from "./public-projection";
 import { toCompactMeetings } from "./compact-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
 import { isTodayOver, nextDayForToday, refreshNextDayProgramIfDue } from "../tjk/next-day-service";
+import { attachNextDayExperts } from "../experts/next-day-service";
 import {
   refreshExpertsIfDue,
   refreshExpertSource
@@ -149,7 +150,9 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
   const publicMeetings=toPublicMeetings(meetings,session.tier);
   // Tomorrow's card (display only, no scores) once today's last race has started.
-  const nextDay=await nextDayForToday(env,meetings).catch(()=>null);
+  // Early expert pick counts ride along (tier-gated like expertConsensus).
+  const storedNextDay=await nextDayForToday(env,meetings).catch(()=>null);
+  const nextDay=storedNextDay?await attachNextDayExperts(env,storedNextDay,session.tier).catch(()=>storedNextDay):null;
   if(isTodayOver(meetings)) ctx.waitUntil(refreshNextDayProgramIfDue(env).then(()=>undefined).catch(console.error));
   return json({date:turkeyDate(),meetings:url.searchParams.get("view")==="full"?publicMeetings:toCompactMeetings(publicMeetings),...(nextDay?{nextDay}:{}),servedFrom:"d1",refreshingInBackground:true});
  }

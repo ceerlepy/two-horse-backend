@@ -19,6 +19,10 @@ import {
 } from "./experts/service";
 
 import {
+  refreshNextDayExpertsIfDue
+} from "./experts/next-day-service";
+
+import {
   cleanup,
   finalizeStartedRaces
 } from "./history/service";
@@ -116,6 +120,15 @@ async function runScheduledPipeline(
     "program.next-day",
     () =>
       refreshNextDayProgramIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "experts.next-day",
+    () =>
+      refreshNextDayExpertsIfDue(
         env
       )
   );
