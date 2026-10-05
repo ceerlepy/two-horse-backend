@@ -2252,9 +2252,10 @@ yazan tier ne olursa olsun.
   her şey açık.
 
 Yeni kullanıcı (Google ile ilk giriş veya e-posta kaydı) otomatik
-olarak **7 günlük Gold deneme** alıyor (`TRIAL_DAYS`, `TRIAL_TIER`;
-2026-10-05 öncesi Premium'du, o kullanıcılar süreleri bitene kadar
-Premium kalır); süre dolunca
+olarak **7 günlük Premium deneme** alıyor (`TRIAL_DAYS`, `TRIAL_TIER`;
+2026-10-05 sabahı kısa süre Gold'du, 2026-10-05 öğleden sonra kullanıcı
+kararıyla tekrar Premium yapıldı ki deneyen kişi değer etiketini görsün);
+süre dolunca
 `effectiveTier` otomatik `free`'ye düşürüyor, ayrı bir iş/cron
 gerekmiyor.
 
