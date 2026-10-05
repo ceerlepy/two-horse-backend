@@ -47,7 +47,7 @@ describe("email registration", () => {
 
     expect(token).toBeTruthy();
     expect(user.email).toBe("new.user@example.com");
-    expect(user.tier).toBe("gold");
+    expect(user.tier).toBe("premium");
     expect(user.tierSource).toBe("trial");
 
     const days =
@@ -133,7 +133,7 @@ describe("account deletion", () => {
       email: "again@example.com",
       displayName: null
     });
-    expect(effectiveTier(first)).toBe("gold");
+    expect(effectiveTier(first)).toBe("premium");
 
     await deleteAccount(env, first);
     expect(await getUserByEmail(env, "again@example.com")).toBeNull();

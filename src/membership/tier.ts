@@ -25,11 +25,11 @@ export interface UserRecord {
 export const TRIAL_DAYS = 7;
 
 /*
- * The tier a new account gets for its free trial week. It matches
- * the plan the user is asked to buy when the trial ends (Gold), so
- * the trial shows exactly what the subscription sells.
+ * The tier a new account gets for its free trial week. Premium, so a
+ * new user sees the full product (the value-model label, unlimited
+ * coupons, coupon history) before choosing Gold or Premium.
  */
-export const TRIAL_TIER: MembershipTier = "gold";
+export const TRIAL_TIER: MembershipTier = "premium";
 
 /*
  * Play Console subscription product IDs -> the tier they grant.
