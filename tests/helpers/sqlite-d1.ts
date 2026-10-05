@@ -34,8 +34,8 @@ export function createSqliteD1(
         return { results: db.prepare(sql).all(...params) as T[] };
       },
       async run() {
-        db.prepare(sql).run(...params);
-        return { success: true };
+        const info = db.prepare(sql).run(...params);
+        return { success: true, meta: { changes: info.changes } };
       }
     };
 

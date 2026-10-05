@@ -87,6 +87,10 @@ import {
   cleanupAskAiLog
 } from "./ask/service";
 
+import {
+  cleanupMyCoupons
+} from "./coupons/my-coupons";
+
 
 async function runScheduledPipeline(
   env: Env
@@ -288,6 +292,15 @@ async function runScheduledPipeline(
     "ask-ai-log.cleanup",
     () =>
       cleanupAskAiLog(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "my-coupons.cleanup",
+    () =>
+      cleanupMyCoupons(
         env
       )
   );
