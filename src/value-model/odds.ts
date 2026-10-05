@@ -13,7 +13,7 @@ import { domesticCity } from "./cities";
 export const ODDS_CONFIG = {
   windowMinutes: 75,
   fetchTimeoutMs: 10_000,
-  retentionDays: 30,
+  retentionDays: 400,
   freshMinutes: 15
 } as const;
 
