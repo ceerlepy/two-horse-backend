@@ -159,7 +159,10 @@ const RUNNER_PREMIUM_SIGNAL_KEYS =
     "fieldSignal",
     "field_score",
     "expertConsensus",
-    "valueModel"
+    "valueModel",
+    /* Tomorrow's card: early expert pick count + consensus sentence. */
+    "expertPickCount",
+    "expertSummary"
   ] as const;
 
 const RACE_PREMIUM_SIGNAL_KEYS =

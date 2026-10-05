@@ -189,6 +189,36 @@ learning never see it. `/api/today` adds `nextDay` only when every race
 of today started more than a minute ago (or today has no meetings) and a
 row for tomorrow exists. Not published yet = retry in ~1 h, not an error.
 
+### Next-day expert picks (`src/experts/next-day-service.ts`)
+
+`refreshNextDayExpertsIfDue` (cron step `experts.next-day`, right after
+`program.next-day`) reads early D+1 picks from an allowlist of sources
+that really publish them the evening before: `puanli_altili_bulten`
+(Blogger feed, deterministic score table, no AI), `horseturk`,
+`ganyan_canavari` (dated article URLs) and `istinye_ganyan` (reused
+`/ganyan/tahminler/` URL: the page must carry a D+1 city/date heading and
+no heading for today, otherwise it is skipped). AFA is excluded (Browser
+Rendering only).
+
+- Runs 18:00–24:00 Turkey time and only when `next_day_programs` has a
+  row for D+1; own lease `experts:next-day`; each source at most once per
+  60 min per D+1 date.
+- Adapters run with an env whose `BROWSER` binding throws, so no Browser
+  Rendering path can run.
+- Documents are fetched first (HTTP); the hash of their normalized text is
+  compared with `next_day_expert_state.content_hash` and an unchanged
+  bundle skips extraction entirely (no Workers AI call).
+- `extractExperts(..., canonical)` takes the D+1 card (cities, altılı
+  starts from `sixfold_start_numbers`, runners) instead of reading D1;
+  picks are matched with the pure `planExpertRaceBlocks`.
+- Rows go to `next_day_expert_picks` only. `expert_predictions`,
+  `source_registry` (no `markExpert*`), refresh traces, anomalies,
+  learning and coupons are never written. Past dates are pruned each run.
+- `/api/today` attaches `expertPickCount` (distinct sources with a positive
+  pick) and `expertSummary` (the aggregator's counts-only sentence) to
+  `nextDay` runners for Gold/Premium; free tier gets neither (same keys
+  in `stripPremiumRunnerSignals`). Never a source name or source text.
+
 ---
 
 ## src/storage

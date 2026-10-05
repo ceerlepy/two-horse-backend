@@ -80,6 +80,45 @@ import {
   parsePuanliBulten
 } from "./adapters/puanli-altili-bulten";
 
+import type {
+  CanonicalExpertRunner
+} from "./validator";
+
+
+export type ExpertAcquiredDocument =
+  Awaited<
+    ReturnType<
+      typeof acquireExpertDocument
+    >
+  >;
+
+
+/*
+ * Canonical card supplied by the caller instead of D1's
+ * meetings/races/runners. Used by the next-day (D+1) expert
+ * service, whose card lives in next_day_programs, never in
+ * today's canonical tables. When omitted, extractExperts reads
+ * D1 exactly as before.
+ */
+export interface ExpertCanonicalCard {
+  cities:
+    string[];
+
+  sixfoldStarts:
+    Array<{
+      city:string;
+      sixfoldNumber:number;
+      raceNumber:number;
+    }>;
+
+  runners:
+    CanonicalExpertRunner[];
+
+  /* Already-acquired document for this URL (skips a re-fetch). */
+  document?:
+    ExpertAcquiredDocument;
+}
+
 export interface ExtractedExperts {
   extraction:
     ExpertExtractionInput;
@@ -461,7 +500,7 @@ function compactText(
 }
 
 
-async function acquireDocument(
+export async function acquireExpertDocument(
   env:
     Env,
 
@@ -780,7 +819,10 @@ export async function extractExperts(
     "",
 
   raceDateOverride?:
-    string
+    string,
+
+  canonical?:
+    ExpertCanonicalCard
 ): Promise<ExtractedExperts> {
   const raceDate =
     raceDateOverride ??
@@ -788,7 +830,14 @@ export async function extractExperts(
 
 
   const meetings =
-    await env.DB.prepare(`
+    canonical
+      ? {
+          results:
+            canonical.cities.map(
+              city => ({ city })
+            )
+        }
+      : await env.DB.prepare(`
       SELECT city
       FROM meetings
       WHERE race_date = ?
@@ -836,7 +885,9 @@ export async function extractExperts(
 
 
   const raceRows =
-    await env.DB.prepare(`
+    canonical
+      ? { results:[] as any[] }
+      : await env.DB.prepare(`
       SELECT
         city,
         race_number,
@@ -922,6 +973,13 @@ export async function extractExperts(
   }
 
 
+  if (canonical) {
+    sixfoldStarts.push(
+      ...canonical.sixfoldStarts
+    );
+  }
+
+
   const targetSixfoldStarts =
     sixfoldStarts.filter(
       value =>
@@ -938,7 +996,8 @@ export async function extractExperts(
 
 
   const document =
-    await acquireDocument(
+    canonical?.document ??
+    await acquireExpertDocument(
       env,
       url,
       sourceKey,
@@ -1355,7 +1414,19 @@ export async function extractExperts(
       "repair-drop-ai-noise"
   ) {
     const runnerRows =
-      await env.DB.prepare(`
+      canonical
+        ? {
+            results:
+              canonical.runners.map(
+                runner => ({
+                  city:runner.city,
+                  race_number:runner.raceNumber,
+                  horse_number:runner.horseNumber,
+                  horse_name:runner.horseName
+                })
+              )
+          }
+        : await env.DB.prepare(`
         SELECT
           city,
           race_number,
