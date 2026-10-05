@@ -14,6 +14,8 @@ export interface FormCandidate {
   horseKey: string;
   horseName: string;
   sourceUrl: string;
+  /* No "son 6 yarış" on today's card: a first-time starter. */
+  isDebut?: boolean;
 }
 
 export interface FormCandidateOptions {
@@ -39,6 +41,7 @@ export async function formCandidates(
       SELECT
         r.horse_name,
         r.horse_profile_url,
+        MAX(COALESCE(r.recent_form_raw, '')) AS recent_form,
         MIN(COALESCE(ra.starts_at, r.race_date)) AS first_start
       FROM runners r
       LEFT JOIN races ra
@@ -147,7 +150,10 @@ export async function formCandidates(
         String(row.horse_name),
 
       sourceUrl:
-        String(row.horse_profile_url)
+        String(row.horse_profile_url),
+
+      isDebut:
+        !String(row.recent_form ?? "").trim()
     });
 
     if (
