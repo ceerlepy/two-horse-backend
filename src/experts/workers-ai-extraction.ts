@@ -29,6 +29,12 @@ export interface WorkersAiExpertOptions {
 
   requireSelectionPerRace?:
     boolean;
+
+  /*
+   * Bypass the response-cache read (see cachedAiRun).
+   */
+  freshSample?:
+    boolean;
 }
 
 
@@ -283,6 +289,12 @@ export async function extractExpertJsonWithWorkersAi(
         } catch {
           return false;
         }
+      },
+
+      {
+        readCache:
+          options.freshSample !==
+          true
       }
     );
 
