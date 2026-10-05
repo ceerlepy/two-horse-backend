@@ -11,6 +11,11 @@ import { addDays, tjkQueryDate } from "./cities";
  * the most recent dates are in, then walks backwards to backfillStart a
  * few dates at a time. The full backfill (~825 dates) takes about a day of
  * ticks and is then idle apart from one new date per day.
+ *
+ * `revision` bumps when the parser starts storing a new field (2: start
+ * position). Dates archived by an older revision stay "done" (coverage is
+ * unaffected) and are re-fetched, newest first, with whatever tick
+ * capacity is left after new dates.
  */
 export const ARCHIVE_CONFIG = {
   backfillStart: "2024-07-01",
@@ -18,7 +23,8 @@ export const ARCHIVE_CONFIG = {
   maxAttempts: 6,
   retryAfterMinutes: 60,
   fetchTimeoutMs: 30_000,
-  retentionDays: 800
+  retentionDays: 800,
+  revision: 2
 } as const;
 
 const INDEX_URL = "https://www.tjk.org/TR/YarisSever/Info/Page/GunlukYarisSonuclari?QueryParameter_Tarih=";
@@ -49,11 +55,11 @@ export async function archiveDate(env: Env, raceDate: string): Promise<number> {
       statements.push(env.DB.prepare(`
         INSERT OR REPLACE INTO result_archive_runners(
           race_code, race_date, horse_id, horse_number, finish_position, time_sec, ganyan,
-          agf_percent, p_win, jockey_id, trainer_id, weight, hp, fig
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          agf_percent, p_win, jockey_id, trainer_id, weight, hp, fig, start_position
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).bind(u.raceCode, raceDateOf.get(u.raceCode) ?? raceDate, u.horseId, u.horseNumber,
         u.finishPosition, u.timeSec, u.ganyan, u.agfPercent, u.pWin, u.jockeyId, u.trainerId,
-        u.weight, u.hp, u.fig));
+        u.weight, u.hp, u.fig, u.startPosition));
     }
     for (let i = 0; i < statements.length; i += 80) {
       await env.DB.batch(statements.slice(i, i + 80));
@@ -71,7 +77,7 @@ export async function pendingArchiveDates(
   env: Env, limit: number, today = turkeyDate(), hour = turkeyHour()
 ): Promise<string[]> {
   const rows = await env.DB.prepare(`
-    SELECT race_date, status, attempts, updated_at FROM result_archive_dates
+    SELECT race_date, status, attempts, updated_at, revision FROM result_archive_dates
   `).all<any>();
   const known = new Map((rows.results ?? []).map((r: any) => [String(r.race_date), r]));
   const retryBefore = Date.now() - ARCHIVE_CONFIG.retryAfterMinutes * 60_000;
@@ -86,6 +92,15 @@ export async function pendingArchiveDates(
     if (Number(row.attempts) >= ARCHIVE_CONFIG.maxAttempts) continue;
     if (Date.parse(row.updated_at) <= retryBefore) out.push(d);
   }
+  const stale = [...known.values()]
+    .filter((r: any) => r.status === "done" && Number(r.revision ?? 1) < ARCHIVE_CONFIG.revision &&
+      Date.parse(r.updated_at) <= retryBefore)
+    .map((r: any) => String(r.race_date))
+    .sort((a, b) => b.localeCompare(a));
+  for (const d of stale) {
+    if (out.length >= limit) break;
+    out.push(d);
+  }
   return out;
 }
 
@@ -97,17 +112,22 @@ export async function refreshResultArchive(env: Env): Promise<{ archived: string
     try {
       const meetings = await archiveDate(env, raceDate);
       await env.DB.prepare(`
-        INSERT INTO result_archive_dates(race_date, status, meetings, attempts, last_error, updated_at)
-        VALUES(?, 'done', ?, 1, NULL, ?)
+        INSERT INTO result_archive_dates(race_date, status, meetings, attempts, last_error, updated_at, revision)
+        VALUES(?, 'done', ?, 1, NULL, ?, ?)
         ON CONFLICT(race_date) DO UPDATE SET status='done', meetings=excluded.meetings,
-          attempts=result_archive_dates.attempts+1, last_error=NULL, updated_at=excluded.updated_at
-      `).bind(raceDate, meetings, now).run();
+          attempts=result_archive_dates.attempts+1, last_error=NULL, updated_at=excluded.updated_at,
+          revision=excluded.revision
+      `).bind(raceDate, meetings, now, ARCHIVE_CONFIG.revision).run();
       archived.push(raceDate);
     } catch (error) {
       await env.DB.prepare(`
         INSERT INTO result_archive_dates(race_date, status, meetings, attempts, last_error, updated_at)
         VALUES(?, 'failed', 0, 1, ?, ?)
-        ON CONFLICT(race_date) DO UPDATE SET status='failed', attempts=result_archive_dates.attempts+1,
+        ON CONFLICT(race_date) DO UPDATE SET
+          -- a failed re-fetch keeps an already archived date usable
+          status=CASE WHEN result_archive_dates.status='done' THEN 'done' ELSE 'failed' END,
+          attempts=CASE WHEN result_archive_dates.status='done' THEN result_archive_dates.attempts
+            ELSE result_archive_dates.attempts+1 END,
           last_error=excluded.last_error, updated_at=excluded.updated_at
       `).bind(raceDate, errorMessage(error).slice(0, 300), now).run();
       failed.push(raceDate);

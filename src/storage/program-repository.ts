@@ -225,10 +225,11 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             horse_id,
             jockey_id,
             jockey_profile_url,
+            start_position,
             updated_at
           )
           VALUES(
-            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
             CURRENT_TIMESTAMP
           )
           ON CONFLICT(
@@ -248,6 +249,7 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
             horse_id=excluded.horse_id,
             jockey_id=excluded.jockey_id,
             jockey_profile_url=excluded.jockey_profile_url,
+            start_position=COALESCE(excluded.start_position, runners.start_position),
             updated_at=CURRENT_TIMESTAMP`)
           .bind(
             date,
@@ -272,7 +274,8 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
               r.jockeyProfileUrl
             ),
 
-            r.jockeyProfileUrl
+            r.jockeyProfileUrl,
+            r.startPosition ?? null
           ));
       }
     }
