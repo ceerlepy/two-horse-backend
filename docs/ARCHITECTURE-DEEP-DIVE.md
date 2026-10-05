@@ -2534,7 +2534,7 @@ Python ile 1e-6 içinde aynı sonucu verdiğini kilitler.
   `Query/Data/IdmanIstatistikleri`, 12 saatte bir, tur başına 30 at.
 - Ganyan oranları (`odds.ts`): `vhs-medya.tjk.org/muhtemeller` checksum +
   CDN dosyası, 75 dk içindeki koşular her turda; yalnızca değişen oran
-  yazılır, tazelik `ganyan_odds_polls` ile ölçülür (15 dk). 30 gün.
+  yazılır, tazelik `ganyan_odds_polls` ile ölçülür (15 dk). 400 gün (dondurulmuş tahminlerle aynı; bahis anı ROI ölçümü TJK geçmişine bağlı kalmasın diye).
 
 **Tahmin** (`predictions.ts`): bugünkü koşular, başlangıca 90 dk kala
 her tur, diğerleri 30 dk'da bir. Koşmaz atlar (oran akışında `K`) alandan
