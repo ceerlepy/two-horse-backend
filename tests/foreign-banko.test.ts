@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { bankoAiPageUrl, bankoSlug, isMissingPage } from "../src/foreign/banko";
+import {
+  bankoAiPageUrl,
+  bankoIndexLinks,
+  bankoPageUrlFor,
+  bankoSlug,
+  classifyPage,
+  isMissingPage
+} from "../src/foreign/banko";
 import { raceDateOfForeignLink } from "../src/foreign/discovery";
 import { parseTjkMeetingPage } from "../src/tjk/html-parser";
 
@@ -26,6 +33,28 @@ describe("foreign meetings: dates, names, banko pages", () => {
     expect(isMissingPage("<title>Sayfa bulunamadı | Banko</title>")).toBe(true);
     expect(isMissingPage("<title>Just a moment...</title>")).toBe(true);
     expect(isMissingPage("<title>5 Ekim 2026 Deauville Fransa</title>")).toBe(false);
+  });
+
+  it("tells a challenge from a missing page", () => {
+    expect(classifyPage("<title>Just a moment...</title>")).toBe("challenge");
+    expect(classifyPage("<title>Sayfa bulunamadı</title>")).toBe("missing");
+    expect(classifyPage("<title>5 Ekim 2026 Le Mans Fransa</title>")).toBe("ok");
+  });
+
+  it("prefers the listing's link over the guessed URL", () => {
+    const links = bankoIndexLinks(`
+      <a href="https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-le-mans-fransa-2/">x</a>
+      <a href="/ai-tahmin/5-ekim-2026-bursa/">y</a>
+      <a href="/tahminler/other/">z</a>`);
+
+    expect(links).toEqual([
+      "https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-le-mans-fransa-2/",
+      "https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-bursa/"
+    ]);
+    expect(bankoPageUrlFor("2026-10-05", "Le Mans Fransa", links))
+      .toBe("https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-le-mans-fransa-2/");
+    expect(bankoPageUrlFor("2026-10-05", "Deauville Fransa", links))
+      .toBe("https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-deauville-fransa/");
   });
 
   it("does not take a gear tooltip as the horse name", () => {

@@ -2462,3 +2462,59 @@ eski anlık görüntüler ve ayak örnekleri silinir.
   tablosuna yazılır (0038; tur başına 2 sayfa, toplantı başına en
   fazla 4 deneme, 3 gün saklama). Seçimleri okuyan ayrıştırıcı bir
   sonraki adım.
+
+# 71. Değer modeli ("AGF'nin hafife aldığı at")
+
+Mevcut skordan (uzman + AGF + HP) ve kuponlardan **tamamen ayrı** ikinci
+bir görüş. Soru: piyasanın (AGF / ganyan) gözden kaçırdığı bilgi bir atın
+kazanma şansını AGF'nin söylediğinden yüksek mi gösteriyor? Ölçüm ve
+eğitim: `/mnt/project-files/analysis/agf-deger-olcumu-2026-10-04/`
+(2025-01..2026-10, 6.3k yarış, walk-forward). Hiçbir eski tablo okunmaz
+ya da değiştirilmez; kod `src/value-model/`, tablolar 0039.
+
+**Model.** Yarış içi koşullu logit, piyasaya çapalı:
+`u = a·log p_piyasa + Σ coef·clip(z, ±4) + naCoef·[eksik]`, softmax.
+Üç varyant: `full` (ganyan + AGF + AGF/ganyan farkı), `ganyan` (altılı
+dışı), `agf` (sabah, ganyan havuzu açılmadan). Özellikler: hız figürü
+(pist varyantı düzeltilmiş, son 3'ün en iyisi ve sonuncusu, alana göre),
+jokey ve at A/E (piyasaya göre), ara verme, mesafe/pist/kilo değişimi,
+son 30 gün idman (400/800 m z-skoru, son idman, idman sayısı). Katsayılar
+`data/coefficients.json`, pist parları ve idman normları
+`data/constants.json`. `tests/value-model-parity.test.ts` Worker'ın
+Python ile 1e-6 içinde aynı sonucu verdiğini kilitler.
+
+**Toplayıcılar** (`value-model.refresh` cron adımı, 240 sn kira):
+- Sonuç arşivi (`archive-service.ts`): TJK Günlük Yarış Sonuçları şehir
+  sayfaları, yurt içi 10 hipodrom. 2024-07-01'den geriye doğru tur başına
+  4 gün; dün TR 06:00'dan sonra. Final ganyan → `p_win`, derece → `fig`.
+  800 gün saklanır.
+- İdman (`gallops.ts`): bugünkü başlamamış koşuların atları için
+  `Query/Data/IdmanIstatistikleri`, 12 saatte bir, tur başına 30 at.
+- Ganyan oranları (`odds.ts`): `vhs-medya.tjk.org/muhtemeller` checksum +
+  CDN dosyası, 75 dk içindeki koşular her turda; yalnızca değişen oran
+  yazılır, tazelik `ganyan_odds_polls` ile ölçülür (15 dk). 30 gün.
+
+**Tahmin** (`predictions.ts`): bugünkü koşular, başlangıca 90 dk kala
+her tur, diğerleri 30 dk'da bir. Koşmaz atlar (oran akışında `K`) alandan
+çıkar. Start anında satır dondurulur (`frozen_at`); sonuç arşivden
+`race_code + horse_id` ile etiketlenir. Etiket: model/referans ≥ 1.2 ve
+model ≥ %4 → `underrated`; ≤ 1/1.2 ve referans ≥ %10 → `overrated`.
+Referans AGF, AGF yoksa ganyan.
+
+**Kapı** (`evaluation.ts`): arşiv son 200 günü kapsayana kadar `warming`
+(tahmin yok). Haftalık: son 500 donmuş+etiketli koşuda log-loss model vs
+referans; ≥150 koşuda kazanç CI üst sınırı < 0 ya da ≥300 koşuda kazanç
+< 0 → `paused` ve API etiketleri göstermez. Aylık: ≥1500 koşu varsa son
+365 günle %80/%20 kronolojik yeniden eğitim; holdout'ta en az 0.002
+iyileşirse yeni katsayılar `value_model_state`'e yazılır.
+
+**API.** `/api/today` koşucuya `valueModel {probability, agfProbability,
+ganyanProbability, odds, valueRatio, label, variant, computedAt}`, koşuya
+`valueModelStatus` ekler; ikisi de premium sinyal (ücretsiz katmanda
+silinir). `GET /api/debug/value-model` durum + arşiv kapsamı,
+`POST /api/admin/refresh-value-model` elle tur (admin token).
+
+Dürüst not: ölçümde model AGF'den daha iyi olasılık veriyor ve hafife
+alınan atlar AGF'nin beklediğinden sık kazanıyor, ama TJK'nın ~%26
+kesintisinden sonra final oranlarla kâr kanıtlanmadı. Etiket bir bahis
+tavsiyesi değil, "AGF bu atı hafife alıyor olabilir" görüşüdür.

@@ -124,13 +124,15 @@ const RUNNER_PREMIUM_SIGNAL_KEYS =
     "market_score",
     "fieldSignal",
     "field_score",
-    "expertConsensus"
+    "expertConsensus",
+    "valueModel"
   ] as const;
 
 const RACE_PREMIUM_SIGNAL_KEYS =
   [
     "uncertainty",
-    "couponStrategy"
+    "couponStrategy",
+    "valueModelStatus"
   ] as const;
 
 export function stripPremiumRunnerSignals(

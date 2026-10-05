@@ -42,6 +42,7 @@ import {
   deleteAccount
 } from "../membership/service";
 import { TIER_LIMITS } from "../membership/tier";
+import { attachValues, loadTodayValues, refreshValueModel, valueModelStatus } from "../value-model/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
@@ -138,7 +139,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  if(url.pathname==="/api/today") {
   const session=await resolveSession(request,env);
   if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
-  const meetings=await getToday(env);
+  const meetings=attachValues(await getToday(env),await loadTodayValues(env,turkeyDate()).catch(()=>({status:"unavailable",byRunner:new Map()})));
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
   const publicMeetings=toPublicMeetings(meetings,session.tier);
@@ -1972,6 +1973,11 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
 
+ if(url.pathname==="/api/debug/value-model") return json(await valueModelStatus(env));
+ if(url.pathname==="/api/admin/refresh-value-model" && request.method==="POST") {
+  await refreshValueModel(env);
+  return json({ok:true,...(await valueModelStatus(env))});
+ }
  if(url.pathname==="/api/debug/refresh-state") return json({states:(await env.DB.prepare("SELECT * FROM refresh_state ORDER BY pipeline_key").all()).results});
  return json({error:"not_found",path:url.pathname},404);
 }
