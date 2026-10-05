@@ -1174,7 +1174,14 @@ export async function extractExperts(
            * Do not force AI to manufacture a semantic selection
            * in every returned race.
            */
-          requireSelectionPerRace
+          requireSelectionPerRace,
+
+          /*
+           * A retry exists to get an independent resample, so it
+           * must not re-read the cached first answer.
+           */
+          freshSample:
+            attempt > 1
         }
       );
 

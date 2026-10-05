@@ -18,8 +18,11 @@ import {
  * picks re-extracted 20+ times in one day).
  *
  * Every call that goes through here runs at temperature 0, so an
- * identical (model, input) pair always produces the same answer:
- * reusing it changes no result, it only skips the billed call.
+ * identical (model, input) pair normally produces the same answer
+ * and reusing it skips the billed call. Workers AI can still drop
+ * an item now and then; callers that detect an incomplete answer
+ * retry with readCache:false, and that fresh answer replaces the
+ * cached one.
  *
  * The cache is strictly best-effort. A D1 failure on read or write
  * falls through to a normal AI call and never fails extraction.
@@ -60,7 +63,19 @@ export async function cachedAiRun(
    * than pinned for 36 hours.
    */
   isCacheable:
-    (raw: unknown) => boolean
+    (raw: unknown) => boolean,
+
+  options: {
+    /*
+     * false = skip the cache read and take a fresh sample, but
+     * still store it. Used for completeness retries: Workers AI
+     * can drop an item even at temperature 0, and a retry that
+     * re-read the cached (incomplete) answer would never get its
+     * independent second chance.
+     */
+    readCache?:
+      boolean;
+  } = {}
 ): Promise<{
   raw:
     any;
@@ -75,48 +90,50 @@ export async function cachedAiRun(
     );
 
 
-  try {
-    const row =
-      await env.DB.prepare(`
-        SELECT response_json
-        FROM ai_response_cache
-        WHERE cache_key = ?
-          AND created_at >= ?
-      `)
-        .bind(
-          key,
-          new Date(
-            Date.now() -
-            AI_RESPONSE_CACHE_TTL_HOURS *
-              60 * 60 * 1000
-          ).toISOString()
-        )
-        .first<{
-          response_json: string;
-        }>();
+  if (options.readCache !== false) {
+    try {
+      const row =
+        await env.DB.prepare(`
+          SELECT response_json
+          FROM ai_response_cache
+          WHERE cache_key = ?
+            AND created_at >= ?
+        `)
+          .bind(
+            key,
+            new Date(
+              Date.now() -
+              AI_RESPONSE_CACHE_TTL_HOURS *
+                60 * 60 * 1000
+            ).toISOString()
+          )
+          .first<{
+            response_json: string;
+          }>();
 
 
-    if (row?.response_json) {
-      await env.DB.prepare(`
-        UPDATE ai_response_cache
-        SET hit_count = hit_count + 1
-        WHERE cache_key = ?
-      `)
-        .bind(key)
-        .run();
+      if (row?.response_json) {
+        await env.DB.prepare(`
+          UPDATE ai_response_cache
+          SET hit_count = hit_count + 1
+          WHERE cache_key = ?
+        `)
+          .bind(key)
+          .run();
 
-      return {
-        raw:
-          JSON.parse(
-            row.response_json
-          ),
+        return {
+          raw:
+            JSON.parse(
+              row.response_json
+            ),
 
-        cacheHit:
-          true
-      };
+          cacheHit:
+            true
+        };
+      }
+    } catch {
+      // Cache unavailable: fall through to a real call.
     }
-  } catch {
-    // Cache unavailable: fall through to a real call.
   }
 
 
