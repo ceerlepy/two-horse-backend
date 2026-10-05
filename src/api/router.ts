@@ -164,7 +164,8 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   const session=await resolveSession(request,env);
   if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
   const date=url.searchParams.get("raceDate") ?? turkeyDate();
-  const meetings=await getForeignMeetings(env,date);
+  // AI picks follow the expert-signal tier rule (Gold and up).
+  const meetings=await getForeignMeetings(env,date,TIER_LIMITS[session.tier].canViewFullSignals);
   if(date===turkeyDate()) ctx.waitUntil(refreshForeignMeetingsIfDue(env).then(()=>undefined).catch(console.error));
   return json({date,meetings,servedFrom:"d1"});
  }
