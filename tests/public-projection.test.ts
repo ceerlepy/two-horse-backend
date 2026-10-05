@@ -179,3 +179,60 @@ describe(
     );
   }
 );
+
+
+describe(
+  "value model is premium-only",
+  () => {
+    const meetings = [
+      {
+        city: "Adana",
+        races: [
+          {
+            race_number: 1,
+            valueModelStatus: "active",
+            runners: [
+              {
+                horse_number: 3,
+                modelScore: { score: 0.4 },
+                valueModel: { probability: 0.3, label: "underrated" }
+              }
+            ]
+          }
+        ]
+      }
+    ];
+
+    it(
+      "premium sees the value model",
+      () => {
+        const race = toPublicMeetings(meetings, "premium")[0].races[0];
+        expect(race.valueModelStatus).toBe("active");
+        expect(race.runners[0].valueModel).toBeDefined();
+      }
+    );
+
+    it(
+      "gold keeps other signals but not the value model",
+      () => {
+        const race = toPublicMeetings(meetings, "gold")[0].races[0];
+        expect(race.valueModelStatus).toBeUndefined();
+        expect(race.runners[0].valueModel).toBeUndefined();
+        expect(race.runners[0].modelScore).toBeDefined();
+      }
+    );
+
+    it(
+      "history snapshots follow the same rule",
+      () => {
+        const entry = { valueModelStatus: "active", runners: [{ horse_number: 3, modelScore: {}, valueModel: {} }] };
+        const gold = toPublicHistory([entry], "gold")[0];
+        expect(gold.valueModelStatus).toBeUndefined();
+        expect(gold.runners[0].valueModel).toBeUndefined();
+        expect(gold.runners[0].modelScore).toBeDefined();
+        const premium = toPublicHistory([entry], "premium")[0];
+        expect(premium.runners[0].valueModel).toBeDefined();
+      }
+    );
+  }
+);

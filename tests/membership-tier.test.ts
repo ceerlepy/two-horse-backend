@@ -179,7 +179,7 @@ describe(
   "TIER_LIMITS",
   () => {
     it(
-      "free cannot generate coupons or view videos",
+      "free cannot generate coupons but can open TJK videos",
       () => {
         expect(
           TIER_LIMITS.free
@@ -189,7 +189,7 @@ describe(
         expect(
           TIER_LIMITS.free
             .canViewHorseVideos
-        ).toBe(false);
+        ).toBe(true);
       }
     );
 
@@ -212,17 +212,35 @@ describe(
     );
 
     it(
-      "only premium can view horse videos",
+      "videos are open to every tier",
       () => {
-        expect(
-          TIER_LIMITS.premium
-            .canViewHorseVideos
-        ).toBe(true);
+        for (const tier of ["free", "gold", "premium"] as const) {
+          expect(
+            TIER_LIMITS[tier]
+              .canViewHorseVideos
+          ).toBe(true);
+        }
+      }
+    );
 
-        expect(
-          TIER_LIMITS.gold
-            .canViewHorseVideos
-        ).toBe(false);
+    it(
+      "value model and coupon history are premium-only",
+      () => {
+        expect(TIER_LIMITS.premium.canViewValueModel).toBe(true);
+        expect(TIER_LIMITS.gold.canViewValueModel).toBe(false);
+        expect(TIER_LIMITS.free.canViewValueModel).toBe(false);
+        expect(TIER_LIMITS.premium.canViewCouponHistory).toBe(true);
+        expect(TIER_LIMITS.gold.canViewCouponHistory).toBe(false);
+      }
+    );
+
+    it(
+      "gold has a daily coupon allowance, premium has none",
+      () => {
+        expect(TIER_LIMITS.gold.maxCouponRequestsPerDay).toBeGreaterThan(0);
+        expect(Number.isFinite(TIER_LIMITS.gold.maxCouponRequestsPerDay)).toBe(true);
+        expect(TIER_LIMITS.premium.maxCouponRequestsPerDay).toBe(Infinity);
+        expect(TIER_LIMITS.free.maxCouponRequestsPerDay).toBe(0);
       }
     );
   }

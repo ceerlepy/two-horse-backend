@@ -42,6 +42,8 @@ import {
   deleteAccount
 } from "../membership/service";
 import { TIER_LIMITS } from "../membership/tier";
+import { checkCouponAllowance, recordCouponRequest } from "../membership/coupon-allowance";
+import { getCouponHistory } from "../coupons/history";
 import { attachValues, loadTodayValues, refreshValueModel, valueModelStatus } from "../value-model/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
@@ -318,6 +320,22 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     }
    }
 
+   const couponRequest={city,pool,windowNumber:sixfold,budgetTl};
+
+   const allowance=
+    couponSession
+     ? await checkCouponAllowance(env,couponSession.user.id,couponSession.tier,couponRequest)
+     : null;
+
+   if(allowance && !allowance.allowed) {
+    return json({
+     ok:false,
+     error:"COUPON_DAILY_LIMIT_REACHED",
+     limit:allowance.limit,
+     used:allowance.used
+    },429);
+   }
+
    const result=
     pool==="fivefold"
      ? await generateFiveFoldCoupons(
@@ -343,6 +361,10 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
         }
        );
 
+   if(couponSession) {
+    await recordCouponRequest(env,couponSession.user.id,couponSession.tier,couponRequest);
+   }
+
    return json({
     ok:true,
     pool,
@@ -361,6 +383,13 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   }
  }
 
+ if(url.pathname==="/api/coupons/history") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  if(!TIER_LIMITS[session.tier].canViewCouponHistory) return json({ok:false,error:"TIER_UPGRADE_REQUIRED"},403);
+  const days=Math.max(1,Math.min(60,Math.floor(Number(url.searchParams.get("days"))||30)));
+  return json({ok:true,days,coupons:await getCouponHistory(env,{days})});
+ }
  if(url.pathname==="/api/history") {
   const historySession=await resolveSession(request,env);
   if(!historySession) return json({ok:false,error:"AUTH_REQUIRED"},401);

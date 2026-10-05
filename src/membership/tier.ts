@@ -86,8 +86,25 @@ export function effectiveTier(
 export interface TierLimits {
   canGenerateCoupons: boolean;
   maxCouponBudgetTl: number;
+  /*
+   * Distinct coupon requests (city + pool + window + budget) a
+   * user may make per Turkey calendar day. Repeating a request
+   * already made that day is free, so re-opening a coupon never
+   * burns the allowance.
+   */
+  maxCouponRequestsPerDay: number;
+  canViewCouponHistory: boolean;
+  /*
+   * Race and training videos are links to TJK's own public pages
+   * (the app opens tjk.org in the browser; nothing is re-hosted).
+   * They are open to every tier on purpose: charging for access to
+   * someone else's free content is the weak spot legally, so it is
+   * not part of what the paid plans sell.
+   */
   canViewHorseVideos: boolean;
   canViewFullSignals: boolean;
+  /* The value model's "AGF underrates this horse" opinion. */
+  canViewValueModel: boolean;
 }
 
 export const TIER_LIMITS: Record<
@@ -97,22 +114,31 @@ export const TIER_LIMITS: Record<
   free: {
     canGenerateCoupons: false,
     maxCouponBudgetTl: 0,
-    canViewHorseVideos: false,
-    canViewFullSignals: false
+    maxCouponRequestsPerDay: 0,
+    canViewCouponHistory: false,
+    canViewHorseVideos: true,
+    canViewFullSignals: false,
+    canViewValueModel: false
   },
 
   gold: {
     canGenerateCoupons: true,
     maxCouponBudgetTl: 1500,
-    canViewHorseVideos: false,
-    canViewFullSignals: true
+    maxCouponRequestsPerDay: 10,
+    canViewCouponHistory: false,
+    canViewHorseVideos: true,
+    canViewFullSignals: true,
+    canViewValueModel: false
   },
 
   premium: {
     canGenerateCoupons: true,
     maxCouponBudgetTl: Infinity,
+    maxCouponRequestsPerDay: Infinity,
+    canViewCouponHistory: true,
     canViewHorseVideos: true,
-    canViewFullSignals: true
+    canViewFullSignals: true,
+    canViewValueModel: true
   }
 };
 
@@ -162,6 +188,51 @@ export function stripPremiumRaceSignals(
   for (
     const key of
       RACE_PREMIUM_SIGNAL_KEYS
+  ) {
+    delete copy[key];
+  }
+
+  return copy;
+}
+
+const RUNNER_VALUE_MODEL_KEYS =
+  [
+    "valueModel"
+  ] as const;
+
+const RACE_VALUE_MODEL_KEYS =
+  [
+    "valueModelStatus"
+  ] as const;
+
+/* Premium-only: drops the value model opinion for Gold callers. */
+export function stripValueModelRunner(
+  runner: any
+): any {
+  const copy = {
+    ...runner
+  };
+
+  for (
+    const key of
+      RUNNER_VALUE_MODEL_KEYS
+  ) {
+    delete copy[key];
+  }
+
+  return copy;
+}
+
+export function stripValueModelRace(
+  race: any
+): any {
+  const copy = {
+    ...race
+  };
+
+  for (
+    const key of
+      RACE_VALUE_MODEL_KEYS
   ) {
     delete copy[key];
   }
