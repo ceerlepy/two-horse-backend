@@ -64,7 +64,6 @@ export interface ForeignAiPick {
   ranked: Array<{ number: number; name: string }>;
   /* Horses on the site's altılı coupon for this race. */
   selection: number[];
-  comment: string;
 }
 
 export interface ForeignRace {
@@ -236,7 +235,12 @@ export async function getForeignMeetings(
         return {
           ...race,
           aiPick: pick
-            ? { ranked: pick.ranked, selection: pick.selection, comment: pick.comment }
+            /*
+             * The site's prose comment is never sent: like domestic
+             * expert picks, only the derived ranking and selection
+             * reach the app, not a third party's text.
+             */
+            ? { ranked: pick.ranked, selection: pick.selection }
             : null
         };
       });
