@@ -44,6 +44,7 @@ import {
 import { TIER_LIMITS } from "../membership/tier";
 import { checkCouponAllowance, recordCouponRequest } from "../membership/coupon-allowance";
 import { getCouponHistory } from "../coupons/history";
+import { askAi } from "../ask/service";
 import { attachValues, loadTodayValues, refreshValueModel, valueModelStatus } from "../value-model/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
@@ -381,6 +382,27 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     error:errorMessage(e)
    },400);
   }
+ }
+
+ if(url.pathname==="/api/ask" && request.method==="POST") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  if(TIER_LIMITS[session.tier].askAiPerDay<=0) return json({ok:false,error:"TIER_UPGRADE_REQUIRED"},403);
+  const body=await request.json<any>().catch(()=>null);
+  const result=await askAi(env,session.user.id,session.tier,{
+   city:String(body?.city ?? ""),
+   raceNumber:Number(body?.raceNumber),
+   question:String(body?.question ?? ""),
+   language:body?.language==="en"?"en":"tr"
+  });
+  if(result.ok) return json(result);
+  const status=
+   result.error==="TIER_UPGRADE_REQUIRED"?403:
+   result.error==="INVALID_QUESTION"?400:
+   result.error==="RACE_NOT_FOUND"?404:
+   result.error==="DAILY_LIMIT_REACHED"?429:
+   503;
+  return json(result,status);
  }
 
  if(url.pathname==="/api/coupons/history") {

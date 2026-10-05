@@ -105,6 +105,11 @@ export interface TierLimits {
   canViewFullSignals: boolean;
   /* The value model's "AGF underrates this horse" opinion. */
   canViewValueModel: boolean;
+  /*
+   * "AI'ya sor": distinct questions per Turkey calendar day.
+   * Asking the same question about the same race again is free.
+   */
+  askAiPerDay: number;
 }
 
 export const TIER_LIMITS: Record<
@@ -118,7 +123,8 @@ export const TIER_LIMITS: Record<
     canViewCouponHistory: false,
     canViewHorseVideos: true,
     canViewFullSignals: false,
-    canViewValueModel: false
+    canViewValueModel: false,
+    askAiPerDay: 0
   },
 
   gold: {
@@ -128,7 +134,8 @@ export const TIER_LIMITS: Record<
     canViewCouponHistory: false,
     canViewHorseVideos: true,
     canViewFullSignals: true,
-    canViewValueModel: false
+    canViewValueModel: false,
+    askAiPerDay: 0
   },
 
   premium: {
@@ -138,7 +145,8 @@ export const TIER_LIMITS: Record<
     canViewCouponHistory: true,
     canViewHorseVideos: true,
     canViewFullSignals: true,
-    canViewValueModel: true
+    canViewValueModel: true,
+    askAiPerDay: 20
   }
 };
 

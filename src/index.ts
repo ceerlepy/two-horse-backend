@@ -83,6 +83,10 @@ import {
   cleanupAiResponseCache
 } from "./experts/ai-response-cache";
 
+import {
+  cleanupAskAiLog
+} from "./ask/service";
+
 
 async function runScheduledPipeline(
   env: Env
@@ -275,6 +279,15 @@ async function runScheduledPipeline(
     "ai-cache.cleanup",
     () =>
       cleanupAiResponseCache(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "ask-ai-log.cleanup",
+    () =>
+      cleanupAskAiLog(
         env
       )
   );
