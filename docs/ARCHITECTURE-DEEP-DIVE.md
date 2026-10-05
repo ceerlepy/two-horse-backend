@@ -177,6 +177,18 @@ olarak görülebilir.
 
 Bu nedenle root cause analizinde upstream önce kontrol edilmelidir.
 
+### Next-day program (`next-day-service.ts`)
+
+`refreshNextDayProgramIfDue` (cron step `program.next-day`) fetches
+tomorrow's TJK card over HTTP only (`extractTjkProgramForDate`, which
+reuses the master/city URL builders with an explicit date plus the same
+parser and completeness checks) and stores it as one compact JSON row in
+`next_day_programs`. It is display-only: it never touches
+`meetings`/`races`/`runners` or AGF snapshots, so scoring, coupons and
+learning never see it. `/api/today` adds `nextDay` only when every race
+of today started more than a minute ago (or today has no meetings) and a
+row for tomorrow exists. Not published yet = retry in ~1 h, not an error.
+
 ---
 
 ## src/storage

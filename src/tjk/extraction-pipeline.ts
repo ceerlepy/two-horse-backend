@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import type { TjkProgramInput } from "../types/models";
+import { TJK_BROWSER_USER_AGENT } from "../acquisition/http";
 
 import {
   discoverDomesticMeetingNames,
@@ -102,10 +103,34 @@ function errorText(error: unknown): string {
     : String(error);
 }
 
-function turkeyDateParts(): {
+/*
+ * Card date parts. Defaults to today's Turkey-local date; the
+ * next-day program fetch passes an explicit ISO date (YYYY-MM-DD).
+ */
+export function turkeyDateParts(
+  isoDate?: string
+): {
   yyyyMMdd: string;
   ddMMyyyy: string;
 } {
+  if (isoDate !== undefined) {
+    const match =
+      /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+
+    if (!match) {
+      throw new Error(
+        `INVALID_CARD_DATE:${isoDate}`
+      );
+    }
+
+    const [, year, month, day] = match;
+
+    return {
+      yyyyMMdd: `${year}-${month}-${day}`,
+      ddMMyyyy: `${day}/${month}/${year}`
+    };
+  }
+
   const parts = new Intl.DateTimeFormat(
     "en-GB",
     {
@@ -129,10 +154,12 @@ function turkeyDateParts(): {
   };
 }
 
-function buildMasterUrl(): string {
+export function buildMasterUrl(
+  isoDate?: string
+): string {
   const {
     ddMMyyyy
-  } = turkeyDateParts();
+  } = turkeyDateParts(isoDate);
 
   const url =
     new URL(
@@ -153,12 +180,13 @@ function buildMasterUrl(): string {
 }
 
 
-function canonicalizeMeetingUrl(
-  rawUrl: string
+export function canonicalizeMeetingUrl(
+  rawUrl: string,
+  isoDate?: string
 ): string {
   const {
     ddMMyyyy
-  } = turkeyDateParts();
+  } = turkeyDateParts(isoDate);
 
   const url =
     new URL(
@@ -187,8 +215,11 @@ function canonicalizeMeetingUrl(
 }
 
 
-function buildCityUrl(city: string): string {
-  const { ddMMyyyy } = turkeyDateParts();
+export function buildCityUrl(
+  city: string,
+  isoDate?: string
+): string {
+  const { ddMMyyyy } = turkeyDateParts(isoDate);
 
   const url = new URL(TJK_MASTER_URL);
 
@@ -262,7 +293,12 @@ interface HttpHtmlResult {
   bodyLength: number;
 }
 
-async function httpHtml(url: string): Promise<HttpHtmlResult> {
+async function httpHtml(
+  url: string,
+  userAgent =
+    "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/139.0 Safari/537.36"
+): Promise<HttpHtmlResult> {
   const controller = new AbortController();
 
   const timeout = setTimeout(
@@ -281,9 +317,7 @@ async function httpHtml(url: string): Promise<HttpHtmlResult> {
         "accept-language":
           "tr-TR,tr;q=0.9,en;q=0.7",
 
-        "user-agent":
-          "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/139.0 Safari/537.36"
+        "user-agent": userAgent
       }
     });
 
@@ -933,7 +967,8 @@ async function meetingThroughFourStages(
 }
 
 function meetingsFromMasterHtml(
-  html: string
+  html: string,
+  isoDate?: string
 ): Array<{ city: string; url: string }> {
   const links =
     discoverDomesticMeetingLinks(
@@ -960,7 +995,8 @@ function meetingsFromMasterHtml(
            */
           url:
             canonicalizeMeetingUrl(
-              item.url
+              item.url,
+              isoDate
             )
         })
       )
@@ -973,7 +1009,7 @@ function meetingsFromMasterHtml(
     ).map(city => ({
       city,
       url:
-        buildCityUrl(city)
+        buildCityUrl(city, isoDate)
     }))
   );
 }
@@ -1272,6 +1308,118 @@ export async function extractTjkProgramWithFallbacks(
       yyyyMMdd: raceDate
     } =
       turkeyDateParts();
+
+    const program: TjkProgramInput = {
+      raceDate,
+      meetings
+    };
+
+    assertCompleteProgram(program);
+
+    return {
+      program,
+      diagnostics
+    };
+  } catch (error) {
+    throw new TjkExtractionError(
+      errorText(error),
+      diagnostics
+    );
+  }
+}
+
+
+/*
+ * Next-day (D+1) program, HTTP only.
+ *
+ * TJK publishes tomorrow's card (cities, races, runners, jockey,
+ * weight, HP, form, start position) by the evening of D, but no
+ * AGF until race morning. This path is deliberately cheap: one
+ * master fetch plus one fetch per city with the browser-like UA,
+ * the same parser and completeness checks as the live program,
+ * and NO Browser Rendering / Workers AI fallback.
+ *
+ * Returns program=null when TJK has not published the card yet
+ * (master page lists no domestic meetings). Any other failure
+ * throws TjkExtractionError.
+ */
+export async function extractTjkProgramForDate(
+  _env: Env,
+  isoDate: string
+): Promise<{
+  program: TjkProgramInput | null;
+  diagnostics: TjkDiagnostic[];
+}> {
+  const diagnostics: TjkDiagnostic[] = [];
+
+  try {
+    const { yyyyMMdd: raceDate } =
+      turkeyDateParts(isoDate);
+
+    const masterUrl =
+      buildMasterUrl(raceDate);
+
+    const master = await timed(
+      "next-day:master",
+      "HTTP_FETCH",
+      diagnostics,
+      () =>
+        httpHtml(
+          masterUrl,
+          TJK_BROWSER_USER_AGENT
+        )
+    );
+
+    const discovered =
+      meetingsFromMasterHtml(
+        master.html,
+        raceDate
+      );
+
+    if (!discovered.length) {
+      return {
+        program: null,
+        diagnostics
+      };
+    }
+
+    const meetings = await mapLimited(
+      discovered,
+      CITY_CONCURRENCY,
+      item => {
+        const scope =
+          `next-day:${item.city}`;
+
+        return timed(
+          scope,
+          "HTTP_FETCH",
+          diagnostics,
+          () =>
+            httpHtml(
+              item.url,
+              TJK_BROWSER_USER_AGENT
+            )
+        ).then(
+          result =>
+            timed(
+              scope,
+              "HTTP_PARSE",
+              diagnostics,
+              async () => {
+                const parsed =
+                  parseTjkMeetingPage(
+                    result.html,
+                    item.city,
+                    item.url
+                  );
+
+                assertCompleteMeeting(parsed);
+                return parsed;
+              }
+            )
+        );
+      }
+    );
 
     const program: TjkProgramInput = {
       raceDate,

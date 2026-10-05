@@ -4,6 +4,7 @@ import { getToday } from "../storage/program-repository";
 import { toPublicMeetings, toPublicHistory } from "./public-projection";
 import { toCompactMeetings } from "./compact-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
+import { isTodayOver, nextDayForToday, refreshNextDayProgramIfDue } from "../tjk/next-day-service";
 import {
   refreshExpertsIfDue,
   refreshExpertSource
@@ -147,7 +148,10 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
   const publicMeetings=toPublicMeetings(meetings,session.tier);
-  return json({date:turkeyDate(),meetings:url.searchParams.get("view")==="full"?publicMeetings:toCompactMeetings(publicMeetings),servedFrom:"d1",refreshingInBackground:true});
+  // Tomorrow's card (display only, no scores) once today's last race has started.
+  const nextDay=await nextDayForToday(env,meetings).catch(()=>null);
+  if(isTodayOver(meetings)) ctx.waitUntil(refreshNextDayProgramIfDue(env).then(()=>undefined).catch(console.error));
+  return json({date:turkeyDate(),meetings:url.searchParams.get("view")==="full"?publicMeetings:toCompactMeetings(publicMeetings),...(nextDay?{nextDay}:{}),servedFrom:"d1",refreshingInBackground:true});
  }
  if(url.pathname==="/api/horses/videos") {
   const session=await resolveSession(request,env);
