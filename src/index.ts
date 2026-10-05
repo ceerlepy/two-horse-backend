@@ -11,6 +11,10 @@ import {
 } from "./tjk/program-service";
 
 import {
+  refreshNextDayProgramIfDue
+} from "./tjk/next-day-service";
+
+import {
   refreshExpertsIfDue
 } from "./experts/service";
 
@@ -103,6 +107,15 @@ async function runScheduledPipeline(
     "program.refresh",
     () =>
       refreshProgramIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "program.next-day",
+    () =>
+      refreshNextDayProgramIfDue(
         env
       )
   );

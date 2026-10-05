@@ -22,6 +22,25 @@ snapshot.
 Program acquisition, parsing and validation remain independent from the
 expert/comment pipeline.
 
+## TJK next-day program (D+1)
+
+Once today's last race has started, `/api/today` can carry tomorrow's card
+in a `nextDay` field so the app is not empty overnight.
+
+- Pipeline key `tjk:next-day-program`, cron step `program.next-day`
+  (`src/tjk/next-day-service.ts`).
+- Target date: Turkey date + 1. Due from 12:00 Turkey time, TTL 3 h.
+- TJK has not published the card yet (master lists no domestic meeting):
+  not an error; `next_allowed_at` is pushed ~1 h, no failure counted.
+- Real failures use the normal `markFailure` backoff (15/30/60 min).
+- HTTP only with the browser user-agent, same parser and completeness
+  checks as the live program; no Browser Rendering or Workers AI fallback.
+- Stored as one compact JSON row in `next_day_programs`; rows with
+  `race_date` before today are pruned on every run.
+- Never writes `meetings`/`races`/`runners` and never records AGF
+  snapshots: tomorrow's card is display-only until it becomes today's
+  canonical program through the normal `tjk:program` refresh.
+
 ## Expert and comment sources
 
 Expert acquisition exists only for upcoming pre-race decisions.

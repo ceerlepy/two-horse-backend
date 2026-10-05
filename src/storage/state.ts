@@ -53,3 +53,15 @@ export function isDue(state: RefreshState | null, ttlMs: number): boolean {
   if (!state?.last_success_at) return true;
   return now - Date.parse(state.last_success_at) >= ttlMs;
 }
+
+/*
+ * "Not yet" rather than "failed": release the lease and hold the
+ * pipeline off until `minutes` from now without counting a failure
+ * or recording an error (e.g. TJK has not published a card yet).
+ */
+export async function markDeferred(env: Env, key: string, minutes: number): Promise<void> {
+  const next = new Date(Date.now() + minutes * 60_000).toISOString();
+  await env.DB.prepare(`UPDATE refresh_state SET next_allowed_at=?, lease_until=NULL,
+    updated_at=CURRENT_TIMESTAMP WHERE pipeline_key=?`)
+    .bind(next, key).run();
+}
