@@ -9,6 +9,10 @@ import {
 } from "../acquisition/deterministic";
 
 import {
+  TJK_BROWSER_USER_AGENT
+} from "../acquisition/http";
+
+import {
   parseOfficialResultsHtml
 } from "./parser";
 
@@ -54,18 +58,30 @@ function normalizedCity(
  * These are part of TJK's public result URL identity.
  * They should be preferred over scraping a selector
  * link from the outer page on every request.
+ *
+ * Read from the city links on TJK's result pages
+ * (September 2026). A city missing here falls back to
+ * discovery, which failed for Şanlıurfa on 2026-10-05
+ * and left that meeting's results and coupons unlabelled.
  */
 const KNOWN_TJK_CITY_IDS:
   Record<string, string> = {
-    "ankara": "5",
+    "adana": "1",
+    "izmir": "2",
+    "istanbul": "3",
     "bursa": "4",
+    "ankara": "5",
+    "şanlıurfa": "6",
+    "sanliurfa": "6",
     "elazığ": "7",
     "elazig": "7",
+    "diyarbakır": "8",
+    "diyarbakir": "8",
     "kocaeli": "9"
   };
 
 
-function knownCityId(
+export function knownCityId(
   city: string
 ): string | null {
   const normalized =
@@ -232,7 +248,7 @@ async function discoverCityResultUrl(
         {
           headers: {
             "user-agent":
-              "Mozilla/5.0 TwoHorse/1.0",
+              TJK_BROWSER_USER_AGENT,
 
             accept:
               "text/html,application/xhtml+xml"
