@@ -74,3 +74,34 @@ describe("archive revision", () => {
     expect(await pendingArchiveDates(env(rows), 1, "2024-07-06", 12)).toEqual(["2024-07-05"]);
   });
 });
+
+describe("draw cell cache", () => {
+  const fakeEnv = (cached: any, archivedDates: number) => {
+    const calls: string[] = [];
+    const statement = (sql: string) => ({
+      bind: () => statement(sql),
+      first: async () => (sql.includes("value_model_cache") ? cached : { n: archivedDates }),
+      all: async () => {
+        calls.push("aggregate");
+        return { results: [{ city_id: 1, surface: "Kum", distance_meters: 1200, start_position: 1, n: 10, wins: 3, expected: 2 }] };
+      }
+    });
+    return { calls, env: { DB: { prepare: statement, batch: async () => [] } } as any };
+  };
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const cell = { archivedDates: 5, cells: { "1|Kum|1|1-2": { wins: 1, expected: 1 } } };
+
+  it("reuses the cache while the archive is unchanged", async () => {
+    const { env, calls } = fakeEnv({ value_json: JSON.stringify(cell), updated_at: ago(120) }, 5);
+    const { loadDrawStats } = await import("../src/value-model/predictions");
+    expect((await loadDrawStats(env, "2026-10-05")).get("1|Kum|1|1-2")).toEqual({ wins: 1, expected: 1 });
+    expect(calls).toEqual([]);
+  });
+
+  it("recomputes once the re-fetch added dates", async () => {
+    const { env, calls } = fakeEnv({ value_json: JSON.stringify(cell), updated_at: ago(45) }, 9);
+    const { loadDrawStats } = await import("../src/value-model/predictions");
+    expect((await loadDrawStats(env, "2026-10-05")).get("1|Kum|1|1-2")).toEqual({ wins: 3, expected: 2 });
+    expect(calls).toEqual(["aggregate"]);
+  });
+});

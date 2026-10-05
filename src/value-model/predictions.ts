@@ -27,7 +27,8 @@ export const PREDICTION_CONFIG = {
   overratedRatio: 1 / 1.2,
   overratedMinProbability: 0.10,
   /* draw-bias cells change only as the archive grows */
-  drawCacheHours: 6
+  drawCacheHours: 6,
+  drawRecheckMinutes: 30
 } as const;
 
 const DAY_MS = 86_400_000;
@@ -108,20 +109,34 @@ export async function computeDrawStats(env: Env, raceDate: string): Promise<Map<
   return out;
 }
 
-/* The aggregate scans the whole archive; it is cached per race date and refreshed a few times a day. */
+/*
+ * The aggregate scans the whole archive, so it is cached per race date. It
+ * is recomputed when the number of archived dates carrying start positions
+ * changed (archive backfill / re-fetch in progress), at most every
+ * drawRecheckMinutes, and otherwise every drawCacheHours.
+ */
 export async function loadDrawStats(env: Env, raceDate: string): Promise<Map<string, DrawCell>> {
   const key = `draw:${raceDate}`;
-  const cached = await env.DB.prepare(`SELECT value_json, updated_at FROM value_model_cache WHERE cache_key = ?`)
-    .bind(key).first<any>();
-  if (cached && Date.now() - Date.parse(cached.updated_at) < PREDICTION_CONFIG.drawCacheHours * 3_600_000) {
-    return new Map(Object.entries(JSON.parse(cached.value_json)) as Array<[string, DrawCell]>);
+  const [cached, dates] = await Promise.all([
+    env.DB.prepare(`SELECT value_json, updated_at FROM value_model_cache WHERE cache_key = ?`).bind(key).first<any>(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM result_archive_dates WHERE status = 'done' AND revision >= 2`).first<any>()
+  ]);
+  const archivedDates = Number(dates?.n ?? 0);
+  if (cached) {
+    const age = Date.now() - Date.parse(cached.updated_at);
+    const value = JSON.parse(cached.value_json);
+    const sameArchive = Number(value.archivedDates) === archivedDates;
+    if ((sameArchive && age < PREDICTION_CONFIG.drawCacheHours * 3_600_000) ||
+        age < PREDICTION_CONFIG.drawRecheckMinutes * 60_000) {
+      return new Map(Object.entries(value.cells ?? {}) as Array<[string, DrawCell]>);
+    }
   }
   const stats = await computeDrawStats(env, raceDate);
   await env.DB.batch([
     env.DB.prepare(`
       INSERT INTO value_model_cache(cache_key, value_json, updated_at) VALUES(?,?,?)
       ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
-    `).bind(key, JSON.stringify(Object.fromEntries(stats)), new Date().toISOString()),
+    `).bind(key, JSON.stringify({ archivedDates, cells: Object.fromEntries(stats) }), new Date().toISOString()),
     env.DB.prepare(`DELETE FROM value_model_cache WHERE cache_key LIKE 'draw:%' AND cache_key < ?`)
       .bind(`draw:${addDays(raceDate, -7)}`)
   ]);
