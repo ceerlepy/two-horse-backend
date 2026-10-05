@@ -37,14 +37,16 @@ import {
   loginWithGoogle,
   loginWithPassword,
   toPublicUser,
-  verifyPurchaseAndUpgrade
+  verifyPurchaseAndUpgrade,
+  registerWithPassword,
+  deleteAccount
 } from "../membership/service";
 import { TIER_LIMITS } from "../membership/tier";
 import { attachValues, loadTodayValues, refreshValueModel, valueModelStatus } from "../value-model/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
  const url=new URL(request.url);
- if(request.method==="OPTIONS") return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"GET,POST,OPTIONS","access-control-allow-headers":"authorization,x-admin-token,content-type"}});
+ if(request.method==="OPTIONS") return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"GET,POST,DELETE,OPTIONS","access-control-allow-headers":"authorization,x-admin-token,content-type"}});
 
  const authFailure=adminAuthFailure(request,env);
  if(authFailure) return authFailure;
@@ -83,6 +85,33 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    return json({ok:true,token,user});
   } catch(e) {
    return json({ok:false,error:errorMessage(e)},401);
+  }
+ }
+
+ if(url.pathname==="/api/auth/register" && request.method==="POST") {
+  try {
+   const body=await request.json<any>();
+   const email=String(body?.email ?? "");
+   const password=String(body?.password ?? "");
+   const displayName=typeof body?.displayName==="string" ? body.displayName : null;
+   if(!email.trim() || !password) return json({ok:false,error:"EMAIL_AND_PASSWORD_REQUIRED"},400);
+   const {token,user}=await registerWithPassword(env,{email,password,displayName});
+   return json({ok:true,token,user});
+  } catch(e) {
+   const error=errorMessage(e);
+   const status=error==="EMAIL_ALREADY_REGISTERED"?409:(error==="INVALID_EMAIL"||error==="WEAK_PASSWORD")?400:500;
+   return json({ok:false,error},status);
+  }
+ }
+
+ if(url.pathname==="/api/auth/account" && request.method==="DELETE") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  try {
+   await deleteAccount(env,session.user);
+   return json({ok:true});
+  } catch(e) {
+   return json({ok:false,error:errorMessage(e)},400);
   }
  }
 

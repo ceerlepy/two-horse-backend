@@ -22,11 +22,17 @@ import {
   getUserById,
   upsertGoogleUser,
   touchLastLogin,
-  applyVerifiedPurchase
+  applyVerifiedPurchase,
+  createPasswordUser,
+  deleteUserAccount,
+  getPurchaseOwner,
+  getLatestPurchase,
+  touchUpdatedAt
 } from "./repository";
 
 import {
-  verifyPlaySubscription
+  verifyPlaySubscription,
+  acknowledgePlaySubscription
 } from "./play-billing";
 
 import {
@@ -98,7 +104,7 @@ export async function resolveSession(
     return null;
   }
 
-  const user =
+  let user =
     await getUserById(
       env,
       userId
@@ -108,6 +114,18 @@ export async function resolveSession(
     return null;
   }
 
+  if (
+    shouldRecheckSubscription(
+      user
+    )
+  ) {
+    user =
+      await recheckSubscription(
+        env,
+        user
+      );
+  }
+
   return {
     user,
     tier:
@@ -115,6 +133,214 @@ export async function resolveSession(
         user
       )
   };
+}
+
+const SUBSCRIPTION_RECHECK_INTERVAL_MS =
+  60 * 60 * 1000;
+
+/*
+ * Subscriptions renew monthly on Google's side, but the stored
+ * expiry only moves when we ask Google again. Once the stored
+ * expiry has passed, re-ask at most once an hour (updated_at is
+ * the throttle) so a renewed subscriber keeps access and a
+ * cancelled one drops to free.
+ */
+function shouldRecheckSubscription(
+  user: UserRecord,
+  now: Date = new Date()
+): boolean {
+  if (
+    user.tierSource !==
+      "play_subscription" ||
+    !user.subscriptionExpiresAt
+  ) {
+    return false;
+  }
+
+  const expiresAt =
+    Date.parse(
+      user.subscriptionExpiresAt
+    );
+
+  const updatedAt =
+    Date.parse(
+      user.updatedAt
+    );
+
+  return (
+    expiresAt <= now.getTime() &&
+    !(
+      updatedAt >
+        now.getTime() -
+          SUBSCRIPTION_RECHECK_INTERVAL_MS
+    )
+  );
+}
+
+async function recheckSubscription(
+  env: Env,
+  user: UserRecord
+): Promise<UserRecord> {
+  try {
+    const latest =
+      await getLatestPurchase(
+        env,
+        user.id
+      );
+
+    if (latest) {
+      const purchase =
+        await verifyPlaySubscription(
+          env,
+          latest.purchaseToken
+        );
+
+      const tier =
+        PRODUCT_TIER_MAP[
+          purchase.productId
+        ];
+
+      if (
+        purchase.active &&
+        tier
+      ) {
+        await applyVerifiedPurchase(
+          env,
+          {
+            userId:
+              user.id,
+            productId:
+              purchase.productId,
+            purchaseToken:
+              latest.purchaseToken,
+            orderId:
+              purchase.orderId,
+            rawStatus:
+              purchase.rawStatus,
+            expiryTimeMillis:
+              purchase.expiryTimeMillis,
+            tier
+          }
+        );
+
+        return (
+          await getUserById(
+            env,
+            user.id
+          )
+        ) ?? user;
+      }
+    }
+  } catch (error) {
+    console.error(
+      "membership.subscription-recheck-failed",
+      String(error)
+    );
+  }
+
+  await touchUpdatedAt(
+    env,
+    user.id
+  );
+
+  return user;
+}
+
+const EMAIL_PATTERN =
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 128;
+const DISPLAY_NAME_MAX_LENGTH = 80;
+
+export async function registerWithPassword(
+  env: Env,
+  params: {
+    email: string;
+    password: string;
+    displayName: string | null;
+  }
+): Promise<{
+  token: string;
+  user: PublicUser;
+}> {
+  const email =
+    params.email.trim().toLowerCase();
+
+  if (
+    email.length > 254 ||
+    !EMAIL_PATTERN.test(email)
+  ) {
+    throw new Error(
+      "INVALID_EMAIL"
+    );
+  }
+
+  if (
+    params.password.length <
+      PASSWORD_MIN_LENGTH ||
+    params.password.length >
+      PASSWORD_MAX_LENGTH
+  ) {
+    throw new Error(
+      "WEAK_PASSWORD"
+    );
+  }
+
+  const displayName =
+    params.displayName
+      ?.trim()
+      .slice(
+        0,
+        DISPLAY_NAME_MAX_LENGTH
+      ) || null;
+
+  const user =
+    await createPasswordUser(
+      env,
+      {
+        email,
+        passwordHash:
+          await hashPassword(
+            params.password
+          ),
+        displayName
+      }
+    );
+
+  const token =
+    await issueSessionToken(
+      env,
+      user.id
+    );
+
+  return {
+    token,
+    user:
+      toPublicUser(
+        user
+      )
+  };
+}
+
+export async function deleteAccount(
+  env: Env,
+  user: UserRecord
+): Promise<void> {
+  // Admin accounts are seeded by migration, not self-service.
+  if (
+    user.tierSource ===
+      "manual"
+  ) {
+    throw new Error(
+      "MANUAL_ACCOUNT_NOT_DELETABLE"
+    );
+  }
+
+  await deleteUserAccount(
+    env,
+    user
+  );
 }
 
 export async function loginWithGoogle(
@@ -236,6 +462,26 @@ export async function verifyPurchaseAndUpgrade(
     );
   }
 
+  /*
+   * A purchase token belongs to the account that first verified
+   * it. Without this, anyone holding someone else's token (or a
+   * second account on the same phone) could unlock a paid tier.
+   */
+  const owner =
+    await getPurchaseOwner(
+      env,
+      purchaseToken
+    );
+
+  if (
+    owner &&
+    owner !== userId
+  ) {
+    throw new Error(
+      "PURCHASE_BELONGS_TO_ANOTHER_ACCOUNT"
+    );
+  }
+
   const purchase =
     await verifyPlaySubscription(
       env,
@@ -251,10 +497,37 @@ export async function verifyPurchaseAndUpgrade(
     );
   }
 
+  // The app tags each purchase with the buyer's user id.
+  if (
+    purchase.obfuscatedAccountId &&
+    purchase.obfuscatedAccountId !==
+      userId
+  ) {
+    throw new Error(
+      "PURCHASE_BELONGS_TO_ANOTHER_ACCOUNT"
+    );
+  }
+
   if (!purchase.active) {
     throw new Error(
       "PURCHASE_NOT_ACTIVE"
     );
+  }
+
+  if (purchase.needsAcknowledgement) {
+    try {
+      await acknowledgePlaySubscription(
+        env,
+        productId,
+        purchaseToken
+      );
+    } catch (error) {
+      // The app acknowledges as well; don't fail the upgrade on this.
+      console.error(
+        "membership.acknowledge-failed",
+        String(error)
+      );
+    }
   }
 
   await applyVerifiedPurchase(
@@ -263,7 +536,8 @@ export async function verifyPurchaseAndUpgrade(
       userId,
       productId,
       purchaseToken,
-      orderId: null,
+      orderId:
+        purchase.orderId,
       rawStatus:
         purchase.rawStatus,
       expiryTimeMillis:

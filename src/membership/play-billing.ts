@@ -12,11 +12,43 @@ interface ServiceAccountKey {
   private_key: string;
 }
 
-interface PlaySubscriptionPurchase {
+export interface PlaySubscriptionPurchase {
   productId: string;
   expiryTimeMillis: number;
   active: boolean;
   rawStatus: string;
+  orderId: string | null;
+  needsAcknowledgement: boolean;
+  obfuscatedAccountId: string | null;
+}
+
+/*
+ * subscriptionsv2 states that still entitle the user. CANCELED
+ * means auto-renew was turned off, but the paid period runs to its
+ * expiry; IN_GRACE_PERIOD keeps access while Google retries a
+ * failed payment. ON_HOLD, PAUSED, PENDING and EXPIRED do not.
+ */
+const ENTITLED_STATES =
+  new Set([
+    "SUBSCRIPTION_STATE_ACTIVE",
+    "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+    "SUBSCRIPTION_STATE_CANCELED"
+  ]);
+
+function playPackageName(
+  env: Env
+): string {
+  const packageName =
+    env.PLAY_PACKAGE_NAME
+      ?.trim();
+
+  if (!packageName) {
+    throw new Error(
+      "PLAY_PACKAGE_NAME_NOT_CONFIGURED"
+    );
+  }
+
+  return packageName;
 }
 
 function parseServiceAccount(
@@ -140,14 +172,9 @@ export async function verifyPlaySubscription(
   purchaseToken: string
 ): Promise<PlaySubscriptionPurchase> {
   const packageName =
-    env.PLAY_PACKAGE_NAME
-      ?.trim();
-
-  if (!packageName) {
-    throw new Error(
-      "PLAY_PACKAGE_NAME_NOT_CONFIGURED"
+    playPackageName(
+      env
     );
-  }
 
   const account =
     parseServiceAccount(
@@ -210,10 +237,9 @@ export async function verifyPlaySubscription(
     ) &&
     expiryTimeMillis >
       Date.now() &&
-    rawStatus !==
-      "SUBSCRIPTION_STATE_EXPIRED" &&
-    rawStatus !==
-      "SUBSCRIPTION_STATE_REVOKED";
+    ENTITLED_STATES.has(
+      rawStatus
+    );
 
   return {
     productId:
@@ -223,6 +249,80 @@ export async function verifyPlaySubscription(
 
     expiryTimeMillis,
     active,
-    rawStatus
+    rawStatus,
+
+    orderId:
+      typeof lineItem.latestSuccessfulOrderId === "string"
+        ? lineItem.latestSuccessfulOrderId
+        : typeof body.latestOrderId === "string"
+          ? body.latestOrderId
+          : null,
+
+    needsAcknowledgement:
+      body.acknowledgementState ===
+        "ACKNOWLEDGEMENT_STATE_PENDING",
+
+    obfuscatedAccountId:
+      typeof body.externalAccountIdentifiers
+        ?.obfuscatedExternalAccountId === "string"
+        ? body.externalAccountIdentifiers
+            .obfuscatedExternalAccountId
+        : null
   };
+}
+
+/*
+ * A subscription that is not acknowledged within three days is
+ * refunded and revoked by Google. The app acknowledges too, but
+ * doing it here as well means a crash between "verified" and
+ * "acknowledged" on the phone can't cost the user their purchase.
+ */
+export async function acknowledgePlaySubscription(
+  env: Env,
+  productId: string,
+  purchaseToken: string
+): Promise<void> {
+  const packageName =
+    playPackageName(
+      env
+    );
+
+  const accessToken =
+    await fetchAccessToken(
+      parseServiceAccount(
+        env
+      )
+    );
+
+  const url =
+    `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/` +
+    `${encodeURIComponent(packageName)}/purchases/subscriptions/` +
+    `${encodeURIComponent(productId)}/tokens/` +
+    `${encodeURIComponent(purchaseToken)}:acknowledge`;
+
+  const response =
+    await fetch(
+      url,
+      {
+        method:
+          "POST",
+
+        headers: {
+          authorization:
+            `Bearer ${accessToken}`,
+
+          "content-type":
+            "application/json"
+        },
+
+        body:
+          "{}"
+      }
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `PLAY_ACKNOWLEDGE_FAILED_${response.status}`
+    );
+  }
 }

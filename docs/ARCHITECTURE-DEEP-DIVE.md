@@ -2221,8 +2221,8 @@ değişmedi.)
 `jose`'nin `createRemoteJWKSet` ile Google'ın gerçek JWKS'ine karşı
 doğrular — imza, `iss`, `aud`, `exp` hepsi kontrol edilir, hiçbir şey
 istemciden güvenilerek kabul edilmez) ve `POST /api/auth/login`
-(e-posta+şifre — şu an sadece elle eklenen/`manual` hesaplar için,
-örn. seed edilen admin hesabı). İkisi de kendi imzaladığımız, 30 gün
+(e-posta+şifre). 2026-10-05'ten beri `POST /api/auth/register` ile
+herkes e-posta+şifreyle kayıt olabiliyor (bkz. 63.1). İkisi de kendi imzaladığımız, 30 gün
 geçerli bir HS256 oturum JWT'si (`SESSION_JWT_SECRET`) döndürür.
 Oturum JWT'si sadece `sub` (kullanıcı id) taşır — tier JWT içine
 gömülmez, her istekte D1'den taze okunur; aksi halde bir kullanıcının
@@ -2251,8 +2251,10 @@ yazan tier ne olursa olsun.
 - **Premium**: Sınırsız (kupon tavanı `Infinity`), at videosu dahil
   her şey açık.
 
-Yeni kullanıcı Google ile ilk kez giriş yaptığında otomatik olarak
-**7 günlük Premium deneme** başlıyor (`TRIAL_DAYS`); süre dolunca
+Yeni kullanıcı (Google ile ilk giriş veya e-posta kaydı) otomatik
+olarak **7 günlük Gold deneme** alıyor (`TRIAL_DAYS`, `TRIAL_TIER`;
+2026-10-05 öncesi Premium'du, o kullanıcılar süreleri bitene kadar
+Premium kalır); süre dolunca
 `effectiveTier` otomatik `free`'ye düşürüyor, ayrı bir iş/cron
 gerekmiyor.
 
@@ -2283,6 +2285,35 @@ olur ki eski kod canlıda kalsın, yarı-bozuk bir sürüm hiç yayınlanmasın)
 opsiyonel — onlar olmadan da deploy geçer, sadece Google girişi ve
 gerçek satın alma doğrulaması o secret'lar eklenene kadar
 `_NOT_CONFIGURED` hatası döner.
+
+## 63.1 Kayıt, hesap silme, satın alma sahipliği (2026-10-05)
+
+- **Kayıt**: `POST /api/auth/register {email,password,displayName?}`.
+  E-posta formatı ve 8–128 karakter şifre kontrol edilir; aynı e-posta
+  `409 EMAIL_ALREADY_REGISTERED`. Hesap `email_verified=0` ile açılır
+  (migration 0042). Aynı e-postayla daha sonra Google girişi yapılırsa
+  hesaplar birleşir ve doğrulanmamış hesabın şifresi silinir: başkasının
+  e-postasıyla önceden kayıt olan biri o hesaba şifreyle girmeye devam
+  edemez.
+- **Hesap silme** (Google Play zorunluluğu): `DELETE /api/auth/account`.
+  `users` ve `play_purchases` satırları silinir; yalnızca e-posta ve
+  Google kimliğinin SHA-256 özeti `trial_claims`'e yazılır, böylece
+  sil-yeniden-kaydol ile ikinci deneme alınamaz (yeni hesap `free`
+  başlar). `manual` (admin) hesaplar silinemez. Google Play aboneliği
+  hesap silinince iptal olmaz; kullanıcı Play'den iptal etmeli.
+- **Satın alma sahipliği**: bir purchase token'ı ilk doğrulayan hesaba
+  aittir; başka hesap aynı token'ı gönderirse
+  `PURCHASE_BELONGS_TO_ANOTHER_ACCOUNT`. Uygulama satın almayı
+  `obfuscatedAccountId = user.id` ile etiketler, backend bunu da
+  karşılaştırır.
+- **Onay (acknowledge)**: onaylanmayan abonelik 3 gün içinde iade
+  edilir. Uygulama onaylıyor; backend de `acknowledgementState` PENDING
+  ise Play API üzerinden onaylıyor.
+- **Yenileme**: `tier_source=play_subscription` ve kayıtlı bitiş tarihi
+  geçmişse, `resolveSession` saatte en fazla bir kez (`updated_at`
+  kısıtı) en son token'ı Google'a tekrar sorar; yenilendiyse bitiş
+  ilerler, değilse kullanıcı `free`'ye düşer. Hak veren durumlar:
+  ACTIVE, IN_GRACE_PERIOD, CANCELED (dönem sonuna kadar).
 
 ---
 
