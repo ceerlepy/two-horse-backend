@@ -2526,3 +2526,19 @@ Dürüst not: ölçümde model AGF'den daha iyi olasılık veriyor ve hafife
 alınan atlar AGF'nin beklediğinden sık kazanıyor, ama TJK'nın ~%26
 kesintisinden sonra final oranlarla kâr kanıtlanmadı. Etiket bir bahis
 tavsiyesi değil, "AGF bu atı hafife alıyor olabilir" görüşüdür.
+
+## 71.1 v2: start kulvarı (2026-10-05)
+
+Denenip **kanıtlanmayan** ve bu yüzden eklenmeyen bilgiler: pedigri (baba A/E), yarış sonrası notlar (geç çıkış, son yarışta fark, takı değişimi), sahip, yaş, AGF'yi ikinci dayanak yapmak, bahis anı oranlarıyla eğitim. Ölçüm 2026 yılının 4.707 yarışı üzerinde yapıldı.
+
+**Kanıtlanan:** piyasa kulvar avantajını tam fiyatlamıyor, özellikle 1400 m ve altı koşularda.
+- `draw_ae_rel` özelliği: hipodrom × pist × sprint/uzun × kulvar grubu (1-2, 3-4, 5-7, 8+) için geçmiş market koşularından hesaplanan kazanan / beklenen oranı. `(w+30)/(e+30)` ile 1'e doğru küçültülüyor ve alan ortalamasına göre veriliyor.
+- Temmuz–Ekim 2026 holdout'unda v1'e göre log-loss iyileşmesi: full +0,0058 ±0,0025, ganyan +0,0053 ±0,0024, agf +0,0059 ±0,0025. 1. seçim tutma oranı değişmedi.
+
+**Uygulama:**
+- `runners.start_position`: program sayfasındaki "St" sütunundan.
+- `result_archive_runners.start_position`: sonuç sayfasındaki `StartId` alanından.
+- `result_archive_dates.revision`: değeri 2'den küçük olan, yani daha önce arşivlenmiş günler yeniden çekiliyor. Bu iş tur kapasitesinin arta kalanıyla yapılıyor; günler "done" kaldığı için kapsam ve etiketler etkilenmiyor.
+- Kulvar hücreleri `value_model_cache` içinde gün başına 6 saat önbellekte tutuluyor.
+- Katsayılar `value-v2-2026-10-05`.
+

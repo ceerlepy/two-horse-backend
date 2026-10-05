@@ -282,6 +282,10 @@ function headerIndexes(
         header.includes("son6y")
       ) {
         indexes.recentForm = index;
+      } else if (
+        header === "st"
+      ) {
+        indexes.start = index;
       }
     });
 
@@ -358,6 +362,7 @@ function parseRunnerTable(
     const agfCell = cell(indexes.agf);
     const recentFormCell =
       cell(indexes.recentForm);
+    const startCell = cell(indexes.start);
 
     runners.push({
       number,
@@ -408,6 +413,11 @@ function parseRunnerTable(
               jockeyCell,
               baseUrl
             )
+          : null,
+
+      startPosition:
+        startCell
+          ? parseInteger(startCell.text())
           : null
     });
   });

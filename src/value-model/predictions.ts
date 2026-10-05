@@ -1,10 +1,12 @@
 import type { Env } from "../env";
 import { turkeyDate } from "../shared";
-import { addDays, tjkNumericId } from "./cities";
+import { addDays, domesticCity, tjkNumericId } from "./cities";
 import {
   VALUE_MODEL_FEATURES,
   computeFeatures,
   marketProbabilities,
+  drawKey,
+  type DrawCell,
   type FeatureRunner,
   type JockeyWindow,
   type PastRun
@@ -23,7 +25,9 @@ export const PREDICTION_CONFIG = {
   underratedRatio: 1.2,
   underratedMinProbability: 0.04,
   overratedRatio: 1 / 1.2,
-  overratedMinProbability: 0.10
+  overratedMinProbability: 0.10,
+  /* draw-bias cells change only as the archive grows */
+  drawCacheHours: 6
 } as const;
 
 const DAY_MS = 86_400_000;
@@ -82,6 +86,48 @@ export async function loadJockeys(env: Env, jockeyIds: number[], raceDate: strin
   return out;
 }
 
+/* Draw-bias cells from every archived market race before raceDate (see drawKey). */
+export async function computeDrawStats(env: Env, raceDate: string): Promise<Map<string, DrawCell>> {
+  const rows = await env.DB.prepare(`
+    SELECT r.city_id, r.surface, r.distance_meters, u.start_position,
+           COUNT(*) AS n, SUM(CASE WHEN u.finish_position = 1 THEN 1 ELSE 0 END) AS wins, SUM(u.p_win) AS expected
+    FROM result_archive_runners u
+    JOIN result_archive_races r USING (race_code)
+    WHERE r.market_ok = 1 AND u.race_date < ? AND u.start_position IS NOT NULL
+      AND r.surface IS NOT NULL AND r.distance_meters IS NOT NULL
+    GROUP BY r.city_id, r.surface, r.distance_meters, u.start_position
+  `).bind(raceDate).all<any>();
+  const out = new Map<string, DrawCell>();
+  for (const r of rows.results ?? []) {
+    const key = drawKey(Number(r.city_id), r.surface, Number(r.distance_meters), Number(r.start_position));
+    const cell = out.get(key) ?? { wins: 0, expected: 0 };
+    cell.wins += Number(r.wins);
+    cell.expected += Number(r.expected ?? 0);
+    out.set(key, cell);
+  }
+  return out;
+}
+
+/* The aggregate scans the whole archive; it is cached per race date and refreshed a few times a day. */
+export async function loadDrawStats(env: Env, raceDate: string): Promise<Map<string, DrawCell>> {
+  const key = `draw:${raceDate}`;
+  const cached = await env.DB.prepare(`SELECT value_json, updated_at FROM value_model_cache WHERE cache_key = ?`)
+    .bind(key).first<any>();
+  if (cached && Date.now() - Date.parse(cached.updated_at) < PREDICTION_CONFIG.drawCacheHours * 3_600_000) {
+    return new Map(Object.entries(JSON.parse(cached.value_json)) as Array<[string, DrawCell]>);
+  }
+  const stats = await computeDrawStats(env, raceDate);
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT INTO value_model_cache(cache_key, value_json, updated_at) VALUES(?,?,?)
+      ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
+    `).bind(key, JSON.stringify(Object.fromEntries(stats)), new Date().toISOString()),
+    env.DB.prepare(`DELETE FROM value_model_cache WHERE cache_key LIKE 'draw:%' AND cache_key < ?`)
+      .bind(`draw:${addDays(raceDate, -7)}`)
+  ]);
+  return stats;
+}
+
 export function valueLabel(pModel: number, pReference: number | null): "underrated" | "overrated" | null {
   if (pReference == null || pReference <= 0) return null;
   const ratio = pModel / pReference;
@@ -100,9 +146,11 @@ interface RaceRow {
   performance_url: string | null;
 }
 
-export async function predictRace(env: Env, race: RaceRow, coefficients: Coefficients): Promise<number> {
+export async function predictRace(
+  env: Env, race: RaceRow, coefficients: Coefficients, drawStats: Map<string, DrawCell> | null = null
+): Promise<number> {
   const runnerRows = await env.DB.prepare(`
-    SELECT horse_number, horse_id, jockey_id, weight, agf_percent FROM runners
+    SELECT horse_number, horse_id, jockey_id, weight, agf_percent, start_position FROM runners
     WHERE race_date = ? AND city = ? AND race_number = ? ORDER BY horse_number
   `).bind(race.race_date, race.city, race.race_number).all<any>();
   const odds = await latestOdds(env, race.race_date, race.city, race.race_number);
@@ -123,7 +171,8 @@ export async function predictRace(env: Env, race: RaceRow, coefficients: Coeffic
     jockeyId: tjkNumericId(r.jockey_id),
     weight: r.weight == null ? null : Number(r.weight),
     agfPercent: r.agf_percent == null ? null : Number(r.agf_percent),
-    odds: odds.get(Number(r.horse_number))?.odds ?? null
+    odds: odds.get(Number(r.horse_number))?.odds ?? null,
+    startPosition: r.start_position == null ? null : Number(r.start_position)
   }));
 
   const horseIds = runners.map(r => r.horseId).filter((x): x is number => x != null);
@@ -134,7 +183,10 @@ export async function predictRace(env: Env, race: RaceRow, coefficients: Coeffic
   const gallops = await loadGallops(env, horseIds);
 
   const features = computeFeatures(
-    { raceDate: race.race_date, distanceMeters: race.distance_meters, surface: race.track, history, jockeys, gallops },
+    {
+      raceDate: race.race_date, distanceMeters: race.distance_meters, surface: race.track, history, jockeys, gallops,
+      cityId: domesticCity(race.city)?.id ?? null, drawStats
+    },
     runners
   );
   const { pAgf, pGanyan } = marketProbabilities(runners);
@@ -197,8 +249,9 @@ export async function refreshPredictions(env: Env, coefficients: Coefficients, t
   `).bind(today, today, now.toISOString(), hot, stale, PREDICTION_CONFIG.racesPerTick).all<RaceRow>();
 
   let count = 0;
+  const drawStats = races.results?.length ? await loadDrawStats(env, today) : null;
   for (const race of races.results ?? []) {
-    count += await predictRace(env, race, coefficients);
+    count += await predictRace(env, race, coefficients, drawStats);
   }
   return count;
 }

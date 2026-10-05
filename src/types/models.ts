@@ -25,6 +25,9 @@ export interface RunnerInput {
    * The same horse may race with different jockeys.
    */
   jockeyProfileUrl: string | null;
+
+  /* Start (gate) number, the "St" column. Optional: AI extraction does not provide it. */
+  startPosition?: number | null;
 }
 
 export interface RaceInput {

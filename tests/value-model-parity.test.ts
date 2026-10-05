@@ -5,6 +5,7 @@ import {
   VALUE_MODEL_FEATURES,
   computeFeatures,
   marketProbabilities,
+  type DrawCell,
   type FeatureContext,
   type Gallop,
   type JockeyWindow,
@@ -27,7 +28,9 @@ function context(race: any): FeatureContext {
     surface: race.surface,
     history: toMap<PastRun[]>(race.history),
     jockeys: toMap<JockeyWindow>(race.jockeys),
-    gallops: toMap<Gallop[]>(race.gallops)
+    gallops: toMap<Gallop[]>(race.gallops),
+    cityId: race.cityId,
+    drawStats: new Map(Object.entries(race.drawStats ?? {})) as Map<string, DrawCell>
   };
 }
 

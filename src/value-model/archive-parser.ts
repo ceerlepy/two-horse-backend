@@ -3,7 +3,7 @@
  * (/TR/YarisSever/Info/Sehir/GunlukYarisSonuclari?SehirId=..) into the
  * fields the value model needs: per race code the distance, surface,
  * breed, going and first prize; per starter the finish, time, final
- * ganyan, AGF, jockey/trainer ids, weight and HP.
+ * ganyan, AGF, jockey/trainer ids, weight, HP and start (gate) number.
  *
  * TJK renders each runner cell with a stable class name
  * ("gunluk-GunlukYarisSonuclari-<Field>"), so columns are read by class
@@ -33,6 +33,7 @@ export interface ArchiveRunner {
   trainerId: number | null;
   weight: number | null;
   hp: number | null;
+  startPosition: number | null;
 }
 
 export interface ArchiveMeeting {
@@ -139,6 +140,7 @@ export function parseArchiveMeeting(html: string): ArchiveMeeting {
       const agf = /title="%([\d,]+)\(\d+\)"/.exec(cell(row, "AGFORAN"));
       const weight = /^([\d,]+)/.exec(text(cell(row, "Kilo")));
       const hp = text(cell(row, "Hc"));
+      const start = text(cell(row, "StartId"));
 
       runners.push({
         raceCode,
@@ -151,7 +153,8 @@ export function parseArchiveMeeting(html: string): ArchiveMeeting {
         jockeyId: intParam(cell(row, "JokeAdi"), "JokeyId"),
         trainerId: intParam(cell(row, "AntronorAdi"), "AntrenorId"),
         weight: weight ? trNumber(weight[1]) : null,
-        hp: /^\d+$/.test(hp) ? Number(hp) : null
+        hp: /^\d+$/.test(hp) ? Number(hp) : null,
+        startPosition: /^\d+$/.test(start) ? Number(start) : null
       });
     }
   }

@@ -11,7 +11,7 @@ export const VALUE_MODEL_FEATURES = [
   "fig_best3_rel", "fig_last_rel", "n_prev", "jockey_ae", "jockey_upg", "horse_ae",
   "days_off", "dist_chg", "surf_chg", "wt_chg",
   "idm_best400_z30_rel", "idm_best800_z30_rel", "idm_last_z_rel", "idm_n30", "idm_days_last",
-  "agf_gny_ratio"
+  "agf_gny_ratio", "draw_ae_rel"
 ] as const;
 
 export type FeatureName = typeof VALUE_MODEL_FEATURES[number];
@@ -50,6 +50,13 @@ export interface FeatureRunner {
   weight: number | null;
   agfPercent: number | null;
   odds: number | null;
+  startPosition?: number | null;
+}
+
+/* Wins and market-expected wins per draw group, from races before the race date. */
+export interface DrawCell {
+  wins: number;
+  expected: number;
 }
 
 export interface FeatureContext {
@@ -59,6 +66,31 @@ export interface FeatureContext {
   history: Map<number, PastRun[]>;           // horseId -> runs, oldest first
   jockeys: Map<number, JockeyWindow>;        // jockeyId -> last 365 days
   gallops: Map<number, Gallop[]> | null;     // horseId -> gallops (null: not fetched)
+  cityId?: number | null;
+  drawStats?: Map<string, DrawCell> | null;  // drawKey -> cell
+}
+
+/*
+ * Draw bias: how a start-position bucket has done against the market at
+ * this hippodrome / surface / sprint-or-route, shrunk towards 1.
+ */
+export const DRAW_SHRINK = 30;
+export const SPRINT_MAX_METRES = 1400;
+
+export function drawBucket(start: number): string {
+  return start <= 2 ? "1-2" : start <= 4 ? "3-4" : start <= 7 ? "5-7" : "8+";
+}
+
+export function drawKey(cityId: number, surface: string, distanceMeters: number, start: number): string {
+  return `${cityId}|${surface}|${distanceMeters <= SPRINT_MAX_METRES ? 1 : 0}|${drawBucket(start)}`;
+}
+
+function drawAe(ctx: FeatureContext, start: number | null | undefined): number | null {
+  if (start == null || start <= 0 || ctx.cityId == null || !ctx.surface || !ctx.distanceMeters || !ctx.drawStats) {
+    return null;
+  }
+  const cell = ctx.drawStats.get(drawKey(ctx.cityId, ctx.surface, ctx.distanceMeters, start));
+  return cell ? (cell.wins + DRAW_SHRINK) / (cell.expected + DRAW_SHRINK) : null;
 }
 
 const NORMS: Record<string, [number, number]> = constants.gallopNorms as any;
@@ -146,14 +178,16 @@ export function computeFeatures(ctx: FeatureContext, runners: FeatureRunner[]): 
       idm_best400_z30: maxOrNull(w30.map(g => gallopZ(g, 400))),
       idm_best800_z30: maxOrNull(w30.map(g => gallopZ(g, 800))),
       idm_n30: prev ? w30.length : null,
-      idm_days_last: lastGallop ? days(lastGallop.date, ctx.raceDate) : null
+      idm_days_last: lastGallop ? days(lastGallop.date, ctx.raceDate) : null,
+      draw_ae: drawAe(ctx, r.startPosition)
     };
   });
 
-  const rel = (key: "fig_best3" | "fig_last" | "idm_last_z" | "idm_best400_z30" | "idm_best800_z30") =>
+  const rel = (key: "fig_best3" | "fig_last" | "idm_last_z" | "idm_best400_z30" | "idm_best800_z30" | "draw_ae") =>
     relativeToField(raw.map(x => x[key]));
   const figBest3Rel = rel("fig_best3"), figLastRel = rel("fig_last");
   const idmLastRel = rel("idm_last_z"), idm400Rel = rel("idm_best400_z30"), idm800Rel = rel("idm_best800_z30");
+  const drawRel = rel("draw_ae");
 
   return raw.map((x, i) => ({
     fig_best3_rel: figBest3Rel[i],
@@ -171,6 +205,7 @@ export function computeFeatures(ctx: FeatureContext, runners: FeatureRunner[]): 
     idm_last_z_rel: idmLastRel[i],
     idm_n30: x.idm_n30,
     idm_days_last: x.idm_days_last,
-    agf_gny_ratio: pAgf[i] != null && pGanyan[i] != null ? Math.log((pGanyan[i] as number) / (pAgf[i] as number)) : null
+    agf_gny_ratio: pAgf[i] != null && pGanyan[i] != null ? Math.log((pGanyan[i] as number) / (pAgf[i] as number)) : null,
+    draw_ae_rel: drawRel[i]
   }));
 }
