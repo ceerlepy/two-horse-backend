@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "fs";
+
 import {
   bankoAiPageUrl,
-  bankoIndexLinks,
-  bankoPageUrlFor,
+  bankoPostSlug,
   bankoSlug,
-  classifyPage,
-  isMissingPage
+  classifyPage
 } from "../src/foreign/banko";
+import { parseBankoPicks, rankedHorses } from "../src/foreign/banko-picks";
 import { raceDateOfForeignLink } from "../src/foreign/discovery";
 import { parseTjkMeetingPage } from "../src/tjk/html-parser";
 
@@ -25,14 +26,9 @@ describe("foreign meetings: dates, names, banko pages", () => {
     expect(bankoSlug("Pontefract Birleşik Krallık")).toBe("pontefract-birlesik-krallik");
     expect(bankoAiPageUrl("2026-04-07", "Deauville Fransa"))
       .toBe("https://www.bankotahminler.com/ai-tahmin/7-nisan-2026-deauville-fransa/");
+    expect(bankoPostSlug("2026-10-05", "Le Mans Fransa")).toBe("5-ekim-2026-le-mans-fransa");
     expect(bankoAiPageUrl("2026-10-05", "Durbanville Guney Afrika"))
       .toBe("https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-durbanville-guney-afrika/");
-  });
-
-  it("recognises missing and challenge pages", () => {
-    expect(isMissingPage("<title>Sayfa bulunamadı | Banko</title>")).toBe(true);
-    expect(isMissingPage("<title>Just a moment...</title>")).toBe(true);
-    expect(isMissingPage("<title>5 Ekim 2026 Deauville Fransa</title>")).toBe(false);
   });
 
   it("tells a challenge from a missing page", () => {
@@ -41,20 +37,33 @@ describe("foreign meetings: dates, names, banko pages", () => {
     expect(classifyPage("<title>5 Ekim 2026 Le Mans Fransa</title>")).toBe("ok");
   });
 
-  it("prefers the listing's link over the guessed URL", () => {
-    const links = bankoIndexLinks(`
-      <a href="https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-le-mans-fransa-2/">x</a>
-      <a href="/ai-tahmin/5-ekim-2026-bursa/">y</a>
-      <a href="/tahminler/other/">z</a>`);
+  it("parses the AI post: coupons by real race number and ranked picks", () => {
+    const picks = parseBankoPicks(
+      readFileSync(new URL("./fixtures/banko-ai-longchamp.html", import.meta.url), "utf8")
+    );
 
-    expect(links).toEqual([
-      "https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-le-mans-fransa-2/",
-      "https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-bursa/"
-    ]);
-    expect(bankoPageUrlFor("2026-10-05", "Le Mans Fransa", links))
-      .toBe("https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-le-mans-fransa-2/");
-    expect(bankoPageUrlFor("2026-10-05", "Deauville Fransa", links))
-      .toBe("https://www.bankotahminler.com/ai-tahmin/5-ekim-2026-deauville-fransa/");
+    expect(picks.coupons).toHaveLength(2);
+    expect(picks.coupons[0]).toMatchObject({
+      altili: 1,
+      startTime: "14:31",
+      combinations: 960,
+      amountTl: 960
+    });
+    expect(picks.coupons[0].legs[0]).toEqual({ raceNumber: 1, selection: [1, 5, 8, 11] });
+    expect(picks.coupons[1].legs.map(leg => leg.raceNumber)).toEqual([4, 5, 6, 7, 8, 9]);
+
+    const race2 = picks.races.find(race => race.raceNumber === 2)!;
+    expect(race2.ranked[0]).toEqual({ number: 1, name: "FOLSOM BLUES (IRE)" });
+    expect(race2.ranked.map(horse => horse.number)).toEqual([1, 3, 6, 4, 9, 7, 2, 10]);
+    expect(race2.ranked[4].name).toBe("MAN'S BEST FRIEND (IRE)");
+    expect(race2.selection).toEqual([1, 2, 3, 4, 6, 7, 9, 10]);
+  });
+
+  it("reads ranked names with apostrophes and stops at prose", () => {
+    expect(
+      rankedHorses("3-CRYPTO RIDE algoritmanın öne aldığı isim. 7-KEEP MOVIN' ON, 1-SHORTMAN ve 4-KIDDO LIGHT yazılabilir.")
+        .map(horse => `${horse.number}:${horse.name}`)
+    ).toEqual(["3:CRYPTO RIDE", "7:KEEP MOVIN' ON", "1:SHORTMAN", "4:KIDDO LIGHT"]);
   });
 
   it("does not take a gear tooltip as the horse name", () => {

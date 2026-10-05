@@ -1,0 +1,2 @@
+import {it} from "vitest"; import {readFileSync} from "fs"; import {parseBankoPicks} from "../src/foreign/banko-picks";
+it("x",()=>{const d=JSON.parse(readFileSync("/tmp/claude-0/sp/bcontent.json","utf8")); for(const [k,v] of Object.entries(d)){const r=parseBankoPicks(v as string); console.log("##",k,r.coupons.map(c=>`A${c.altili}@${c.startTime}:${c.legs.map(l=>l.raceNumber+"="+l.selection.join("-")).join(" ")} [${c.combinations}/${c.amountTl}]`).join(" | ")); for(const rp of r.races) console.log("  R"+rp.raceNumber, rp.ranked.map(h=>h.number+":"+h.name).join(" / "));}});

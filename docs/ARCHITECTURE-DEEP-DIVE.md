@@ -2425,12 +2425,20 @@ eski anlık görüntüler ve ayak örnekleri silinir.
 - Yurt dışı kartlarda profil linki olmayan atlarda ilk `<a>` takı
   ipucuydu ("Kapalı gözlük takılacağını ifade eder.") ve at adı
   sanılıyordu. Ad artık `sup.tooltipp` çıkarılarak okunuyor.
-- `foreign.banko-pages` (`src/foreign/banko.ts`): her YD toplantısı
-  için `bankotahminler.com/ai-tahmin/<gün>-<ay>-<yıl>-<slug>/`
-  sayfası Browser Rendering ile çekilip `foreign_expert_pages`
-  tablosuna yazılır (0038; tur başına 2 sayfa, toplantı başına en
-  fazla 4 deneme, 3 gün saklama). Seçimleri okuyan ayrıştırıcı bir
-  sonraki adım.
+- `foreign.banko-pages` (`src/foreign/banko.ts`): Banko Tahminler her
+  toplantı için (yurt dışı dahil) 05:25 civarı bir "AI tahmin" yazısı
+  yayınlıyor ve gün içinde güncelliyor. Yazılar WordPress kategori
+  987'de; herkese açık REST API'den (`/wp-json/wp/v2/posts?categories=987`)
+  tek istekle günün tüm yazıları alınır, 30 dk'da bir, toplantının son
+  koşusu başlayana kadar. HTML sayfalar Cloudflare doğrulaması
+  arkasında; Browser Rendering yalnızca yedek (tur başına 2 sayfa).
+- Ayrıştırıcı `src/foreign/banko-picks.ts`: "Altılı N" başlığı ve
+  başlangıç saati, "N.KOŞU:" yorumundaki sıralı atlar (ilk at = sitenin
+  ana tercihi), "Koşu N: 1-5-8" kupon ayakları (N gerçek koşu numarası),
+  toplam kombinasyon ve tutar. `foreign_expert_pages.picks_json` (0043).
+- API: `/api/foreign` Gold ve üstünde her koşuya `aiPick {ranked,
+  selection, comment}` ve toplantıya `aiCoupons` ekler (kaynak adı
+  gösterilmez).
 
 # 71. Değer modeli ("AGF'nin hafife aldığı at")
 

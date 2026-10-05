@@ -181,7 +181,25 @@ export async function refreshHorseForms(
           const rows =
             await fetchHorseHistory(
               candidate.sourceUrl
-            );
+            ).catch(error => {
+              /*
+               * For a horse that has never raced TJK answers the
+               * worker with a short page without the results table
+               * (seen live: 7.5 KB, no title). With no recent form
+               * on today's card that is an empty history, not a
+               * failure to retry every hour.
+               */
+              if (
+                candidate.isDebut &&
+                String(error?.message ?? "").startsWith(
+                  "FORM_TABLE_NOT_FOUND"
+                )
+              ) {
+                return [];
+              }
+
+              throw error;
+            });
 
           await persistHorseHistory(
             env,

@@ -23,6 +23,14 @@ import {
 } from "../storage/state";
 
 import {
+  getBankoForeignPicks
+} from "./banko";
+
+import type {
+  BankoPicks
+} from "./banko-picks";
+
+import {
   discoverForeignMeetingLinks,
   raceDateOfForeignLink,
   type ForeignMeetingLink
@@ -51,12 +59,29 @@ export interface ForeignRunner {
   recentForm: string | null;
 }
 
+export interface ForeignAiPick {
+  /* Site's ranking for the race, top pick first. */
+  ranked: Array<{ number: number; name: string }>;
+  /* Horses on the site's altılı coupon for this race. */
+  selection: number[];
+  comment: string;
+}
+
 export interface ForeignRace {
   raceNumber: number;
   time: string | null;
   distanceMeters: number | null;
   track: string | null;
   runners: ForeignRunner[];
+  aiPick?: ForeignAiPick | null;
+}
+
+export interface ForeignAiCoupon {
+  altili: number;
+  startTime: string | null;
+  legs: Array<{ raceNumber: number; selection: number[] }>;
+  combinations: number | null;
+  amountTl: number | null;
 }
 
 export interface ForeignMeeting {
@@ -65,6 +90,7 @@ export interface ForeignMeeting {
   ydOrder: number | null;
   races: ForeignRace[];
   fetchedAt: string;
+  aiCoupons?: ForeignAiCoupon[];
 }
 
 
@@ -178,8 +204,14 @@ export async function refreshForeignMeetingsIfDue(
 
 export async function getForeignMeetings(
   env: Env,
-  raceDate: string = turkeyDate()
+  raceDate: string = turkeyDate(),
+  includeAiPicks = false
 ): Promise<ForeignMeeting[]> {
+  const picksByCity =
+    includeAiPicks
+      ? await getBankoForeignPicks(env, raceDate)
+      : new Map<string, BankoPicks>();
+
   const rows = await env.DB.prepare(`
     SELECT city, country, yd_order, program_json, fetched_at
     FROM foreign_meetings
@@ -196,12 +228,27 @@ export async function getForeignMeetings(
     } catch {
       races = [];
     }
+    const picks = picksByCity.get(row.city);
+
+    if (picks) {
+      races = races.map(race => {
+        const pick = picks.races.find(item => item.raceNumber === race.raceNumber);
+        return {
+          ...race,
+          aiPick: pick
+            ? { ranked: pick.ranked, selection: pick.selection, comment: pick.comment }
+            : null
+        };
+      });
+    }
+
     return {
       city: row.city,
       country: row.country ?? null,
       ydOrder: row.yd_order ?? null,
       races,
-      fetchedAt: row.fetched_at
+      fetchedAt: row.fetched_at,
+      ...(includeAiPicks ? { aiCoupons: picks?.coupons ?? [] } : {})
     };
   });
 }
