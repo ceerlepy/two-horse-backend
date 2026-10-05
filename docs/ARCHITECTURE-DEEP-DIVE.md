@@ -2351,6 +2351,49 @@ gerçek satın alma doğrulaması o secret'lar eklenene kadar
   `premium_monthly`) eklenen ikinci temel plan (`yearly`); ürün kimliği
   değişmediği için sunucu doğrulaması aynı kalır.
 
+## 63.3 "AI'ya sor" (Premium, günde 20 soru) — 2026-10-05
+
+`POST /api/ask` `{city, raceNumber, question, language: "tr"|"en"}`
+(oturum gerekli). Premium üye bugünkü bir koşu hakkında serbest soru
+sorar; cevabı `src/ask/service.ts` yalnızca bizim verimizden yazar.
+
+- **Bağlam**: `getToday` + değer modeli, koşudaki her at için bir satır
+  (bizim skor sırası, skor, AGF ve hareketi, HP, kilo, son form, uzman
+  kategori sayıları, değer modeli). Uzman adı veya metni, web araması
+  yok.
+- **Model**: `@cf/google/gemma-4-26b-a4b-it` (OpenAI biçimi cevap,
+  `chat_template_kwargs.enable_thinking=false`, temperature 0, en çok 350
+  çıktı tokeni). Gemma hata verir veya boş dönerse
+  `@cf/meta/llama-3.3-70b-instruct-fp8-fast` yedek olarak çağrılır
+  (`ask-ai.fallback` uyarısı loglanır). Sistem istemi: yalnızca verilen
+  veriden cevap, uydurma yok, site veya tahminci adı yok, kazanç vaadi
+  yok, 100 kelimeyi geçme, konu dışı soruyu reddet, at ve jokey adları
+  olduğu gibi.
+- **Maliyet sınırları** (`ASK_AI_CONFIG`):
+  - Kişi başı `TIER_LIMITS.askAiPerDay` (Free 0, Gold 0, Premium 20)
+    farklı soru / Türkiye günü. Aynı koşu + dil + normalize edilmiş soru
+    tekrar sorulursa hak yemez. Maliyet böylece yalnızca ödeyen üye
+    sayısıyla büyür.
+  - Soru normalize edilip (`normalizeQuestion`) istemde o haliyle
+    kullanılır, cevap `ai_response_cache`'e (36 saat) gider; aynı soruyu
+    soran başka üye ücretsiz önbellekten alır.
+  - Global emniyet sınırı: günde en çok `globalDailyAiCalls` (5.000)
+    ücretli çağrı (hata veya toplu sahte hesap ihtimaline karşı). Her
+    üyenin hakkı ayrı olduğundan tek üye bunu dolduramaz. Dolunca
+    yalnızca önbellekteki cevaplar verilir (`cachedAiRun(..., {cacheOnly:
+    true})`), yoksa `503 ASK_BUSY`.
+  - Fiyat: Gemma 4 26B giriş $0,10 / çıkış $0,30 milyon token. Bir cevap
+    ~1.200 giriş + ~250 çıkış tokeni, yani ~$0,0002 (Llama 3.3 70B ile
+    ~$0,001 olurdu).
+- **Kayıt**: `ask_ai_log` (migration 0046), satır başına `billed`
+  (önbellekten gelen 0). Başarısız cevabın ücretli çağrıları `_failed`
+  kullanıcısına yazılır: üyenin hakkını yemez ama emniyet sınırına sayılır. 30 günden eski satırlar cron'da
+  (`ask-ai-log.cleanup`) silinir, hesap silinince de silinir.
+- **Hatalar**: 401 `AUTH_REQUIRED`, 403 `TIER_UPGRADE_REQUIRED`,
+  400 `INVALID_QUESTION` (3-300 karakter), 404 `RACE_NOT_FOUND`,
+  429 `DAILY_LIMIT_REACHED {used, limit}`, 503 `ASK_BUSY` / `ASK_FAILED`.
+  Başarısız cevap hak yemez.
+
 # 64. TJK idman bilgileri ve TJK kullanıcı ajanı
 
 **Kaynak**: TJK günlük programında her koşunun "İdman Bilgileri" sekmesi

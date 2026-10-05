@@ -75,6 +75,14 @@ export async function cachedAiRun(
      */
     readCache?:
       boolean;
+
+    /*
+     * true = only look in the cache; on a miss return
+     * { raw: null, cacheHit: false } without calling the model.
+     * Used when a daily spending cap is reached.
+     */
+    cacheOnly?:
+      boolean;
   } = {}
 ): Promise<{
   raw:
@@ -134,6 +142,17 @@ export async function cachedAiRun(
     } catch {
       // Cache unavailable: fall through to a real call.
     }
+  }
+
+
+  if (options.cacheOnly) {
+    return {
+      raw:
+        null,
+
+      cacheHit:
+        false
+    };
   }
 
 
