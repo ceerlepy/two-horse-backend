@@ -81,13 +81,13 @@ export async function getHistory(
     await env.DB.prepare(`
      SELECT
        horse_number,
-       finish_position
+       finish_position,
+       model_score
      FROM learning_runner_features
      WHERE
        race_date = ?
        AND city = ?
        AND race_number = ?
-       AND finish_position IS NOT NULL
     `)
      .bind(
       snapshot.raceDate,
@@ -99,16 +99,45 @@ export async function getHistory(
 
   const finishByHorse=
    new Map<number,number>(
-    results.map(
-     (item:any)=>[
-      Number(
-       item.horse_number
-      ),
-      Number(
-       item.finish_position
-      )
-     ]
-    )
+    results
+     .filter(
+      (item:any)=>
+       item.finish_position!=null
+     )
+     .map(
+      (item:any)=>[
+       Number(
+        item.horse_number
+       ),
+       Number(
+        item.finish_position
+       )
+      ]
+     )
+   );
+
+  /*
+   * The frozen snapshot holds raw runner rows without our score, so
+   * the app used to rank by horse number. The learning snapshot
+   * stores the score the model had at the off; attach it here.
+   */
+  const scoreByHorse=
+   new Map<number,number>(
+    results
+     .filter(
+      (item:any)=>
+       item.model_score!=null
+     )
+     .map(
+      (item:any)=>[
+       Number(
+        item.horse_number
+       ),
+       Number(
+        item.model_score
+       )
+      ]
+     )
    );
 
   snapshot.runners=
@@ -125,7 +154,26 @@ export async function getHistory(
         runner.horse_number
        )
       ) ??
-      null
+      null,
+
+     modelScore:
+      runner.modelScore ??
+      (
+       scoreByHorse.has(
+        Number(
+         runner.horse_number
+        )
+       )
+        ? {
+           score:
+            scoreByHorse.get(
+             Number(
+              runner.horse_number
+             )
+            )
+          }
+        : null
+      )
     })
    );
 
