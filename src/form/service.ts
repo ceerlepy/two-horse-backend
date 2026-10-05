@@ -119,8 +119,34 @@ export async function fetchHorseHistory(
       acquired.html
     )
   ) {
+    const html =
+      acquired.html;
+
+    const title =
+      (html.match(/<title[^>]*>([^<]*)/i)?.[1] ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80);
+
+    const tableAt =
+      html.indexOf("queryTable");
+
+    const near =
+      tableAt >= 0
+        ? html
+          .slice(tableAt, tableAt + 1500)
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .slice(0, 160)
+        : "";
+
     throw new Error(
-      "FORM_TABLE_NOT_FOUND"
+      `FORM_TABLE_NOT_FOUND:${JSON.stringify({
+        bytes: html.length,
+        title,
+        hasTable: tableAt >= 0,
+        near
+      })}`
     );
   }
 
