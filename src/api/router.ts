@@ -45,6 +45,7 @@ import { TIER_LIMITS } from "../membership/tier";
 import { checkCouponAllowance, recordCouponRequest } from "../membership/coupon-allowance";
 import { getCouponHistory } from "../coupons/history";
 import { askAi } from "../ask/service";
+import { deleteMyCoupon, listMyCoupons, parseMyCouponInput, saveMyCoupon } from "../coupons/my-coupons";
 import { attachValues, loadTodayValues, refreshValueModel, valueModelStatus } from "../value-model/service";
 
 export async function route(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
@@ -403,6 +404,27 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    result.error==="DAILY_LIMIT_REACHED"?429:
    503;
   return json(result,status);
+ }
+
+ if(url.pathname==="/api/my-coupons") {
+  const session=await resolveSession(request,env);
+  if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
+  if(!TIER_LIMITS[session.tier].canGenerateCoupons) return json({ok:false,error:"TIER_UPGRADE_REQUIRED"},403);
+  if(request.method==="GET") {
+   return json({ok:true,coupons:await listMyCoupons(env,session.user.id)});
+  }
+  if(request.method==="POST") {
+   const input=parseMyCouponInput(await request.json<any>().catch(()=>null));
+   if(!input) return json({ok:false,error:"INVALID_COUPON"},400);
+   const saved=await saveMyCoupon(env,session.user.id,input);
+   return saved.ok?json(saved):json(saved,429);
+  }
+  if(request.method==="DELETE") {
+   const id=Math.floor(Number(url.searchParams.get("id")));
+   if(!Number.isFinite(id) || id<=0) return json({ok:false,error:"INVALID_COUPON"},400);
+   return json({ok:await deleteMyCoupon(env,session.user.id,id)});
+  }
+  return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
  }
 
  if(url.pathname==="/api/coupons/history") {

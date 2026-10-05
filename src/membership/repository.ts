@@ -475,6 +475,12 @@ export async function deleteUserAccount(
     ),
 
     env.DB.prepare(
+      `DELETE FROM my_coupons WHERE user_id = ?`
+    ).bind(
+      user.id
+    ),
+
+    env.DB.prepare(
       `DELETE FROM users WHERE id = ?`
     ).bind(
       user.id

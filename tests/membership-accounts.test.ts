@@ -29,7 +29,8 @@ function testEnv(): any {
       "migrations/0029_membership.sql",
       "migrations/0042_membership_signup.sql",
       "migrations/0045_coupon_allowance.sql",
-      "migrations/0046_ask_ai.sql"
+      "migrations/0046_ask_ai.sql",
+      "migrations/0047_my_coupons.sql"
     ]),
     SESSION_JWT_SECRET: "test-only-session-secret-not-real"
   };

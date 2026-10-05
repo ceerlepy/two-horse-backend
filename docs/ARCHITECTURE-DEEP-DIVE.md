@@ -2394,6 +2394,26 @@ sorar; cevabı `src/ask/service.ts` yalnızca bizim verimizden yazar.
   429 `DAILY_LIMIT_REACHED {used, limit}`, 503 `ASK_BUSY` / `ASK_FAILED`.
   Başarısız cevap hak yemez.
 
+## 63.4 "Kuponlarım" (Gold ve Premium) — 2026-10-05
+
+Model kuponlarının toplu karnesi (`/api/coupons/history`) uygulamada
+şimdilik gizli. Bunun yerine üye, kupon ekranında oluşturduğu kuponu
+kaydeder ve yalnızca kendi kaydettiklerini sonuçlarıyla görür
+(`src/coupons/my-coupons.ts`, tablo `my_coupons`, migration 0047).
+
+- `GET /api/my-coupons`: son 30 günün kayıtları. Tutan ayak sayısı her
+  okumada `learning_races` / `learning_runner_features` kazananlarından
+  hesaplanır (kupon değerlendirmesiyle aynı kaynak). Bütün ayaklar
+  sonuçlanana kadar `evaluated=false`; her ayağın kazananı `winner`
+  alanında gelir.
+- `POST /api/my-coupons` `{city, pool, windowNumber, budgetTl, totalTl,
+  combinations, legs:[{raceNumber, horseNumbers}]}`. Tarih sunucuda
+  Türkiye günüdür. Aynı kupon iki kez kaydedilmez. Günde en çok 50
+  kayıt (tabloyu korumak için, ürün sınırı değil).
+- `DELETE /api/my-coupons?id=`: yalnızca üyenin kendi satırı.
+- Erişim `TIER_LIMITS.canGenerateCoupons` (Gold, Premium). Satırlar 35
+  gün tutulur (cron `my-coupons.cleanup`), hesap silinince silinir.
+
 # 64. TJK idman bilgileri ve TJK kullanıcı ajanı
 
 **Kaynak**: TJK günlük programında her koşunun "İdman Bilgileri" sekmesi
