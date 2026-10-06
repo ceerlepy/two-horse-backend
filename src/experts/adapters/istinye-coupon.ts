@@ -2,8 +2,7 @@ import * as cheerio from "cheerio";
 
 import type {
   RawExpertExtraction,
-  RawExpertRace,
-  RawExpertSelection
+  RawExpertRace
 } from "../raw-extraction";
 
 import {
@@ -17,30 +16,25 @@ import {
 
 /*
  * İstinye Ganyan's "tahminler" page carries one long post per city
- * ("06 EKİM SALI ADANA ALTILI GANYAN TAHMİNLERİ"), each holding
- * several in-house tipsters' prose plus their Altılı coupons:
+ * ("06 EKİM SALI ADANA ALTILI GANYAN TAHMİNLERİ"). Sending the whole
+ * page (two cities, ~50k characters) to Workers AI timed out (3046),
+ * so the post is read directly.
  *
- *   1. Altılı Ganyan
- *   1. Koşu: 1-3-9
- *   ...
- *   2. Altılı Ganyan
- *   3. Koşu: 1-3-6-9
+ * Coupon legs are NOT read: a coupon does not say which horse a
+ * tipster prefers. The only explicit choice the post makes per race
+ * is its named win bet, in one of two layouts seen live:
  *
- * Sending the whole page (two cities, ~50k characters) to Workers
- * AI timed out (3046), so the post is read directly instead.
+ *   1. Koşu
+ *   Sabit Ganyan: 4 numaralı KURT BAKIŞLI
  *
- * A horse that only sits in a multi-horse coupon leg is NOT a pick
- * (project rule: a coupon does not say which horse the tipster
- * prefers). Explicit choices only:
- *   - a horse a tipster wrote ALONE in a leg (a "tek"). Coupon lines
- *     use official race numbers; each tipster counts once per race.
- *     A horse at least half the tipsters covering the race wrote
- *     alone is the source's banko.
- *   - otherwise the post's named win bet ("Sabit Ganyan: 4 numaralı
- *     ..." or a "Sabit Bahis" list "1. Koşu: 8 SEVDE RAIDERS") is
- *     its favourite;
- *   - otherwise the horse with the most tek votes (no tie).
- * One pick per race.
+ *   Sabit Bahis (Kazanır / Ganyan Bahsi)
+ *   Günün birincilik için en sağlam adayları:
+ *   1. Koşu: 8 SEVDE RAIDERS (...)
+ *
+ * Each becomes the source's favourite for that race, carrying the
+ * horse's name so the extractor can reject any row whose number and
+ * name disagree with the TJK program. Anything else on the page is
+ * ignored; a post in another layout simply yields no picks.
  */
 
 const MONTHS = [
@@ -111,103 +105,24 @@ export function istinyeTitleMatches(
 
 
 /*
- * Every tipster's coupon as race -> horse numbers. A "1. Altılı
- * Ganyan" line opens a new tipster; "2. Altılı Ganyan" continues it.
+ * "8 SEVDE RAIDERS (Good Curry yavrusu ...) 🥇" -> "SEVDE RAIDERS".
  */
-export function istinyeTipsterCoupons(
-  text:string
-):Array<Map<number,number[]>> {
-  const tipsters:
-    Array<Map<number,number[]>> = [];
-
-  let current:
-    Map<number,number[]> | null =
-    null;
-
-  let inCoupon =
-    false;
-
-  for (
-    const rawLine of
-    text.split("\n")
-  ) {
-    const line =
-      rawLine.trim();
-
-    if (!line) {
-      continue;
-    }
-
-    const heading =
-      /^(\d)\s*\.\s*Altılı\s+Ganyan$/iu.exec(
-        line
-      );
-
-    if (heading) {
-      if (
-        Number(heading[1]) === 1 ||
-        !current
-      ) {
-        current = new Map();
-        tipsters.push(current);
-      }
-
-      inCoupon = true;
-      continue;
-    }
-
-    const leg =
-      inCoupon
-        ? /^(\d{1,2})\s*\.\s*Koşu\s*:\s*([\d\s,\-–.]+)$/iu.exec(
-            line
-          )
-        : null;
-
-    if (
-      !leg ||
-      !current
-    ) {
-      inCoupon = false;
-      continue;
-    }
-
-    const horses =
-      (
-        leg[2].match(/\d{1,2}/g) ??
-        []
-      )
-        .map(Number)
-        .filter(
-          number =>
-            number > 0 &&
-            number <= 30
-        );
-
-    if (horses.length) {
-      current.set(
-        Number(leg[1]),
-        [...new Set(horses)]
-      );
-    }
-  }
-
-  return tipsters.filter(
-    tipster =>
-      tipster.size > 0
-  );
+function horseName(
+  value:string
+):string {
+  return value
+    .split(/[(,]/u)[0]
+    .replace(/[^\p{L}\p{N}' .]/gu,"")
+    .replace(/\s+/g," ")
+    .trim();
 }
 
 
-/*
- * Named win bets, race -> horse number. Two layouts seen live:
- *   "1. Koşu" / "Sabit Ganyan: 4 numaralı KURT BAKIŞLI"
- *   "Sabit Bahis (Kazanır / Ganyan Bahsi)" / "1. Koşu: 8 SEVDE RAIDERS"
- */
 export function istinyeWinBets(
   text:string
-):Map<number,number> {
+):Map<number,{ horseNumber:number; horseName:string }> {
   const bets =
-    new Map<number,number>();
+    new Map<number,{ horseNumber:number; horseName:string }>();
 
   const lines =
     text
@@ -223,27 +138,6 @@ export function istinyeWinBets(
     false;
 
   for (const line of lines) {
-    const sabitGanyan =
-      /^Sabit\s+Ganyan\s*:\s*(\d{1,2})\s*numaralı/iu.exec(
-        line
-      );
-
-    if (
-      sabitGanyan &&
-      raceHeading !== null
-    ) {
-      bets.set(
-        raceHeading,
-        Number(sabitGanyan[1])
-      );
-    }
-
-    if (/^Sabit\s+Bahis\b/iu.test(line)) {
-      inList = true;
-      raceHeading = null;
-      continue;
-    }
-
     const heading =
       /^(\d{1,2})\s*\.\s*Koşu$/iu.exec(line);
 
@@ -253,163 +147,53 @@ export function istinyeWinBets(
       continue;
     }
 
-    if (inList) {
-      const item =
-        /^(\d{1,2})\s*\.\s*Koşu\s*:\s*(\d{1,2})\s+\p{L}/u.exec(
-          line
-        );
+    const sabitGanyan =
+      /^Sabit\s+Ganyan\s*:\s*(\d{1,2})\s*numaralı\s+(.+)$/iu.exec(
+        line
+      );
 
-      if (item) {
-        bets.set(
-          Number(item[1]),
-          Number(item[2])
-        );
-        continue;
-      }
-
-      /*
-       * An intro line ("Günün birincilik için en sağlam
-       * adayları:") sits between the header and the list.
-       */
-      if (/:$/u.test(line)) {
-        continue;
-      }
-
-      inList = false;
+    if (
+      sabitGanyan &&
+      raceHeading !== null
+    ) {
+      bets.set(raceHeading, {
+        horseNumber:Number(sabitGanyan[1]),
+        horseName:horseName(sabitGanyan[2])
+      });
     }
 
-    if (!sabitGanyan) {
-      raceHeading = null;
+    raceHeading = null;
+
+    if (/^Sabit\s+Bahis\b/iu.test(line)) {
+      inList = true;
+      continue;
+    }
+
+    if (!inList) {
+      continue;
+    }
+
+    const item =
+      /^(\d{1,2})\s*\.\s*Koşu\s*:\s*(\d{1,2})\s+(\p{L}.*)$/u.exec(
+        line
+      );
+
+    if (item) {
+      bets.set(Number(item[1]), {
+        horseNumber:Number(item[2]),
+        horseName:horseName(item[3])
+      });
+
+    /*
+     * An intro line ("... en sağlam adayları:") may sit between
+     * the header and the list; anything else ends the list.
+     */
+    } else if (!/:$/u.test(line)) {
+      inList = false;
     }
   }
 
   return bets;
-}
-
-
-export function istinyeExplicitRaces(
-  city:string,
-  tipsters:Array<Map<number,number[]>>,
-  winBets:Map<number,number> = new Map()
-):RawExpertRace[] {
-  const raceNumbers =
-    [
-      ...new Set([
-        ...tipsters.flatMap(
-          tipster =>
-            [...tipster.keys()]
-        ),
-        ...winBets.keys()
-      ])
-    ].sort(
-      (a,b) => a-b
-    );
-
-  const races:
-    RawExpertRace[] = [];
-
-  for (const raceNumber of raceNumbers) {
-    const legs =
-      tipsters
-        .map(
-          tipster =>
-            tipster.get(raceNumber)
-        )
-        .filter(
-          (leg):leg is number[] =>
-            Boolean(leg?.length)
-        );
-
-    const tek =
-      new Map<number,number>();
-
-    for (const leg of legs) {
-      if (leg.length === 1) {
-        tek.set(
-          leg[0],
-          (tek.get(leg[0]) ?? 0) + 1
-        );
-      }
-    }
-
-    const ranked =
-      [...tek.entries()]
-        .sort(
-          (a,b) => b[1] - a[1]
-        );
-
-    const tekLeader =
-      ranked.length &&
-      (
-        ranked.length === 1 ||
-        ranked[1][1] < ranked[0][1]
-      )
-        ? ranked[0]
-        : null;
-
-    /*
-     * A tek written by at least half the tipsters is the source's
-     * banko. Otherwise the post's own named win bet speaks for the
-     * whole source; a lone tipster's tek is the last resort.
-     */
-    const bankoLeader =
-      tekLeader &&
-      legs.length >= 2 &&
-      tekLeader[1] * 2 >= legs.length
-        ? tekLeader
-        : null;
-
-    let selection:
-      RawExpertSelection | null =
-      null;
-
-    if (bankoLeader) {
-      selection = {
-        horseNumber:
-          bankoLeader[0],
-
-        comment:
-          `${bankoLeader[1]}/${legs.length} yorumcu tek yazdı`,
-
-        labels:["banko"]
-      };
-
-    } else if (winBets.has(raceNumber)) {
-      selection = {
-        horseNumber:
-          winBets.get(raceNumber)!,
-
-        comment:
-          "Sabit ganyan",
-
-        labels:["favorite"]
-      };
-
-    } else if (tekLeader) {
-      selection = {
-        horseNumber:
-          tekLeader[0],
-
-        comment:
-          `${tekLeader[1]}/${legs.length} yorumcu tek yazdı`,
-
-        labels:["favorite"]
-      };
-    }
-
-    if (!selection) {
-      continue;
-    }
-
-    races.push({
-      city,
-      raceNumber,
-      selections:[selection],
-      numberGroups:[]
-    });
-  }
-
-  return races;
 }
 
 
@@ -422,7 +206,7 @@ export function parseIstinyeCoupons(
   matchedPosts:Array<{
     city:string;
     title:string;
-    tipsters:number;
+    winBets:number;
   }>;
 } {
   const $ =
@@ -474,7 +258,7 @@ export function parseIstinyeCoupons(
     Array<{
       city:string;
       title:string;
-      tipsters:number;
+      winBets:number;
     }> = [];
 
   for (const city of cities) {
@@ -492,25 +276,45 @@ export function parseIstinyeCoupons(
       continue;
     }
 
-    const text =
-      postText($, post.node);
-
-    const tipsters =
-      istinyeTipsterCoupons(text);
+    const bets =
+      istinyeWinBets(
+        postText($, post.node)
+      );
 
     matchedPosts.push({
       city,
       title:post.title,
-      tipsters:tipsters.length
+      winBets:bets.size
     });
 
-    races.push(
-      ...istinyeExplicitRaces(
-        city,
-        tipsters,
-        istinyeWinBets(text)
+    for (
+      const [raceNumber, bet] of
+      [...bets.entries()].sort(
+        (a,b) => a[0] - b[0]
       )
-    );
+    ) {
+      races.push({
+        city,
+        raceNumber,
+
+        selections:[
+          {
+            horseNumber:
+              bet.horseNumber,
+
+            horseName:
+              bet.horseName,
+
+            comment:
+              "Sabit ganyan",
+
+            labels:["favorite"]
+          }
+        ],
+
+        numberGroups:[]
+      });
+    }
   }
 
   return {

@@ -173,10 +173,6 @@ export function parseHorseturkCoupon(
         legNumber -
         1;
 
-      if (main.length !== 1) {
-        continue;
-      }
-
       const race =
         races.get(raceNumber) ?? {
           city,
@@ -188,15 +184,27 @@ export function parseHorseturkCoupon(
       const name =
         mainPart
           .replace(/^\s*\d{1,2}\s*/,"")
-          .replace(/\b(?:banko|tek)\b.*$/iu,"")
+          .replace(/\s+(?:banko|tek)(?:\s.*)?$/iu,"")
           .trim();
+
+      /*
+       * Only a leg with ONE horse written WITH its name is an
+       * explicit choice; the name lets the extractor reject the row
+       * if it does not match that race's TJK runner.
+       */
+      if (
+        main.length !== 1 ||
+        !/\p{L}{2}/u.test(name)
+      ) {
+        continue;
+      }
 
       race.selections.push({
         horseNumber:
           main[0],
 
         horseName:
-          name || null,
+          name,
 
         comment:
           "Kupon tek",

@@ -92,6 +92,10 @@ import type {
   CanonicalExpertRunner
 } from "./validator";
 
+import {
+  normalizeExpertHorseName
+} from "./validator";
+
 
 export type ExpertAcquiredDocument =
   Awaited<
@@ -768,6 +772,101 @@ export async function acquireExpertDocument(
 }
 
 
+/*
+ * Keeps a parsed selection only when its city + race + number is a
+ * real runner whose name matches the name the source wrote.
+ */
+export function keepNameVerifiedSelections(
+  raw:RawExpertExtraction,
+  runners:Array<{
+    city:string;
+    raceNumber:number;
+    horseNumber:number;
+    horseName:string;
+  }>
+):{
+  raw:RawExpertExtraction;
+  rejected:Array<{
+    city:string;
+    raceNumber:number;
+    horseNumber:number;
+    horseName:string | null;
+  }>;
+} {
+  const names =
+    new Map(
+      runners.map(
+        runner => [
+          [
+            normalizeExpertSearchText(runner.city),
+            runner.raceNumber,
+            runner.horseNumber
+          ].join("|"),
+          normalizeExpertHorseName(runner.horseName)
+        ]
+      )
+    );
+
+  const rejected:
+    Array<{
+      city:string;
+      raceNumber:number;
+      horseNumber:number;
+      horseName:string | null;
+    }> = [];
+
+  const races =
+    raw.races.map(
+      race => ({
+        ...race,
+
+        numberGroups:[],
+
+        selections:
+          race.selections.filter(
+            selection => {
+              const expected =
+                names.get(
+                  [
+                    normalizeExpertSearchText(race.city),
+                    race.raceNumber,
+                    selection.horseNumber
+                  ].join("|")
+                );
+
+              const ok =
+                Boolean(expected) &&
+                Boolean(selection.horseName) &&
+                normalizeExpertHorseName(
+                  String(selection.horseName)
+                ) === expected;
+
+              if (!ok) {
+                rejected.push({
+                  city:race.city,
+                  raceNumber:race.raceNumber,
+                  horseNumber:selection.horseNumber,
+                  horseName:selection.horseName ?? null
+                });
+              }
+
+              return ok;
+            }
+          )
+      })
+    )
+      .filter(
+        race =>
+          race.selections.length > 0
+      );
+
+  return {
+    raw:{ races },
+    rejected
+  };
+}
+
+
 function finalizeExtraction(
   raw:
     RawExpertExtraction,
@@ -1122,94 +1221,88 @@ export async function extractExperts(
 
 
   /*
-   * Coupon sources are read straight from their own pages. Only
-   * explicit choices count (a horse written alone in a leg, or a
-   * named win pick); horses that merely sit in a multi-horse leg are
-   * never picks. Workers AI stays the fallback only when the page
-   * shape is not recognised.
+   * HorseTurk and İstinye are read straight from their own pages,
+   * explicit choices only (see each parser). Every row carries the
+   * horse's name and is kept only when number AND name match that
+   * race's TJK runner, so a misread layout drops rows instead of
+   * landing on the wrong horse.
    */
-  if (
-    sourceKey ===
-      "horseturk"
-  ) {
-    const raw: RawExpertExtraction = {
-      races:
-        targetCities.flatMap(
-          city =>
-            parseHorseturkCoupon(
-              document.acquired.html,
-              city,
-              effectiveSixfoldStarts
-            ).races
-        )
-    };
-
-    /*
-     * A recognised coupon with no single-horse leg is a valid
-     * "no explicit pick" answer, not a reason to spend Workers AI.
-     */
-    if (
-      raw.races.length ||
-      /\d\s*\.\s*AYAK\s*:/iu.test(
-        document.acquired.html
-      )
-    ) {
-      return finalizeExtraction(
-        raw,
-        `${document.stage}-deterministic-coupon`,
-        {
-          acquisition:{
-            stage:
-              document.stage,
-
-            bodyLength:
-              document.acquired
-                .bodyLength
-          }
+  const ownParser =
+    sourceKey === "horseturk" &&
+    /\d\s*\.\s*AYAK\s*:/iu.test(
+      document.acquired.html
+    )
+      ? {
+          races:
+            targetCities.flatMap(
+              city =>
+                parseHorseturkCoupon(
+                  document.acquired.html,
+                  city,
+                  effectiveSixfoldStarts
+                ).races
+            )
         }
+
+      /*
+       * Never hand İstinye's whole multi-city page to Workers AI:
+       * that is what timed out.
+       */
+      : sourceKey === "istinye_ganyan"
+        ? parseIstinyeCoupons(
+            document.acquired.html,
+            raceDate,
+            targetCities
+          ).extraction
+        : null;
+
+
+  if (ownParser) {
+    const runners =
+      canonical
+        ? canonical.runners
+        : (
+            (
+              await env.DB.prepare(`
+                SELECT city, race_number, horse_number, horse_name
+                FROM runners
+                WHERE race_date = ?
+              `)
+                .bind(raceDate)
+                .all<any>()
+            ).results ?? []
+          ).map(
+            row => ({
+              city:String(row.city),
+              raceNumber:Number(row.race_number),
+              horseNumber:Number(row.horse_number),
+              horseName:String(row.horse_name)
+            })
+          );
+
+    const verified =
+      keepNameVerifiedSelections(
+        ownParser,
+        runners
       );
-    }
-  }
 
+    return finalizeExtraction(
+      verified.raw,
+      `${document.stage}-deterministic-explicit`,
+      {
+        acquisition:{
+          stage:
+            document.stage,
 
-  if (
-    sourceKey ===
-      "istinye_ganyan"
-  ) {
-    const parsed =
-      parseIstinyeCoupons(
-        document.acquired.html,
-        raceDate,
-        targetCities
-      );
+          bodyLength:
+            document.acquired
+              .bodyLength
+        },
 
-    /*
-     * A page whose posts are all for another date (or another
-     * city) holds nothing for this card. Never hand the whole
-     * multi-city page to Workers AI: that is what timed out.
-     */
-    if (
-      parsed.extraction.races.length ||
-      !parsed.matchedPosts.length
-    ) {
-      return finalizeExtraction(
-        parsed.extraction,
-        `${document.stage}-deterministic-coupon`,
-        {
-          acquisition:{
-            stage:
-              document.stage,
-
-            bodyLength:
-              document.acquired
-                .bodyLength
-          },
-
-          istinyePosts:
-            parsed.matchedPosts
-        }
-      );
-    }
+        rejectedRows:
+          verified.rejected
+      }
+    );
   }
 
 
