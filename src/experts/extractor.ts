@@ -77,6 +77,14 @@ import {
 
 
 import {
+  parseHorseturkCoupon
+} from "./adapters/horseturk-coupon";
+
+import {
+  parseIstinyeCoupons
+} from "./adapters/istinye-coupon";
+
+import {
   parsePuanliBulten
 } from "./adapters/puanli-altili-bulten";
 
@@ -1109,6 +1117,87 @@ export async function extractExperts(
         sixfoldNumber:1,
         raceNumber
       });
+    }
+  }
+
+
+  /*
+   * Coupon-only sources are read straight from their own leg
+   * lists (see the parsers for the label rules); Workers AI stays
+   * the fallback only when the page shape is not recognised.
+   */
+  if (
+    sourceKey ===
+      "horseturk"
+  ) {
+    const raw: RawExpertExtraction = {
+      races:
+        targetCities.flatMap(
+          city =>
+            parseHorseturkCoupon(
+              document.acquired.html,
+              city,
+              effectiveSixfoldStarts
+            ).races
+        )
+    };
+
+    if (raw.races.length) {
+      return finalizeExtraction(
+        raw,
+        `${document.stage}-deterministic-coupon`,
+        {
+          acquisition:{
+            stage:
+              document.stage,
+
+            bodyLength:
+              document.acquired
+                .bodyLength
+          }
+        }
+      );
+    }
+  }
+
+
+  if (
+    sourceKey ===
+      "istinye_ganyan"
+  ) {
+    const parsed =
+      parseIstinyeCoupons(
+        document.acquired.html,
+        raceDate,
+        targetCities
+      );
+
+    /*
+     * A page whose posts are all for another date (or another
+     * city) holds nothing for this card. Never hand the whole
+     * multi-city page to Workers AI: that is what timed out.
+     */
+    if (
+      parsed.extraction.races.length ||
+      !parsed.matchedPosts.length
+    ) {
+      return finalizeExtraction(
+        parsed.extraction,
+        `${document.stage}-deterministic-coupon`,
+        {
+          acquisition:{
+            stage:
+              document.stage,
+
+            bodyLength:
+              document.acquired
+                .bodyLength
+          },
+
+          istinyePosts:
+            parsed.matchedPosts
+        }
+      );
     }
   }
 
