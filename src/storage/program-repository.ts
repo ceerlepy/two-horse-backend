@@ -811,12 +811,30 @@ export async function getToday(env: Env): Promise<any> {
                 uncertainty
               );
 
+            /*
+             * Distinct expert sources with any pick in this race, so the
+             * app can show "1 of 4 experts" instead of shares counted
+             * only among the experts who named a given horse.
+             */
+            const expertSourceCount =
+              new Set(
+                assembledRunners.flatMap(
+                  (runner:any) =>
+                    (runner.expertPredictions ?? []).map(
+                      (prediction:any) =>
+                        prediction.source_key
+                    )
+                )
+              ).size;
+
             return {
               ...race,
 
               uncertainty,
 
               couponStrategy,
+
+              expertSourceCount,
 
               runners:
                 scoredRunners
