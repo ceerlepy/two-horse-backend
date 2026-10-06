@@ -169,7 +169,8 @@ const RACE_PREMIUM_SIGNAL_KEYS =
   [
     "uncertainty",
     "couponStrategy",
-    "valueModelStatus"
+    "valueModelStatus",
+    "expertSourceCount"
   ] as const;
 
 export function stripPremiumRunnerSignals(

@@ -284,6 +284,12 @@ export function toCompactRace(
     race?.valueModelStatus
   );
 
+  assign(
+    out,
+    "expertSourceCount",
+    race?.expertSourceCount
+  );
+
   out.runners =
     (race?.runners ?? []).map(
       toCompactRunner
