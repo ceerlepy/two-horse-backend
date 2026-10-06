@@ -18,6 +18,10 @@ import {
   mapRawExpertExtraction
 } from "../src/experts/raw-extraction";
 
+import {
+  keepNameVerifiedSelections
+} from "../src/experts/extractor";
+
 
 /* Shape of the live 06.10.2026 HorseTurk Adana article (trimmed). */
 const HORSETURK = `
@@ -60,12 +64,14 @@ describe("parseHorseturkCoupon", () => {
     expect(picks).toHaveLength(2);
   });
 
-  it("reads a single horse with backups as a favourite and ignores the backups", () => {
-    const html = `<article><h3>HorseTurk Altılı Ganyan Tahmin</h3><p>1.AYAK: 6-7//1<br/>2.AYAK: 7//6</p></article>`;
+  it("reads a named single horse with backups as a favourite and drops nameless legs", () => {
+    const html = `<article><h3>HorseTurk Altılı Ganyan Tahmin</h3><p>1.AYAK: 7//6<br/>2.AYAK: 3 TEKİN YILDIZ//6<br/>3.AYAK: 5 SECRET STORM banko</p></article>`;
     const picks = mapRawExpertExtraction(parseHorseturkCoupon(html, "Adana", STARTS)).picks;
 
-    expect(picks).toHaveLength(1);
-    expect(picks[0]).toMatchObject({ raceNumber:2, horseNumber:7, isFavorite:true, isBanko:false });
+    expect(picks).toEqual([
+      expect.objectContaining({ raceNumber:2, horseNumber:3, horseName:"TEKİN YILDIZ", isFavorite:true, isBanko:false }),
+      expect.objectContaining({ raceNumber:3, horseNumber:5, horseName:"SECRET STORM", isBanko:true })
+    ]);
   });
 
   it("returns nothing when the Altılı start race is unknown", () => {
@@ -118,51 +124,49 @@ describe("parseIstinyeCoupons", () => {
     expect(istinyeTitleMatches("BURSA ANALİZİ ALTILI GANYAN TAHMİNİ","2026-10-06","Bursa")).toBe(false);
   });
 
-  it("keeps only horses a tipster wrote alone, plus the named win bet", () => {
+  it("keeps only the post's named win bets, never coupon legs", () => {
     const parsed = parseIstinyeCoupons(ISTINYE, "2026-10-06", ["Adana","Kocaeli"]);
-
-    expect(parsed.matchedPosts).toEqual([
-      { city:"Adana", title:"06 EKİM SALI ADANA ALTILI GANYAN TAHMİNLERİ", tipsters:3 },
-      { city:"Kocaeli", title:"06 EKİM SALI KOCAELİ ALTILI GANYAN TAHMİNLERİ", tipsters:2 }
-    ]);
-
     const picks = mapRawExpertExtraction(parsed.extraction).picks;
-    const inRace = (city:string, race:number) =>
-      picks.filter(value => value.city === city && value.raceNumber === race);
 
-    // Adana R1: 1 and 7 are each one tipster's tek -> tie, so the named win bet (4) decides.
-    expect(inRace("Adana",1)).toEqual([expect.objectContaining({ horseNumber:4, isFavorite:true })]);
-    // Adana R2: nobody wrote a tek and there is no win bet -> no pick.
-    expect(inRace("Adana",2)).toEqual([]);
-    // Adana R5: 9 is the only tek (1 of 3) -> favourite, not banko.
-    expect(inRace("Adana",5)).toEqual([expect.objectContaining({ horseNumber:9, isFavorite:true, isBanko:false })]);
-    // Kocaeli R2: 4 is a tek for one of the two tipsters -> banko.
-    expect(inRace("Kocaeli",2)).toEqual([expect.objectContaining({ horseNumber:4, isBanko:true })]);
-    // Exactly one pick per covered race.
-    expect(new Set(picks.map(value => `${value.city}${value.raceNumber}`)).size).toBe(picks.length);
-    // Nothing from the undated Bursa post.
-    expect(picks.some(value => value.city === "Bursa")).toBe(false);
+    expect(picks).toEqual([
+      expect.objectContaining({ city:"Adana", raceNumber:1, horseNumber:4, horseName:"KURT BAKIŞLI", isFavorite:true }),
+      expect.objectContaining({ city:"Kocaeli", raceNumber:2, horseNumber:1, horseName:"PUYOL", isFavorite:true })
+    ]);
   });
 
-  it("reads the Sabit Bahis list layout", () => {
-    expect([...istinyeWinBets("Sabit Bahis (Kazanır / Ganyan Bahsi)\nGünün birincilik için en sağlam adayları:\n1. Koşu: 8 SEVDE RAIDERS (not)\n4. Koşu: 3 KAYALARIN ŞAHI\nİkili\n6. Koşu: 4 KARA BERELİ").entries()])
-      .toEqual([[1,8],[4,3]]);
-  });
-
-  it("marks a horse written alone by most tipsters as banko", () => {
-    const html = istinyePost("06 EKİM SALI ADANA ALTILI GANYAN TAHMİNLERİ", [
-      coupon(["1. Altılı Ganyan","5. Koşu: 9"]),
-      coupon(["1. Altılı Ganyan","5. Koşu: 9"]),
-      coupon(["1. Altılı Ganyan","5. Koşu: 4-9"])
-    ].join("\n"));
-    const picks = mapRawExpertExtraction(parseIstinyeCoupons(html, "2026-10-06", ["Adana"]).extraction).picks;
-
-    expect(picks.find(value => value.horseNumber === 9)?.isBanko).toBe(true);
+  it("reads the Sabit Bahis list layout, skipping an intro line", () => {
+    expect([...istinyeWinBets("Sabit Bahis (Kazanır / Ganyan Bahsi) 🥇\nGünün birincilik için en sağlam adayları:\n1. Koşu: 8 SEVDE RAIDERS (Good Curry yavrusu)\n4. Koşu: 3 KAYALARIN ŞAHI\nİkili\n6. Koşu: 4 KARA BERELİ").entries()])
+      .toEqual([[1,{ horseNumber:8, horseName:"SEVDE RAIDERS" }],[4,{ horseNumber:3, horseName:"KAYALARIN ŞAHI" }]]);
   });
 
   it("finds nothing for a page dated another day", () => {
     const parsed = parseIstinyeCoupons(ISTINYE, "2026-10-07", ["Adana","Kocaeli"]);
     expect(parsed.matchedPosts).toEqual([]);
     expect(parsed.extraction.races).toEqual([]);
+  });
+});
+
+
+describe("keepNameVerifiedSelections", () => {
+  it("drops rows whose number and name disagree with the TJK program", () => {
+    const runners = [
+      { city:"Adana", raceNumber:5, horseNumber:9, horseName:"BEST OF ANADOLU" },
+      { city:"Adana", raceNumber:5, horseNumber:4, horseName:"EL INTOCABLE" }
+    ];
+    const result = keepNameVerifiedSelections({
+      races:[{
+        city:"Adana",
+        raceNumber:5,
+        numberGroups:[],
+        selections:[
+          { horseNumber:9, horseName:"Best Of Anadolu", labels:["banko"] },
+          { horseNumber:4, horseName:"BEST OF ANADOLU", labels:["favorite"] },
+          { horseNumber:12, horseName:"GHOST", labels:["favorite"] }
+        ]
+      }]
+    }, runners);
+
+    expect(result.raw.races[0].selections.map(value => value.horseNumber)).toEqual([9]);
+    expect(result.rejected.map(value => value.horseNumber)).toEqual([4,12]);
   });
 });
