@@ -59,6 +59,10 @@ export interface PublicUser {
   tierSource: string;
   trialEndsAt: string | null;
   subscriptionExpiresAt: string | null;
+  /* false after the member cancels in Google Play (runs to expiry). */
+  subscriptionAutoRenew: boolean | null;
+  /* Plan a scheduled switch moves to at the next renewal. */
+  subscriptionPendingTier: MembershipTier | null;
 }
 
 export function toPublicUser(
@@ -77,13 +81,25 @@ export function toPublicUser(
     tierSource: user.tierSource,
     trialEndsAt: user.trialEndsAt,
     subscriptionExpiresAt:
-      user.subscriptionExpiresAt
+      user.subscriptionExpiresAt,
+    subscriptionAutoRenew:
+      user.subscriptionAutoRenew,
+    subscriptionPendingTier:
+      user.subscriptionPendingProductId
+        ? PRODUCT_TIER_MAP[
+            user.subscriptionPendingProductId
+          ] ?? null
+        : null
   };
 }
 
 export async function resolveSession(
   request: Request,
-  env: Env
+  env: Env,
+  options: {
+    /* The membership screen asks for fresh state after Google Play. */
+    refreshSubscription?: boolean;
+  } = {}
 ): Promise<AuthContext | null> {
   const token =
     bearerToken(
@@ -117,6 +133,12 @@ export async function resolveSession(
   if (
     shouldRecheckSubscription(
       user
+    ) ||
+    (
+      options.refreshSubscription &&
+      shouldRefreshSubscription(
+        user
+      )
     )
   ) {
     user =
@@ -177,6 +199,37 @@ function shouldRecheckSubscription(
   );
 }
 
+const SUBSCRIPTION_REFRESH_INTERVAL_MS =
+  60 * 1000;
+
+/*
+ * On request (membership screen opened or resumed) re-ask Google so
+ * a cancel or plan switch made in Google Play shows within a minute,
+ * not only after the stored expiry.
+ */
+function shouldRefreshSubscription(
+  user: UserRecord,
+  now: Date = new Date()
+): boolean {
+  if (
+    user.tierSource !==
+      "play_subscription"
+  ) {
+    return false;
+  }
+
+  const updatedAt =
+    Date.parse(
+      user.updatedAt
+    );
+
+  return !(
+    updatedAt >
+      now.getTime() -
+        SUBSCRIPTION_REFRESH_INTERVAL_MS
+  );
+}
+
 async function recheckSubscription(
   env: Env,
   user: UserRecord
@@ -219,7 +272,11 @@ async function recheckSubscription(
               purchase.rawStatus,
             expiryTimeMillis:
               purchase.expiryTimeMillis,
-            tier
+            tier,
+            autoRenewEnabled:
+              purchase.autoRenewEnabled,
+            pendingProductId:
+              purchase.pendingProductId
           }
         );
 
@@ -488,12 +545,28 @@ export async function verifyPurchaseAndUpgrade(
       purchaseToken
     );
 
+  /*
+   * A deferred Premium -> Gold switch returns a Gold token whose
+   * current entitlement is still Premium until the renewal, so the
+   * requested product may be the pending one.
+   */
   if (
-    purchase.productId !==
-    productId
+    purchase.productId !== productId &&
+    purchase.pendingProductId !== productId
   ) {
     throw new Error(
       "PURCHASE_PRODUCT_MISMATCH"
+    );
+  }
+
+  const entitledTier =
+    PRODUCT_TIER_MAP[
+      purchase.productId
+    ];
+
+  if (!entitledTier) {
+    throw new Error(
+      "UNKNOWN_PRODUCT_ID"
     );
   }
 
@@ -534,7 +607,8 @@ export async function verifyPurchaseAndUpgrade(
     env,
     {
       userId,
-      productId,
+      productId:
+        purchase.productId,
       purchaseToken,
       orderId:
         purchase.orderId,
@@ -542,7 +616,12 @@ export async function verifyPurchaseAndUpgrade(
         purchase.rawStatus,
       expiryTimeMillis:
         purchase.expiryTimeMillis,
-      tier
+      tier:
+        entitledTier,
+      autoRenewEnabled:
+        purchase.autoRenewEnabled,
+      pendingProductId:
+        purchase.pendingProductId
     }
   );
 

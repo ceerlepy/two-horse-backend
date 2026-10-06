@@ -122,7 +122,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  }
 
  if(url.pathname==="/api/auth/me" && request.method==="GET") {
-  const session=await resolveSession(request,env);
+  const session=await resolveSession(request,env,{refreshSubscription:url.searchParams.get("refresh")==="1"});
   if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
   return json({ok:true,user:toPublicUser(session.user)});
  }

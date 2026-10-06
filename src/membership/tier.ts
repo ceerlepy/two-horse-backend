@@ -17,6 +17,8 @@ export interface UserRecord {
   trialEndsAt: string | null;
   subscriptionProductId: string | null;
   subscriptionExpiresAt: string | null;
+  subscriptionAutoRenew: boolean | null;
+  subscriptionPendingProductId: string | null;
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;
