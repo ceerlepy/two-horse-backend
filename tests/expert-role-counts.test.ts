@@ -35,7 +35,9 @@ describe("expert role counts", () => {
       row("e", { is_avoid: 1, is_rival: 1 })
     ]);
 
-    expect(result.primaryCount).toBe(2);
+    // a: favourite+banko -> first choice; b: strong+rival -> strong.
+    expect(result.primaryCount).toBe(1);
+    expect(result.strongOnlyCount).toBe(1);
     expect(result.secondaryCount).toBe(1);
     expect(result.surpriseOnlyCount).toBe(1);
     expect(result.avoidCount).toBe(1);

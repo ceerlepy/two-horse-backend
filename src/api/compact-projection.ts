@@ -112,6 +112,7 @@ const EXPERT_CONSENSUS_KEYS = [
   "surpriseCount",
   "avoidCount",
   "primaryCount",
+  "strongOnlyCount",
   "secondaryCount",
   "surpriseOnlyCount",
   "bankoScore",
