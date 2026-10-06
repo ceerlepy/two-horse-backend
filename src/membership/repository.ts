@@ -33,6 +33,11 @@ function rowToUser(
     trialEndsAt: row.trial_ends_at ?? null,
     subscriptionProductId: row.subscription_product_id ?? null,
     subscriptionExpiresAt: row.subscription_expires_at ?? null,
+    subscriptionAutoRenew:
+      row.subscription_auto_renew == null
+        ? null
+        : Number(row.subscription_auto_renew) === 1,
+    subscriptionPendingProductId: row.subscription_pending_product_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastLoginAt: row.last_login_at ?? null
@@ -516,7 +521,7 @@ export async function getLatestPurchase(
       `SELECT product_id, purchase_token
        FROM play_purchases
        WHERE user_id = ?
-       ORDER BY expiry_time_millis DESC
+       ORDER BY expiry_time_millis DESC, created_at DESC
        LIMIT 1`
     )
       .bind(
@@ -574,6 +579,8 @@ export async function applyVerifiedPurchase(
     rawStatus: string;
     expiryTimeMillis: number;
     tier: MembershipTier;
+    autoRenewEnabled?: boolean | null;
+    pendingProductId?: string | null;
   }
 ): Promise<void> {
   const now =
@@ -609,6 +616,8 @@ export async function applyVerifiedPurchase(
          tier_source = 'play_subscription',
          subscription_product_id = ?,
          subscription_expires_at = ?,
+         subscription_auto_renew = ?,
+         subscription_pending_product_id = ?,
          updated_at = ?
      WHERE id = ?`
   )
@@ -618,6 +627,12 @@ export async function applyVerifiedPurchase(
       new Date(
         params.expiryTimeMillis
       ).toISOString(),
+      params.autoRenewEnabled == null
+        ? null
+        : params.autoRenewEnabled
+          ? 1
+          : 0,
+      params.pendingProductId ?? null,
       now,
       params.userId
     )

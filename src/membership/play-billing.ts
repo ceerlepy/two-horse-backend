@@ -20,6 +20,11 @@ export interface PlaySubscriptionPurchase {
   orderId: string | null;
   needsAcknowledgement: boolean;
   obfuscatedAccountId: string | null;
+  /* false once the member cancels; null when Google did not say. */
+  autoRenewEnabled: boolean | null;
+  /* Product a deferred plan change moves to at the next renewal. */
+  pendingProductId: string | null;
+  linkedPurchaseToken: string | null;
 }
 
 /*
@@ -211,18 +216,43 @@ export async function verifyPlaySubscription(
   const body =
     await response.json<any>();
 
-  const lineItem =
-    (body.lineItems ?? [])[0];
+  /*
+   * After a deferred plan change (Premium -> Gold at renewal) the new
+   * token carries two line items: the current plan with an expiry and
+   * a deferredItemReplacement, and the next plan with no expiry yet.
+   * The entitlement is the line item that runs the longest.
+   */
+  const lineItems: any[] =
+    body.lineItems ?? [];
 
-  if (!lineItem) {
+  if (!lineItems.length) {
     throw new Error(
       "PLAY_PURCHASE_NO_LINE_ITEMS"
     );
   }
 
+  const expiryOf = (item: any): number => {
+    const value =
+      Date.parse(
+        item?.expiryTime
+      );
+
+    return Number.isFinite(value)
+      ? value
+      : -Infinity;
+  };
+
+  const lineItem =
+    lineItems.reduce(
+      (best, item) =>
+        expiryOf(item) > expiryOf(best)
+          ? item
+          : best
+    );
+
   const expiryTimeMillis =
-    Date.parse(
-      lineItem.expiryTime
+    expiryOf(
+      lineItem
     );
 
   const rawStatus =
@@ -267,6 +297,25 @@ export async function verifyPlaySubscription(
         ?.obfuscatedExternalAccountId === "string"
         ? body.externalAccountIdentifiers
             .obfuscatedExternalAccountId
+        : null,
+
+    autoRenewEnabled:
+      typeof lineItem.autoRenewingPlan
+        ?.autoRenewEnabled === "boolean"
+        ? lineItem.autoRenewingPlan
+            .autoRenewEnabled
+        : null,
+
+    pendingProductId:
+      typeof lineItem.deferredItemReplacement
+        ?.productId === "string"
+        ? lineItem.deferredItemReplacement
+            .productId
+        : null,
+
+    linkedPurchaseToken:
+      typeof body.linkedPurchaseToken === "string"
+        ? body.linkedPurchaseToken
         : null
   };
 }
