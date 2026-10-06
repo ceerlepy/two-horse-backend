@@ -147,11 +147,12 @@ export function aggregateExpertPredictions(
 
   /*
    * Each source counted once, by the strongest role it gave this
-   * horse: a main pick (banko/favourite/strong/star), a second
-   * choice, or only a surprise. The app shows these plain counts
-   * instead of seven overlapping labels.
+   * horse: a first choice (banko/favourite/star), a strong
+   * contender, a second choice, or only a surprise. The app shows
+   * these plain counts instead of seven overlapping labels.
    */
   let primaryCount = 0;
+  let strongOnlyCount = 0;
   let secondaryCount = 0;
   let surpriseOnlyCount = 0;
 
@@ -211,8 +212,10 @@ export function aggregateExpertPredictions(
         prediction.is_avoid
       );
 
-    if (!avoid && (banko || favorite || strong || star)) {
+    if (!avoid && (banko || favorite || star)) {
       primaryCount++;
+    } else if (!avoid && strong) {
+      strongOnlyCount++;
     } else if (!avoid && rival) {
       secondaryCount++;
     } else if (!avoid && surprise) {
@@ -359,6 +362,7 @@ export function aggregateExpertPredictions(
     avoidCount,
 
     primaryCount,
+    strongOnlyCount,
     secondaryCount,
     surpriseOnlyCount,
 

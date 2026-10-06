@@ -29,6 +29,7 @@ export interface ExpertConsensus {
 
   /* Sources by the strongest role they gave this horse. */
   primaryCount: number;
+  strongOnlyCount: number;
   secondaryCount: number;
   surpriseOnlyCount: number;
 
