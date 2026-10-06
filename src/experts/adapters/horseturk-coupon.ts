@@ -23,13 +23,14 @@ import {
  *   HorseTurk 2. Altılı Ganyan Tahmin
  *   ...
  *
- * The leg lists ARE the expert's picks, so they are read directly
- * (no Workers AI). Legs map to official races through the canonical
- * Altılı start race, exactly like the other coupon sources:
- *   - a single horse in a leg (a "tek", usually written with its
- *     name and often "banko") -> banko
- *   - horses before "//" -> strong
- *   - horses after "//" (the source's backup picks) -> rival
+ * A coupon leg with several horses does not say which one the
+ * expert prefers, so those horses are NOT picks (project rule:
+ * coupon-only horses never count as an expert choice). Only a leg
+ * the expert wrote with a single horse (a "tek", usually with its
+ * name and often "banko") is an explicit choice. Legs map to official
+ * races through the canonical Altılı start:
+ *   - single horse, no backup        -> banko
+ *   - single horse with "//" backups -> favorite (backups ignored)
  */
 export function articleTextLines(
   html:string
@@ -172,6 +173,10 @@ export function parseHorseturkCoupon(
         legNumber -
         1;
 
+      if (main.length !== 1) {
+        continue;
+      }
+
       const race =
         races.get(raceNumber) ?? {
           city,
@@ -180,39 +185,27 @@ export function parseHorseturkCoupon(
           numberGroups:[]
         };
 
-      if (main.length === 1) {
-        const name =
-          mainPart
-            .replace(/^\s*\d{1,2}\s*/,"")
-            .replace(/\b(?:banko|tek)\b.*$/iu,"")
-            .trim();
+      const name =
+        mainPart
+          .replace(/^\s*\d{1,2}\s*/,"")
+          .replace(/\b(?:banko|tek)\b.*$/iu,"")
+          .trim();
 
-        race.selections.push({
-          horseNumber:
-            main[0],
+      race.selections.push({
+        horseNumber:
+          main[0],
 
-          horseName:
-            name || null,
+        horseName:
+          name || null,
 
-          comment:
-            "Kupon tek",
+        comment:
+          "Kupon tek",
 
-          labels:["banko"]
-        });
-
-      } else {
-        race.numberGroups.push({
-          label:"strong",
-          horseNumbers:main
-        });
-      }
-
-      if (backup.length) {
-        race.numberGroups.push({
-          label:"rival",
-          horseNumbers:backup
-        });
-      }
+        labels:
+          backup.length
+            ? ["favorite"]
+            : ["banko"]
+      });
 
       races.set(raceNumber,race);
     }

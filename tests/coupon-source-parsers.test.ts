@@ -10,6 +10,7 @@ import {
 
 import {
   istinyeTitleMatches,
+  istinyeWinBets,
   parseIstinyeCoupons
 } from "../src/experts/adapters/istinye-coupon";
 
@@ -44,31 +45,27 @@ const STARTS = [
 
 
 describe("parseHorseturkCoupon", () => {
-  it("maps every leg to its official race with banko/strong/rival labels", () => {
+  it("keeps only legs the expert wrote with a single horse", () => {
     const raw = parseHorseturkCoupon(HORSETURK, "Adana", STARTS);
-
-    expect(raw.races.map(race => race.raceNumber)).toEqual([1,2,3,4,5,6,7,8]);
-
     const picks = mapRawExpertExtraction(raw).picks;
-    const pick = (race:number, horse:number) =>
-      picks.find(value => value.raceNumber === race && value.horseNumber === horse);
 
-    expect(pick(1,4)?.isStrong).toBe(true);
-    expect(pick(1,1)?.isRival).toBe(true);
-    expect(pick(5,9)).toMatchObject({ isBanko:true, horseName:"BEST OF ANADOLU" });
-    expect(pick(8,3)).toMatchObject({ isBanko:true, horseName:"HEVENK" });
-    expect(pick(7,5)?.isStrong).toBe(true);
-    // Shared legs of the two coupons are one pick, not two.
-    expect(picks.filter(value => value.raceNumber === 3 && value.horseNumber === 9)).toHaveLength(1);
+    // Multi-horse legs are not picks.
+    expect(picks.some(value => value.raceNumber === 1)).toBe(false);
+    expect(picks.some(value => value.raceNumber === 7)).toBe(false);
+
+    expect(picks.find(value => value.raceNumber === 5 && value.horseNumber === 9))
+      .toMatchObject({ isBanko:true, horseName:"BEST OF ANADOLU" });
+    expect(picks.find(value => value.raceNumber === 8 && value.horseNumber === 3))
+      .toMatchObject({ isBanko:true, horseName:"HEVENK" });
+    expect(picks).toHaveLength(2);
   });
 
-  it("reads an unnumbered single coupon as the first Altılı", () => {
+  it("reads a single horse with backups as a favourite and ignores the backups", () => {
     const html = `<article><h3>HorseTurk Altılı Ganyan Tahmin</h3><p>1.AYAK: 6-7//1<br/>2.AYAK: 7//6</p></article>`;
-    const raw = parseHorseturkCoupon(html, "Adana", STARTS);
-    const picks = mapRawExpertExtraction(raw).picks;
+    const picks = mapRawExpertExtraction(parseHorseturkCoupon(html, "Adana", STARTS)).picks;
 
-    expect(picks.find(value => value.raceNumber === 2 && value.horseNumber === 7)?.isBanko).toBe(true);
-    expect(picks.find(value => value.raceNumber === 2 && value.horseNumber === 6)?.isRival).toBe(true);
+    expect(picks).toHaveLength(1);
+    expect(picks[0]).toMatchObject({ raceNumber:2, horseNumber:7, isFavorite:true, isBanko:false });
   });
 
   it("returns nothing when the Altılı start race is unknown", () => {
@@ -121,7 +118,7 @@ describe("parseIstinyeCoupons", () => {
     expect(istinyeTitleMatches("BURSA ANALİZİ ALTILI GANYAN TAHMİNİ","2026-10-06","Bursa")).toBe(false);
   });
 
-  it("turns the tipsters' coupons into one consensus pick per race", () => {
+  it("keeps only horses a tipster wrote alone, plus the named win bet", () => {
     const parsed = parseIstinyeCoupons(ISTINYE, "2026-10-06", ["Adana","Kocaeli"]);
 
     expect(parsed.matchedPosts).toEqual([
@@ -130,23 +127,26 @@ describe("parseIstinyeCoupons", () => {
     ]);
 
     const picks = mapRawExpertExtraction(parsed.extraction).picks;
-    const pick = (city:string, race:number, horse:number) =>
-      picks.find(value => value.city === city && value.raceNumber === race && value.horseNumber === horse);
+    const inRace = (city:string, race:number) =>
+      picks.filter(value => value.city === city && value.raceNumber === race);
 
-    // Adana R1: 1 and 7 are each one tipster's tek and both sit in a five-horse leg -> tied, both strong.
-    expect(pick("Adana",1,1)).toMatchObject({ isStrong:true, isFavorite:false, isBanko:false });
-    expect(pick("Adana",1,7)?.isStrong).toBe(true);
-    // Adana R2: horse 1 is in all three coupons.
-    expect(pick("Adana",2,1)?.isFavorite).toBe(true);
-    // Adana R5: 9 is a tek for one tipster, 4 shared by two -> 4 (1.0) ties 9 (1.0): both strong.
-    expect(pick("Adana",5,4)?.isStrong).toBe(true);
-    expect(pick("Adana",5,9)?.isStrong).toBe(true);
-    // Kocaeli R2: 4 is a tek for one of the two tipsters and in the other leg -> banko.
-    expect(pick("Kocaeli",2,4)?.isBanko).toBe(true);
-    // The "Sabit Bahis" lines are not coupon legs.
-    expect(picks.some(value => value.city === "Kocaeli" && value.raceNumber === 2 && value.horseNumber === 1 && value.isFavorite)).toBe(false);
+    // Adana R1: 1 and 7 are each one tipster's tek -> tie, so the named win bet (4) decides.
+    expect(inRace("Adana",1)).toEqual([expect.objectContaining({ horseNumber:4, isFavorite:true })]);
+    // Adana R2: nobody wrote a tek and there is no win bet -> no pick.
+    expect(inRace("Adana",2)).toEqual([]);
+    // Adana R5: 9 is the only tek (1 of 3) -> favourite, not banko.
+    expect(inRace("Adana",5)).toEqual([expect.objectContaining({ horseNumber:9, isFavorite:true, isBanko:false })]);
+    // Kocaeli R2: 4 is a tek for one of the two tipsters -> banko.
+    expect(inRace("Kocaeli",2)).toEqual([expect.objectContaining({ horseNumber:4, isBanko:true })]);
+    // Exactly one pick per covered race.
+    expect(new Set(picks.map(value => `${value.city}${value.raceNumber}`)).size).toBe(picks.length);
     // Nothing from the undated Bursa post.
     expect(picks.some(value => value.city === "Bursa")).toBe(false);
+  });
+
+  it("reads the Sabit Bahis list layout", () => {
+    expect([...istinyeWinBets("Sabit Bahis (Kazanır / Ganyan Bahsi)\nGünün birincilik için en sağlam adayları:\n1. Koşu: 8 SEVDE RAIDERS (not)\n4. Koşu: 3 KAYALARIN ŞAHI\nİkili\n6. Koşu: 4 KARA BERELİ").entries()])
+      .toEqual([[1,8],[4,3]]);
   });
 
   it("marks a horse written alone by most tipsters as banko", () => {
