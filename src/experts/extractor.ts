@@ -1122,9 +1122,11 @@ export async function extractExperts(
 
 
   /*
-   * Coupon-only sources are read straight from their own leg
-   * lists (see the parsers for the label rules); Workers AI stays
-   * the fallback only when the page shape is not recognised.
+   * Coupon sources are read straight from their own pages. Only
+   * explicit choices count (a horse written alone in a leg, or a
+   * named win pick); horses that merely sit in a multi-horse leg are
+   * never picks. Workers AI stays the fallback only when the page
+   * shape is not recognised.
    */
   if (
     sourceKey ===
@@ -1142,7 +1144,16 @@ export async function extractExperts(
         )
     };
 
-    if (raw.races.length) {
+    /*
+     * A recognised coupon with no single-horse leg is a valid
+     * "no explicit pick" answer, not a reason to spend Workers AI.
+     */
+    if (
+      raw.races.length ||
+      /\d\s*\.\s*AYAK\s*:/iu.test(
+        document.acquired.html
+      )
+    ) {
       return finalizeExtraction(
         raw,
         `${document.stage}-deterministic-coupon`,
