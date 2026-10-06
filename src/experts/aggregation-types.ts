@@ -27,6 +27,11 @@ export interface ExpertConsensus {
   surpriseCount: number;
   avoidCount: number;
 
+  /* Sources by the strongest role they gave this horse. */
+  primaryCount: number;
+  secondaryCount: number;
+  surpriseOnlyCount: number;
+
   weightedBanko: number;
   weightedFavorite: number;
   weightedStrong: number;
