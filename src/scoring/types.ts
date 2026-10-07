@@ -109,6 +109,28 @@ export interface RaceUncertainty {
   secondScore: number | null;
 
   /*
+   * The leader's own chance and the gap to
+   * the second horse, in probability. The
+   * 0-100 score compresses, so nine points
+   * of score mean "clearly ahead" in one
+   * race and "wide open" in another; the
+   * probabilities do not. Null whenever the
+   * race fell back to the weighted score.
+   */
+  topProbability: number | null;
+  probabilityGap: number | null;
+
+  /*
+   * What pushed the level up: the field
+   * being close ("margin") or our own
+   * inputs being incomplete ("data").
+   * The app's sentence has to agree with
+   * the level, and it cannot tell which
+   * one it was from the numbers alone.
+   */
+  driver: "margin" | "data";
+
+  /*
    * Suggested breadth pressure for the
    * future coupon optimizer.
    */

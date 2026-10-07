@@ -65,8 +65,30 @@ export function recommendCouponStrategy<
     ) /
     ordered.length;
 
+  /*
+   * How far clear the favourite is. The
+   * score margin only means the same thing
+   * from race to race while the scale does,
+   * so prefer the probability gap and keep
+   * the score thresholds for races that
+   * fell back to the weighted score.
+   */
+  const probabilityGap =
+    uncertainty
+      .probabilityGap;
+
   const topMargin =
     uncertainty.topMargin;
+
+  const clearlyAhead =
+    probabilityGap === null
+      ? topMargin >= 8
+      : probabilityGap >= 0.20;
+
+  const someDaylight =
+    probabilityGap === null
+      ? topMargin >= 3
+      : probabilityGap >= 0.08;
 
   /*
    * SINGLE
@@ -81,7 +103,7 @@ export function recommendCouponStrategy<
       "low" &&
     averageConfidence >=
       0.75 &&
-    topMargin >= 8
+    clearlyAhead
   ) {
     return {
       mode: "single",
@@ -121,7 +143,7 @@ export function recommendCouponStrategy<
     ) &&
     averageConfidence >=
       0.60 &&
-    topMargin >= 3
+    someDaylight
   ) {
     const count =
       uncertainty

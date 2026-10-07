@@ -173,6 +173,9 @@ export function raceUncertainty<
       topMargin: 0,
       leaderScore: 0,
       secondScore: null,
+      topProbability: null,
+      probabilityGap: null,
+      driver: "margin",
       expansionPressure: 1
     };
   }
@@ -191,15 +194,50 @@ export function raceUncertainty<
       ? leader
       : leader - second;
 
+  const leaderProbability =
+    ordered[0]
+      .modelScore
+      .winProbability ??
+    null;
+
+  const secondProbability =
+    ordered[1]
+      ?.modelScore
+      .winProbability ??
+    null;
+
   /*
-   * Small top-2 margin -> uncertain.
+   * How far clear the favourite is. In
+   * probability where the model gives us
+   * one, because the 0-100 score is a
+   * squashed view of it: on 7 October the
+   * same nine-point score margin covered
+   * both a 37% favourite well clear of the
+   * field and an 18% one in a wide-open
+   * race. Twenty points of probability is
+   * a horse that is genuinely clear.
    */
+  const probabilityGap =
+    leaderProbability === null
+      ? null
+      : secondProbability === null
+        ? leaderProbability
+        : leaderProbability -
+          secondProbability;
+
   const marginUncertainty =
-    clamp(
-      1 - margin / 25,
-      0,
-      1
-    );
+    probabilityGap === null
+      ? clamp(
+          1 - margin / 25,
+          0,
+          1
+        )
+      : clamp(
+          1 -
+          probabilityGap / 0.20,
+          0,
+          1
+        );
 
   const averageConfidence =
     ordered.reduce(
@@ -282,6 +320,28 @@ export function raceUncertainty<
             second,
             2
           ),
+
+    topProbability:
+      leaderProbability === null
+        ? null
+        : round(
+            leaderProbability,
+            4
+          ),
+
+    probabilityGap:
+      probabilityGap === null
+        ? null
+        : round(
+            probabilityGap,
+            4
+          ),
+
+    driver:
+      marginUncertainty >=
+      missingDataPressure
+        ? "margin"
+        : "data",
 
     expansionPressure:
       round(

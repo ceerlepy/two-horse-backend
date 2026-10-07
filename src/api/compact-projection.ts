@@ -162,6 +162,9 @@ const UNCERTAINTY_KEYS = [
   "topMargin",
   "leaderScore",
   "secondScore",
+  "topProbability",
+  "probabilityGap",
+  "driver",
   "expansionPressure"
 ] as const;
 
