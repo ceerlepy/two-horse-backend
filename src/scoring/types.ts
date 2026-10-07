@@ -53,6 +53,23 @@ export interface HorseModelScore {
   score: number;
 
   /*
+   * Win probability inside the race, from the learned AGF-anchored model.
+   * Null when the race has no complete AGF and the score fell back to the
+   * hand-weighted average.
+   */
+  winProbability?: number | null;
+
+  /*
+   * Which path produced `score`. "weighted" is the fallback.
+   */
+  scoreSource?: "learned" | "weighted";
+
+  /*
+   * The hand-weighted score, kept for diagnostics and comparison.
+   */
+  weightedScore?: number;
+
+  /*
    * Present once the learning layer has been applied.
    */
   baseScore?: number;

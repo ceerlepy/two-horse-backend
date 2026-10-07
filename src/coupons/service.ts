@@ -293,7 +293,13 @@ export async function generateSixFoldCoupons(
                       .modelScore
                       .confidence ??
                     0
-                  )
+                  ),
+
+                winProbability:
+                  runner
+                    .modelScore
+                    .winProbability ??
+                  null
               })
             );
 
@@ -685,7 +691,13 @@ export async function generateFiveFoldCoupons(
                       .modelScore
                       .confidence ??
                     0
-                  )
+                  ),
+
+                winProbability:
+                  runner
+                    .modelScore
+                    .winProbability ??
+                  null
               })
             );
 

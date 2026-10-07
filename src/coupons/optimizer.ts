@@ -9,6 +9,14 @@ export interface CouponRunner {
 
   score: number;
   confidence: number;
+
+  /*
+   * Win probability from the learned model score. When every runner in
+   * the leg has one, it is used directly instead of softmaxing the 0-100
+   * scores -- the model already produces a calibrated distribution, so
+   * re-deriving one would only blur it.
+   */
+  winProbability?: number | null;
 }
 
 
@@ -207,6 +215,51 @@ function runnerProbabilities(
           b.score -
           a.score
       );
+
+  /*
+   * The learned model score is already a within-race probability
+   * distribution. Use it as it stands when the whole leg has it.
+   */
+  const modelled =
+    ordered.every(
+      runner =>
+        runner.winProbability !=
+          null &&
+        Number.isFinite(
+          runner.winProbability
+        ) &&
+        (
+          runner
+            .winProbability as number
+        ) > 0
+    );
+
+  if (modelled) {
+    const total =
+      ordered.reduce(
+        (sum, runner) =>
+          sum +
+          (
+            runner
+              .winProbability as number
+          ),
+        0
+      );
+
+    if (total > 0) {
+      return ordered.map(
+        runner => ({
+          ...runner,
+
+          probability:
+            (
+              runner
+                .winProbability as number
+            ) / total
+        })
+      );
+    }
+  }
 
   const best =
     ordered[0].score;

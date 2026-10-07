@@ -5,6 +5,11 @@ import { aggregateExpertPredictions } from "../experts/aggregator";
 import { scoreRace, raceUncertainty } from "../scoring/race-score";
 
 import {
+  loadLearnedFeatures,
+  raceFeatureKey
+} from "../scoring/feature-store";
+
+import {
   getTodayMarketSnapshots,
   marketRunnerKey
 } from "../market/repository";
@@ -292,6 +297,19 @@ export async function getToday(env: Env): Promise<any> {
   const marketSnapshots =
     await getTodayMarketSnapshots(
       env
+    );
+
+  /*
+   * Signals the learned model score reads from the value model's feature
+   * store. An empty map is fine: the score then falls back to AGF plus
+   * our own components.
+   */
+  const learnedFeatures =
+    await loadLearnedFeatures(
+      env,
+      date
+    ).catch(
+      () => new Map()
     );
 
   const fieldSignals =
@@ -660,7 +678,16 @@ export async function getToday(env: Env): Promise<any> {
 
             const baseScoredRunners =
               scoreRace(
-                fieldCoverageAdjustedRunners
+                fieldCoverageAdjustedRunners,
+
+                learnedFeatures.get(
+                  raceFeatureKey(
+                    m.city,
+                    Number(
+                      race.race_number
+                    )
+                  )
+                )
               );
 
             const band =
