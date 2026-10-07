@@ -132,11 +132,59 @@ describe(
     );
 
     it(
+      "treats a share published as 0 as present, not missing",
+      () => {
+        /*
+         * TJK rounds AGF to whole percents, so a long shot in a full
+         * field reads 0 while the race still adds up to 100. Bailing out
+         * there would drop the learned score for the whole race.
+         */
+        const probabilities =
+          learnedWinProbabilities(
+            [60, 39, 1, 0],
+            [{}, {}, {}, {}]
+          );
+
+        expect(
+          probabilities
+        ).not.toBeNull();
+
+        const values =
+          probabilities as number[];
+
+        expect(
+          values.reduce(
+            (sum, value) =>
+              sum + value,
+            0
+          )
+        ).toBeCloseTo(1, 10);
+
+        expect(
+          values[3]
+        ).toBeGreaterThan(0);
+
+        expect(
+          values[3]
+        ).toBeLessThan(
+          values[2]
+        );
+      }
+    );
+
+    it(
       "falls back to the weighted score when the race has no complete AGF",
       () => {
         expect(
           learnedWinProbabilities(
             [45, null, 15],
+            [{}, {}, {}]
+          )
+        ).toBeNull();
+
+        expect(
+          learnedWinProbabilities(
+            [0, 0, 0],
             [{}, {}, {}]
           )
         ).toBeNull();

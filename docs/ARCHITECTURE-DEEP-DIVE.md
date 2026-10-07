@@ -2802,3 +2802,31 @@ log-loss kazancı +0,006 / +0,026 / +0,033.
 
 Rapor ve betikler: `/mnt/project-files/analysis/model-puani-sinyal-testi-2026-10-07/`.
 Katsayı sürümü `score-v1-2026-10-07`, 821 yarışa uydurulmuş.
+
+### Kalibrasyon (aynı ileri test: eğitim < 15 Eylül, 352 yarış / 3.629 at)
+
+Kupon ekranındaki "kapsama %" doğrudan bu olasılıklardan çıkıyor, bu yüzden sayının
+gerçeği tutması sıralamadan daha önemli. Tahmin edilen bant vs. gerçekte kazanma oranı:
+
+| Tahmin bandı | n | yeni puan diyor | gerçek | eski softmax diyor | AGF diyor |
+|---|---|---|---|---|---|
+| %0-2 | 847 | %1,0 | %1,8 | — | — |
+| %2-5 | 865 | %3,3 | %3,4 | — | — |
+| %5-10 | 735 | %7,3 | %7,1 | — | — |
+| %10-20 | 743 | %14,2 | %14,5 | — | — |
+| %20-30 | 281 | %24,7 | %25,3 | %23,8 (gerçek %21,1) | — |
+| %30-50 | 157 | %37,0 | %32,5 | — | %36,7 (gerçek %32,0) |
+| %50+ | 48 | %58,6 | %54,2 | %59,8 (gerçek %34,8, n=23) | %60,8 (gerçek %51,0) |
+
+%30'a kadar sayı gerçeği birebir tutuyor; üstünde bir miktar fazla iddialı ama AGF'nin
+kendi sapmasıyla aynı seviyede. Eski sıcaklıklı softmax en üst bantta %60 diyip %35
+tutturuyordu — kupon kapsaması bu yüzden şişiyordu.
+
+### AGF %0 düzeltmesi (7 Ekim 2026)
+
+İlk sürüm yarışın öğrenilmiş puan alması için her atta AGF > 0 arıyordu. TJK AGF'yi tam
+yüzdeye yuvarladığı için kalabalık sahada gerçek sürpriz atlar 0 olarak yayınlanıyor;
+yarışın toplamı yine 100. 7 Ekim'de günün 17 yarışından 3'ü (Elazığ 4, 5, 6) bu yüzden
+sessizce eski puana düşüyordu. Offline uyum bu sıfırları 1e-6'ya tabanlamıştı, yani
+canlı kod ölçülenden katıydı. `canScoreLearned` artık boş/negatif/sonsuz payı reddedip
+yayınlanmış 0'ı var sayıyor; çıpa onu 1e-6 tabanıyla en düşük şansa oturtuyor.
