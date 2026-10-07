@@ -36,6 +36,11 @@ import {
 } from "./calibration";
 
 import {
+  buildForeignModelCoupons,
+  type ForeignModelCoupon
+} from "./model-coupon";
+
+import {
   discoverForeignMeetingLinks,
   raceDateOfForeignLink,
   type ForeignMeetingLink
@@ -79,6 +84,12 @@ export interface ForeignRace {
   distanceMeters: number | null;
   track: string | null;
   runners: ForeignRunner[];
+  /*
+   * Which altılı windows start at this race, as TJK marks them on the
+   * meeting page (1 and/or 2). Kept so we can build our own coupon for
+   * the card -- see ./model-coupon.ts.
+   */
+  sixfoldStartNumbers?: number[];
   aiPick?: ForeignAiPick | null;
 }
 
@@ -96,7 +107,10 @@ export interface ForeignMeeting {
   ydOrder: number | null;
   races: ForeignRace[];
   fetchedAt: string;
+  /* Scraped from an outside tipster site; see ./banko.ts. */
   aiCoupons?: ForeignAiCoupon[];
+  /* Ours, from the calibrated win probabilities. */
+  modelCoupons?: ForeignModelCoupon[];
 }
 
 
@@ -116,6 +130,7 @@ async function fetchMeeting(
       time: race.time ?? null,
       distanceMeters: race.distanceMeters ?? null,
       track: race.track ?? null,
+      sixfoldStartNumbers: race.sixfoldStartNumbers ?? [],
       runners: race.runners.map(runner => ({
         number: runner.number,
         name: runner.name,
@@ -254,9 +269,12 @@ export async function getForeignMeetings(
       });
     }
 
+    let modelCoupons: ForeignModelCoupon[] = [];
+
     if (includeModelSignals) {
       const group = foreignCountryGroup(row.city, row.country);
       races = races.map(race => withForeignWinProbs(race, group));
+      modelCoupons = buildForeignModelCoupons(races);
     }
 
     return {
@@ -265,7 +283,9 @@ export async function getForeignMeetings(
       ydOrder: row.yd_order ?? null,
       races,
       fetchedAt: row.fetched_at,
-      ...(includeModelSignals ? { aiCoupons: picks?.coupons ?? [] } : {})
+      ...(includeModelSignals
+        ? { aiCoupons: picks?.coupons ?? [], modelCoupons }
+        : {})
     };
   });
 }
