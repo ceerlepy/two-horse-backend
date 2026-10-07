@@ -71,23 +71,39 @@ export const SHIPPED_SCORE_COEFFICIENTS =
   coefficients as unknown as LearnedScoreCoefficients;
 
 /*
- * AGF is the anchor, so the whole race needs it. One runner without a
- * published AGF share means the learned score is unavailable and the
- * caller keeps the weighted score.
+ * AGF is the anchor, so the whole race needs it: one runner with no
+ * published share means the learned score is unavailable and the caller
+ * keeps the weighted score.
+ *
+ * A published 0.0 is not a missing share. TJK rounds AGF to whole
+ * percents, so a genuine long shot in a full field reads 0 while the
+ * race's shares still add up to 100 -- on 7 October 2026 that was 3 of
+ * the day's 17 races. Those count as present and the anchor floors them,
+ * exactly as the offline fit treated them.
  */
 export function canScoreLearned(
   agfPercent:
     Array<number | null | undefined>
 ): boolean {
-  return (
-    agfPercent.length > 1 &&
-    agfPercent.every(
-      value =>
-        value != null &&
-        Number.isFinite(value) &&
-        value > 0
-    )
-  );
+  if (agfPercent.length < 2) {
+    return false;
+  }
+
+  let total = 0;
+
+  for (const value of agfPercent) {
+    if (
+      value == null ||
+      !Number.isFinite(value) ||
+      value < 0
+    ) {
+      return false;
+    }
+
+    total += value;
+  }
+
+  return total > 0;
 }
 
 export function learnedWinProbabilities(
@@ -120,6 +136,10 @@ export function learnedWinProbabilities(
           (value as number) /
           agfTotal;
 
+        /*
+         * Floored, so a share published as 0 lands on the smallest
+         * chance the model can express instead of -Infinity.
+         */
         let utility =
           model.anchorCoef *
           Math.log(
