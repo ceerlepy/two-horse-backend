@@ -338,6 +338,24 @@ picks and, domestically, `modelScore`). Free users never receive it.
 Coefficients are a constant; to refresh, rerun `scripts/b2_export.py`
 and regenerate the constant in `calibration.ts`.
 
+### Our own foreign altılı (7 Ekim 2026)
+
+TJK marks each altılı window's first race on the foreign meeting page
+exactly as it does domestically ("1. 6'LI GANYAN bu koşudan başlar"), so
+`parseTjkMeetingPage` already returns `sixfoldStartNumbers`;
+`service.ts` now keeps it in `foreign_meetings.program_json` instead of
+dropping it. `model-coupon.ts` turns that into our own coupon: the
+window's six races by race number, runners priced by `winProb`, through
+the same `optimizeSixFoldCoupons` the domestic coupons use, at a fixed
+500 TL budget and the foreign 1 TL combination price. It arrives as
+`modelCoupons` beside the scraped `aiCoupons`, under the same Gold+
+gate.
+
+Rules: a runner TJK publishes no AGF for has no `winProb` and is left
+out of the leg; a leg where that leaves nobody drops the whole window
+rather than guessing. Verified live on all 7 foreign meetings of
+7 Ekim 2026, both windows each.
+
 ---
 
 ## src/coupons
