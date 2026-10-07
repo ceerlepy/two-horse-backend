@@ -169,6 +169,22 @@ export function applyLearningAdjustment(
   baseScore: number;
   learningAdjustment: number;
 } {
+  /*
+   * The learned model score is fitted to outcomes and carries its own
+   * win probability, which the coupon engine reads. Nudging the 0-100
+   * number here would leave the two disagreeing, and this horse/jockey
+   * nudge has never beaten the base score on its own (measured 2026-10-04:
+   * base and learned top-1 both 30.09%). So it only applies to the
+   * hand-weighted fallback.
+   */
+  if (score.scoreSource === "learned") {
+    return {
+      ...score,
+      baseScore: score.score,
+      learningAdjustment: 0
+    };
+  }
+
   const horseConfig =
     LEARNING_ADJUSTMENT_CONFIG.contextPriors.horse;
 

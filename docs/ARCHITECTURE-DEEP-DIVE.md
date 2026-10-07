@@ -2724,3 +2724,81 @@ Denenen dört parametre: pist durumu tercihi, uzmanlık, hipodrom geçmişi, jok
 
 Yeni veri gerekmiyor; mevcut arşivdeki geçmiş koşulardan hesaplanıyor. Katsayılar `value-v3-2026-10-05`.
 
+
+## 72. Model puanı: elle verilen ağırlıklardan öğrenilmiş puana (2026-10-07)
+
+### Neden değişti
+
+`learning_runner_features` tablosundaki donmuş yarış öncesi puanlar 821 yarışta ölçüldü
+(19 Ağustos – 4 Ekim 2026, model puanı eksiksiz + AGF eksiksiz + tek kazanan):
+
+| | 1. seçim kazanıyor | ilk 3'te kazanan | log-loss |
+|---|---|---|---|
+| Elle ağırlıklı model puanı | %30,4 | %60,4 | 1,9842 |
+| Düz AGF favorisi | %34,3 | %66,3 | 1,8628 |
+
+Eşleştirilmiş test (McNemar) p = 0,0056; D1'de bağımsız SQL ile de doğrulandı (854 yarışta 260'a 293).
+Yani `SCORING_WEIGHTS` ile kurulan puan, hiçbir şey yapmayıp AGF favorisini seçmekten kötüydü.
+
+Sebep ağırlıklardı, veri değildi. AGF çıpa alınıp bileşenler veriye uydurulduğunda AGF'nin üstüne
+ölçülebilir bilgi katan iki şey kaldı: uzmanlık/hız derecesi ve start kulvarı. Puanın en ağır iki
+bileşeni — uzman (22 puan) ve form (18 puan) — AGF'nin üstüne ölçülebilir bir şey katmıyordu;
+HP ve kilo da katmıyordu. Yani AGF puanın yalnız 25'ini alırken geri kalan 75 bilgi taşımıyordu.
+
+### Yeni puan
+
+`src/scoring/learned-score.ts`, yarış içi (koşullu) logit, AGF'ye çıpalı:
+
+```
+u_i = anchorCoef * log(p_agf_i) + sum_f coef_f * clip((x_f - mean_f) / sd_f, -4, 4)
+p_i = exp(u_i) / sum_j exp(u_j)
+```
+
+Eksik bir özellik `coef` yerine `naCoef` katkısı verir. Katsayılar çevrimdışı uydurulur,
+`src/scoring/data/score-coefficients.json` içinde taşınır, istek anında hiçbir şey eğitilmez.
+
+**Özellikler.** Kendi bileşen puanlarımız (uzman, form, AGF değişimi, HP, kilo, saha) artık elle
+değil uydurulmuş ağırlıkla girer. Yanına AGF'nin tam fiyatlamadığı altı sinyal eklenir ve bunlar
+değer modelinin özellik deposundan (`value_model_predictions.features_json`) okunur, ikinci kez
+hesaplanmaz: `fig_best3_rel`, `spec_best_rel`, `idm_best400_z30_rel`, `draw_ae_rel`,
+`agf_gny_ratio`, `jockey_ae`. Okuma `src/scoring/feature-store.ts` içinde; değer modeline hiçbir
+şey yazmaz. Satır yoksa yarış o sinyaller olmadan puanlanır.
+
+**Katsayılar sıfırın altına inemez.** Her özellik "yüksek olan iyidir" diye tanımlı, dolayısıyla
+negatif katsayı yalnızca AGF ile eşdoğrusallıktan doğar ve %45 AGF'li atı %15'linin altına
+düşürebilir. Uydurma bu yüzden sınırlı yapılıyor ve `tests/learned-score.test.ts` yayına çıkan
+dosyada negatif katsayı kalmadığını doğruluyor. Uydurma sonucu: uzman, form, HP ve kilo katsayıları
+sıfır çıktı; AGF değişimi 0,10, uzmanlık 0,21, kulvar 0,14, AGF/ganyan ayrışması 0,13, idman 0,06.
+Bileşenler puanda duruyor, ağırlıklarını artık veri veriyor.
+
+**0-100 gösterimi.** `displayScore(p, n) = 100 * (p*n) / (1 + p*n)`, 1..99 arasına kırpılı.
+50 o yarıştaki ortalama şans demek, üstü ortalamadan iyi. Sıralama olasılıkla birebir aynı.
+
+**Yedek yol.** AGF yarışın her atında dolu değilse öğrenilmiş puan üretilmez; eski ağırlıklı puan
+olduğu gibi kullanılır (`scoreSource: "weighted"`, `winProbability: null`). `SCORING_WEIGHTS`,
+`availableWeight` ve "Veri tamlığı" bu yüzden duruyor.
+
+**Kuponlar.** `runnerProbabilities` artık ayağın her atında `winProbability` varsa onu doğrudan
+kullanıyor; yoksa eski sıcaklıklı softmax'a düşüyor. Model zaten kalibre bir dağılım üretiyor,
+ikinci kez dağılım türetmek onu bulanıklaştırırdı.
+
+**Öğrenme katmanı.** `applyLearningAdjustment` öğrenilmiş puanda devre dışı: 0-100 sayısını
+oynatmak onu `winProbability` ile çelişkiye düşürürdü ve bu at/jokey düzeltmesi kendi başına
+temel puanı geçmemişti (2026-10-04 ölçümü: temel ve öğrenilmiş top-1 ikisi de %30,09).
+
+### Ölçüm (zaman sırasıyla ileri test)
+
+Katsayılar yalnızca kesme tarihinden öncesine uydurulup sonrası test edildi:
+
+| Eğitim < | Test | yeni 1. seçim | AGF | eski puan | yeni ilk 3 | AGF ilk 3 | eski ilk 3 |
+|---|---|---|---|---|---|---|---|
+| 15 Eylül | 352 yarış | %31,5 | %30,1 | %27,0 | %67,3 | %65,6 | %58,5 |
+| 20 Eylül | 262 yarış | %31,3 | %28,6 | %24,4 | %67,2 | %64,9 | %58,0 |
+| 25 Eylül | 176 yarış | %28,4 | %27,3 | %21,6 | %68,8 | %64,8 | %56,8 |
+
+Eski puana karşı üç kesmede de kanıtlı (eşleştirilmiş p = 0,033 / 0,011 / 0,043).
+AGF'ye karşı üç kesmede de aynı yönde ama tek başına kanıtlı değil (p = 0,46 / 0,21 / 0,80);
+log-loss kazancı +0,006 / +0,026 / +0,033.
+
+Rapor ve betikler: `/mnt/project-files/analysis/model-puani-sinyal-testi-2026-10-07/`.
+Katsayı sürümü `score-v1-2026-10-07`, 821 yarışa uydurulmuş.
