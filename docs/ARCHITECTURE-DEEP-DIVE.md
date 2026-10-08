@@ -356,6 +356,14 @@ out of the leg; a leg where that leaves nobody drops the whole window
 rather than guessing. Verified live on all 7 foreign meetings of
 7 Ekim 2026, both windows each.
 
+`/api/coupons/generate?foreign=1` builds the same window at the budget
+the user picked (`coupon-service.ts`), returning the domestic
+response's shape so the app's coupon screen renders it unchanged. Not
+persisted: the sixfold snapshot and evaluation tables are keyed on
+domestic meetings and no foreign results feed exists here, so the app
+also hides "Kuponlarıma kaydet" on a foreign coupon. `pool=fivefold`
+is refused, since TJK runs no Beşli Ganyan on a foreign card.
+
 ---
 
 ## src/coupons

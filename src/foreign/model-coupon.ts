@@ -29,13 +29,13 @@ export const FOREIGN_MODEL_COUPON_CONFIG = {
 } as const;
 
 
-interface CouponRunnerInput {
+export interface CouponRunnerInput {
   number: number;
   name: string;
   winProb?: number | null;
 }
 
-interface CouponRaceInput {
+export interface CouponRaceInput {
   raceNumber: number;
   time?: string | null;
   sixfoldStartNumbers?: number[];
@@ -64,6 +64,23 @@ export interface ForeignModelCoupon {
  * with no runners are dropped before this point and would shift a
  * positional window onto the wrong races.
  */
+export function foreignCouponWindows(
+  races: CouponRaceInput[]
+): Map<number, number> {
+  const windows = new Map<number, number>();
+
+  for (const race of races) {
+    for (const window of race.sixfoldStartNumbers ?? []) {
+      if (!windows.has(window)) {
+        windows.set(window, race.raceNumber);
+      }
+    }
+  }
+
+  return windows;
+}
+
+
 function legRaces(
   races: CouponRaceInput[],
   startRaceNumber: number
@@ -88,6 +105,22 @@ function legRaces(
  * leg. A race where that leaves nobody kills the whole window rather
  * than producing a coupon with a guessed leg.
  */
+export function foreignCouponLegs(
+  races: CouponRaceInput[],
+  startRaceNumber: number
+): { legs: CouponLegInput[]; races: CouponRaceInput[] } | null {
+  const found = legRaces(races, startRaceNumber);
+
+  if (!found.length) return null;
+
+  const legs = found.map(legInput);
+
+  if (legs.some(leg => leg === null)) return null;
+
+  return { legs: legs as CouponLegInput[], races: found };
+}
+
+
 function legInput(
   race: CouponRaceInput
 ): CouponLegInput | null {
@@ -126,34 +159,22 @@ function legInput(
 export function buildForeignModelCoupons(
   races: CouponRaceInput[]
 ): ForeignModelCoupon[] {
-  const windows = new Map<number, number>();
-
-  for (const race of races) {
-    for (const window of race.sixfoldStartNumbers ?? []) {
-      if (!windows.has(window)) {
-        windows.set(window, race.raceNumber);
-      }
-    }
-  }
+  const windows = foreignCouponWindows(races);
 
   const output: ForeignModelCoupon[] = [];
 
   for (const altili of [...windows.keys()].sort((a, b) => a - b)) {
-    const startRaceNumber = windows.get(altili) as number;
-    const legRacesFound = legRaces(races, startRaceNumber);
+    const prepared =
+      foreignCouponLegs(races, windows.get(altili) as number);
 
-    if (!legRacesFound.length) continue;
-
-    const legs = legRacesFound.map(legInput);
-
-    if (legs.some(leg => leg === null)) continue;
+    if (!prepared) continue;
 
     let optimized;
 
     try {
       optimized =
         optimizeSixFoldCoupons({
-          legs: legs as CouponLegInput[],
+          legs: prepared.legs,
           budgetTl: FOREIGN_MODEL_COUPON_CONFIG.budgetTl,
           unitPriceTl: sixFoldUnitPrice({ isForeign: true })
         })[0];
@@ -165,7 +186,7 @@ export function buildForeignModelCoupons(
 
     output.push({
       altili,
-      startTime: legRacesFound[0].time ?? null,
+      startTime: prepared.races[0].time ?? null,
       legs: optimized.legs.map(leg => ({
         raceNumber: leg.raceNumber,
         selection: leg.horses.map(horse => horse.horseNumber).sort((a, b) => a - b),
