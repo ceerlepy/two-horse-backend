@@ -26,6 +26,10 @@ import {
 } from "../experts/ai-response-cache";
 
 import {
+  getForeignRace
+} from "../foreign/service";
+
+import {
   TIER_LIMITS,
   type MembershipTier
 } from "../membership/tier";
@@ -69,6 +73,8 @@ export interface AskRequest {
   raceNumber: number;
   question: string;
   language: AskLanguage;
+  /* A TJK foreign ("YD") card; see foreignRaceContext below. */
+  foreign?: boolean;
 }
 
 export type AskResult =
@@ -178,6 +184,51 @@ export function raceContext(
     .join("\n");
 }
 
+/*
+ * The same table for a foreign card, with the columns a foreign
+ * meeting actually has. TJK publishes no handicap points there, we
+ * keep no AGF history for those races and no expert covers them, so
+ * the model is told plainly which columns do not exist rather than
+ * being left to guess from blanks.
+ */
+export function foreignRaceContext(
+  meeting: { city: string; country: string | null },
+  race: any
+): string {
+  const runners =
+    [...(race.runners ?? [])]
+      .filter((runner: any) => runner?.number != null)
+      .sort(
+        (a: any, b: any) =>
+          Number(b?.winProb ?? -1) - Number(a?.winProb ?? -1)
+      );
+
+  const lines =
+    runners.map((runner: any, index: number) =>
+      [
+        `${index + 1}. #${runner.number} ${runner.name ?? ""}`.trim(),
+        `jockey ${runner.jockey || "-"}`,
+        runner.winProb != null
+          ? `our win chance ${percent(runner.winProb)}`
+          : "our win chance - (TJK published no AGF for this horse)",
+        `AGF ${fixed(runner.agfPercent)}%`,
+        `kg ${runner.weight ?? "-"}`,
+        `form ${runner.recentForm || "debut"}`
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    );
+
+  return [
+    "Columns: our rank. #number name | jockey | our corrected win chance | AGF share | weight | recent finishes (newest last)",
+    "This is a foreign card: there are no expert picks, no handicap points and no AGF movement for it. Our win chance is AGF corrected for the country and the field size.",
+    `Race: ${meeting.city}${meeting.country ? ` (${meeting.country})` : ""} race ${race.raceNumber}, ${race.distanceMeters ?? "?"}m ${race.track ?? ""}, starts ${race.time ?? "?"}`,
+    ...lines
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function askMessages(
   context: string,
   question: string,
@@ -267,6 +318,7 @@ async function questionKey(
     [
       request.city.trim().toLocaleLowerCase("tr-TR"),
       request.raceNumber,
+      request.foreign ? "yd" : "tr",
       request.language,
       normalizeQuestion(request.question)
     ].join("|")
@@ -352,17 +404,32 @@ export async function askAi(
     return { ok: false, error: "DAILY_LIMIT_REACHED", used: before.used, limit };
   }
 
-  const meetings =
-    attachValues(
-      await getToday(env),
-      await loadTodayValues(env, date)
-        .catch(() => ({ status: "unavailable", byRunner: new Map() }))
-    );
+  let context: string;
 
-  const race = findRace(meetings, request.city, request.raceNumber);
+  if (request.foreign) {
+    const found =
+      await getForeignRace(env, date, request.city, request.raceNumber);
 
-  if (!race) {
-    return { ok: false, error: "RACE_NOT_FOUND" };
+    if (!found) {
+      return { ok: false, error: "RACE_NOT_FOUND" };
+    }
+
+    context = foreignRaceContext(found, found.race);
+  } else {
+    const meetings =
+      attachValues(
+        await getToday(env),
+        await loadTodayValues(env, date)
+          .catch(() => ({ status: "unavailable", byRunner: new Map() }))
+      );
+
+    const race = findRace(meetings, request.city, request.raceNumber);
+
+    if (!race) {
+      return { ok: false, error: "RACE_NOT_FOUND" };
+    }
+
+    context = raceContext(race);
   }
 
   /*
@@ -370,7 +437,7 @@ export async function askAi(
    * "kim  KAZANIR?" share one cached answer across all members.
    */
   const messages =
-    askMessages(raceContext(race), normalizeQuestion(question), request.language);
+    askMessages(context, normalizeQuestion(question), request.language);
 
   /*
    * The global cap only blocks billed calls: a cached answer is still

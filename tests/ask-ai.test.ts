@@ -191,3 +191,96 @@ describe("AI'ya sor", () => {
     expect(row.n).toBe(0);
   });
 });
+
+describe("AI'ya sor on a foreign card", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const FOREIGN_CITY = "Keeneland ABD";
+
+  const foreignRaces = [
+    {
+      raceNumber: 2,
+      time: "20:35",
+      distanceMeters: 1700,
+      track: "Kum",
+      runners: [
+        {
+          number: 1, name: "FIRST LADY", jockey: "J. ROSARIO",
+          weight: 57, agfPercent: 42, recentForm: "321"
+        },
+        {
+          number: 5, name: "LATE CALL", jockey: "I. ORTIZ",
+          weight: 56, agfPercent: 58, recentForm: "111"
+        },
+        {
+          number: 7, name: "NO PRICE", jockey: null,
+          weight: null, agfPercent: null, recentForm: null
+        }
+      ]
+    }
+  ];
+
+  async function envWithForeign() {
+    const { env, run } = envWith("LATE CALL öne çıkıyor.");
+
+    await env.DB.prepare(
+      "CREATE TABLE foreign_meetings (race_date TEXT, city TEXT, country TEXT, yd_order INTEGER, program_json TEXT, source_url TEXT, fetched_at TEXT, PRIMARY KEY (race_date, city))"
+    ).run();
+
+    await env.DB.prepare("INSERT INTO foreign_meetings VALUES (?,?,?,?,?,?,?)")
+      .bind(
+        "2026-10-05", FOREIGN_CITY, "ABD", 4,
+        JSON.stringify(foreignRaces), "https://x", "2026-10-05T10:00:00Z"
+      )
+      .run();
+
+    return { env, run };
+  }
+
+  const foreignAsk = (question: string) => ({
+    city: FOREIGN_CITY,
+    raceNumber: 2,
+    question,
+    language: "tr" as const,
+    foreign: true
+  });
+
+  it("answers from the foreign card's own numbers", async () => {
+    const { env, run } = await envWithForeign();
+
+    const result = await askAi(env, "u1", "premium", foreignAsk("Favori kim?"), NOW);
+    expect(result).toMatchObject({ ok: true, answer: "LATE CALL öne çıkıyor." });
+
+    const prompt = (run.mock.calls[0] as any)[1].messages[1].content;
+    const lines = prompt.split("\n");
+
+    /* Ranked by our corrected chance, not by the card order. */
+    expect(lines[3]).toMatch(/^1\. #5 LATE CALL/);
+    expect(lines[3]).toContain("our win chance");
+    expect(lines[2]).toContain("Keeneland ABD (ABD) race 2, 1700m Kum");
+
+    /* The model is told which columns a foreign card does not have. */
+    expect(prompt).toContain("no expert picks");
+    expect(prompt).not.toContain("HP ");
+
+    /* A horse TJK priced nothing for is shown as such, not dropped. */
+    expect(prompt).toContain("#7 NO PRICE");
+  });
+
+  it("does not share an answer with a domestic race of the same name", async () => {
+    const { env, run } = await envWithForeign();
+
+    await askAi(env, "u1", "premium", ask("Favori kim?", { city: "Bursa", raceNumber: 3 }), NOW);
+    await askAi(env, "u1", "premium", foreignAsk("Favori kim?"), NOW);
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("says the race is not there when the card has no such race", async () => {
+    const { env } = await envWithForeign();
+
+    expect(
+      await askAi(env, "u1", "premium", { ...foreignAsk("Favori kim?"), raceNumber: 9 }, NOW)
+    ).toEqual({ ok: false, error: "RACE_NOT_FOUND" });
+  });
+});
