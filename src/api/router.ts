@@ -34,6 +34,7 @@ import { repairHistoricalDates } from "../results/historical-date-repair";
 import { getHorseVideos } from "../horses/service";
 import { getRaceTraining } from "../training/service";
 import { getForeignMeetings, refreshForeignMeetingsIfDue } from "../foreign/service";
+import { generateForeignSixFoldCoupons } from "../foreign/coupon-service";
 import {
   resolveSession,
   loginWithGoogle,
@@ -248,6 +249,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
      "pool"
     ) ?? "sixfold";
 
+   /* A foreign meeting's altılı, built the same way (foreign/coupon-service.ts). */
+   let foreign=
+    url.searchParams.get(
+     "foreign"
+    )==="1";
+
    if(
     request.method==="POST"
    ) {
@@ -284,6 +291,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
       body?.pool ??
       pool
      );
+
+    if(body?.foreign!=null) {
+     foreign=
+      body.foreign===true ||
+      body.foreign==="1";
+    }
    }
 
    if(
@@ -311,6 +324,14 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     pool!=="sixfold" &&
     pool!=="fivefold"
    ) {
+    return json({
+     ok:false,
+     error:"INVALID_POOL"
+    },400);
+   }
+
+   /* TJK runs no Beşli Ganyan on a foreign card. */
+   if(foreign && pool!=="sixfold") {
     return json({
      ok:false,
      error:"INVALID_POOL"
@@ -347,7 +368,17 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    }
 
    const result=
-    pool==="fivefold"
+    foreign
+     ? await generateForeignSixFoldCoupons(
+        env,
+        {
+         city,
+         budgetTl,
+         sixfold,
+         multiplier
+        }
+       )
+     : pool==="fivefold"
      ? await generateFiveFoldCoupons(
         env,
         {
@@ -378,6 +409,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    return json({
     ok:true,
     pool,
+    foreign,
     windowNumber:
      pool==="fivefold"
       ?(result as any).fivefold
