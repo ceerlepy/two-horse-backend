@@ -434,7 +434,8 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    city:String(body?.city ?? ""),
    raceNumber:Number(body?.raceNumber),
    question:String(body?.question ?? ""),
-   language:body?.language==="en"?"en":"tr"
+   language:body?.language==="en"?"en":"tr",
+   foreign:body?.foreign===true || body?.foreign==="1"
   });
   if(result.ok) return json(result);
   const status=
