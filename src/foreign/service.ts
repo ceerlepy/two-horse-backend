@@ -234,6 +234,49 @@ export async function refreshForeignMeetingsIfDue(
 
 
 /*
+ * A whole foreign meeting with calibrated win probabilities and any
+ * official results, for the meeting-wide "AI'ya sor" button.
+ */
+export async function getForeignMeeting(
+  env: Env,
+  raceDate: string,
+  city: string
+): Promise<{ city: string; country: string | null; races: ForeignRace[] } | null> {
+  const row =
+    await env.DB.prepare(`
+      SELECT city, country, program_json
+      FROM foreign_meetings
+      WHERE race_date = ? AND LOWER(city) = LOWER(?)
+    `)
+      .bind(raceDate, city)
+      .first<any>();
+
+  if (!row) return null;
+
+  let races: ForeignRace[] = [];
+
+  try {
+    races = JSON.parse(row.program_json);
+  } catch {
+    return null;
+  }
+
+  const group = foreignCountryGroup(row.city, row.country);
+  const results = (await getForeignResults(env, raceDate)).get(row.city);
+
+  return {
+    city: row.city,
+    country: row.country ?? null,
+    races: races.map(race => {
+      const priced = withForeignWinProbs(race, group) as ForeignRace;
+      const result = results?.get(race.raceNumber);
+      return result ? { ...priced, result: result.slice(0, 3) } : priced;
+    })
+  };
+}
+
+
+/*
  * One foreign race with its calibrated win probabilities, for
  * "AI'ya sor" (../ask/service.ts). Read straight from the stored
  * programme: a foreign card has no expert picks, handicap points or

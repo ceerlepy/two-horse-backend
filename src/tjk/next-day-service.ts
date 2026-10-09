@@ -20,6 +20,10 @@ import {
   extractTjkProgramForDate
 } from "./extraction-pipeline";
 
+import {
+  isForeignTjkMeeting
+} from "./meeting-classification";
+
 /*
  * Tomorrow's TJK program (D+1), for display only.
  *
@@ -232,7 +236,12 @@ export async function loadNextDayProgram(
 
   try {
     const parsed = JSON.parse(row.program_json) as NextDayProgram;
-    return parsed?.meetings?.length ? parsed : null;
+    /* Cards stored before the foreign filter may still carry YD meetings. */
+    const meetings =
+      (parsed?.meetings ?? []).filter(
+        meeting => !isForeignTjkMeeting(meeting.city)
+      );
+    return meetings.length ? { ...parsed, meetings } : null;
   } catch {
     return null;
   }

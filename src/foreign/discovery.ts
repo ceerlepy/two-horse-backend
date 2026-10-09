@@ -19,6 +19,7 @@ export interface ForeignMeetingLink {
 const COUNTRY_SUFFIXES: Array<[RegExp, string]> = [
   [/\s(?:Güney|Guney)\s+Afrika$/iu, "Güney Afrika"],
   [/\s(?:İngiltere|Ingiltere|Ingıltere)$/iu, "İngiltere"],
+  [/\s(?:Birleşik|Birlesik)\s+(?:Krallık|Krallik)$/iu, "Birleşik Krallık"],
   [/\s(?:İrlanda|Irlanda)$/iu, "İrlanda"],
   [/\s(?:Birleşik\s+Arap\s+Emirlikleri|BAE)$/iu, "BAE"],
   [/\sHong\s+Kong$/iu, "Hong Kong"],

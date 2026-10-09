@@ -26,6 +26,7 @@ import {
 } from "../experts/ai-response-cache";
 
 import {
+  getForeignMeeting,
   getForeignRace
 } from "../foreign/service";
 
@@ -75,7 +76,19 @@ export interface AskRequest {
   language: AskLanguage;
   /* A TJK foreign ("YD") card; see foreignRaceContext below. */
   foreign?: boolean;
+  /*
+   * The card's own date for a foreign meeting: an American card runs
+   * past midnight Turkey time but keeps its date. Today or yesterday.
+   */
+  raceDate?: string;
 }
+
+/*
+ * raceNumber 0 on a foreign card asks about the whole meeting (the
+ * screen's bottom-right button); a race card's own button sends its
+ * race number.
+ */
+export const WHOLE_MEETING = 0;
 
 export type AskResult =
   | {
@@ -229,6 +242,45 @@ export function foreignRaceContext(
     .join("\n");
 }
 
+/* Every race of a foreign meeting, top runners only, for meeting-wide questions. */
+export function foreignMeetingContext(
+  meeting: { city: string; country: string | null; races: any[] }
+): string {
+  const races =
+    [...(meeting.races ?? [])]
+      .sort((a: any, b: any) => Number(a.raceNumber) - Number(b.raceNumber))
+      .map((race: any) => {
+        const runners =
+          [...(race.runners ?? [])]
+            .filter((runner: any) => runner?.number != null)
+            .sort(
+              (a: any, b: any) =>
+                Number(b?.winProb ?? -1) - Number(a?.winProb ?? -1)
+            )
+            .slice(0, 5)
+            .map((runner: any) =>
+              `#${runner.number} ${runner.name ?? ""} ${
+                runner.winProb != null ? percent(runner.winProb) : "-"
+              } (AGF ${fixed(runner.agfPercent)}%, form ${runner.recentForm || "debut"})`
+            );
+
+        const result =
+          (race.result ?? []).length
+            ? ` | official result: ${(race.result as any[])
+              .map(item => `${item.position}. #${item.number} ${item.name}`)
+              .join(", ")}`
+            : "";
+
+        return `Race ${race.raceNumber} (${race.time ?? "?"}, ${race.distanceMeters ?? "?"}m ${race.track ?? ""}, ${(race.runners ?? []).length} runners): ${runners.join("; ")}${result}`;
+      });
+
+  return [
+    `Meeting: ${meeting.city}${meeting.country ? ` (${meeting.country})` : ""}, the whole card. Each race lists our top five by corrected win chance.`,
+    "This is a foreign card: there are no expert picks, no handicap points and no AGF movement for it. Our win chance is AGF corrected for the country and the field size.",
+    ...races
+  ].join("\n");
+}
+
 export function askMessages(
   context: string,
   question: string,
@@ -318,7 +370,7 @@ async function questionKey(
     [
       request.city.trim().toLocaleLowerCase("tr-TR"),
       request.raceNumber,
-      request.foreign ? "yd" : "tr",
+      request.foreign ? `yd:${request.raceDate ?? ""}` : "tr",
       request.language,
       normalizeQuestion(request.question)
     ].join("|")
@@ -391,7 +443,8 @@ export async function askAi(
     question.length > ASK_AI_CONFIG.maxQuestionChars ||
     !request.city ||
     !Number.isInteger(request.raceNumber) ||
-    request.raceNumber <= 0
+    request.raceNumber < 0 ||
+    (request.raceNumber === WHOLE_MEETING && !request.foreign)
   ) {
     return { ok: false, error: "INVALID_QUESTION" };
   }
@@ -407,14 +460,32 @@ export async function askAi(
   let context: string;
 
   if (request.foreign) {
-    const found =
-      await getForeignRace(env, date, request.city, request.raceNumber);
+    const yesterday =
+      new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
 
-    if (!found) {
-      return { ok: false, error: "RACE_NOT_FOUND" };
+    const cardDate =
+      request.raceDate === yesterday ? yesterday : date;
+
+    if (request.raceNumber === WHOLE_MEETING) {
+      const meeting = await getForeignMeeting(env, cardDate, request.city);
+
+      if (!meeting) {
+        return { ok: false, error: "RACE_NOT_FOUND" };
+      }
+
+      context = foreignMeetingContext(meeting);
+    } else {
+      const found =
+        await getForeignRace(env, cardDate, request.city, request.raceNumber);
+
+      if (!found) {
+        return { ok: false, error: "RACE_NOT_FOUND" };
+      }
+
+      context = foreignRaceContext(found, found.race);
     }
-
-    context = foreignRaceContext(found, found.race);
   } else {
     const meetings =
       attachValues(
