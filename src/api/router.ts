@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { json, errorMessage, turkeyDate } from "../shared";
 import { getToday } from "../storage/program-repository";
 import { toPublicMeetings, toPublicHistory } from "./public-projection";
+import { markAgfPending } from "./agf-pending";
 import { toCompactMeetings } from "./compact-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
 import { isTodayOver, nextDayForToday, refreshNextDayProgramIfDue } from "../tjk/next-day-service";
@@ -34,6 +35,7 @@ import { repairHistoricalDates } from "../results/historical-date-repair";
 import { getHorseVideos } from "../horses/service";
 import { getRaceTraining } from "../training/service";
 import { getForeignMeetings, refreshForeignMeetingsIfDue } from "../foreign/service";
+import { foreignCardStillRunning, previousDate } from "../foreign/results";
 import { generateForeignSixFoldCoupons } from "../foreign/coupon-service";
 import {
   resolveSession,
@@ -149,7 +151,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   const meetings=attachValues(await getToday(env),await loadTodayValues(env,turkeyDate()).catch(()=>({status:"unavailable",byRunner:new Map()})));
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
-  const publicMeetings=toPublicMeetings(meetings,session.tier);
+  const publicMeetings=markAgfPending(toPublicMeetings(meetings,session.tier));
   // Tomorrow's card (display only, no scores) once today's last race has started.
   // Early expert pick counts ride along (tier-gated like expertConsensus).
   const storedNextDay=await nextDayForToday(env,meetings).catch(()=>null);
@@ -175,10 +177,20 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
  if(url.pathname==="/api/foreign") {
   const session=await resolveSession(request,env);
   if(!session) return json({ok:false,error:"AUTH_REQUIRED"},401);
-  const date=url.searchParams.get("raceDate") ?? turkeyDate();
+  const explicitDate=url.searchParams.get("raceDate");
+  const date=explicitDate ?? turkeyDate();
   // AI picks and calibrated winProb follow the model-signal tier rule
   // (canViewFullSignals: Gold and up), like domestic modelScore.
-  const meetings=await getForeignMeetings(env,date,TIER_LIMITS[session.tier].canViewFullSignals);
+  const fullSignals=TIER_LIMITS[session.tier].canViewFullSignals;
+  const todays=(await getForeignMeetings(env,date,fullSignals)).map(m=>({...m,raceDate:date}));
+  // American cards run past midnight Turkey time under yesterday's date;
+  // keep yesterday's cards on screen while their races are still to come.
+  const yesterday=previousDate(date);
+  const late=explicitDate?[]:(await getForeignMeetings(env,yesterday,fullSignals))
+   .filter(m=>foreignCardStillRunning(yesterday,m.races))
+   .map(m=>({...m,raceDate:yesterday}));
+  // Same track on both days (e.g. Santa Anita): the running card first.
+  const meetings=[...late,...todays.filter(m=>!late.some(l=>l.city===m.city))];
   if(date===turkeyDate()) ctx.waitUntil(refreshForeignMeetingsIfDue(env).then(()=>undefined).catch(console.error));
   return json({date,meetings,servedFrom:"d1"});
  }
@@ -254,6 +266,12 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     url.searchParams.get(
      "foreign"
     )==="1";
+
+   /* Card date for a foreign meeting: today, or yesterday's late card. */
+   const foreignDateParam=
+    url.searchParams.get(
+     "raceDate"
+    );
 
    if(
     request.method==="POST"
@@ -368,7 +386,11 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
          budgetTl,
          sixfold,
          pool:pool as "sixfold" | "fivefold",
-         multiplier
+         multiplier,
+         raceDate:
+          foreignDateParam===previousDate(turkeyDate())
+           ? foreignDateParam
+           : undefined
         }
        )
      : pool==="fivefold"

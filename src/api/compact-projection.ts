@@ -74,7 +74,8 @@ const RACE_KEYS = [
   "starts_at",
   "distance_meters",
   "track",
-  "finalized_at"
+  "finalized_at",
+  "agfPending"
 ] as const;
 
 const RUNNER_KEYS = [
