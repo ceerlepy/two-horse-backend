@@ -34,6 +34,12 @@ export interface MyCouponInput {
   totalTl: number;
   combinations: number;
   legs: MyCouponLeg[];
+  /*
+   * The card's date. Only sent for a foreign meeting: an American card
+   * runs past midnight Turkey time but keeps its own date. Accepted when
+   * it is today or yesterday, otherwise today is used.
+   */
+  raceDate?: string;
 }
 
 export interface MyCouponEntry {
@@ -87,7 +93,12 @@ export function parseMyCouponInput(body: any): MyCouponInput | null {
     legs.push({ raceNumber, horseNumbers });
   }
 
-  return { city, pool, windowNumber, budgetTl, totalTl, combinations, legs };
+  const raceDate =
+    typeof body?.raceDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.raceDate)
+      ? body.raceDate
+      : undefined;
+
+  return { city, pool, windowNumber, budgetTl, totalTl, combinations, legs, ...(raceDate ? { raceDate } : {}) };
 }
 
 export async function saveMyCoupon(
@@ -96,7 +107,11 @@ export async function saveMyCoupon(
   input: MyCouponInput,
   now = new Date()
 ): Promise<{ ok: true; id: number } | { ok: false; error: "MY_COUPONS_DAILY_LIMIT" }> {
-  const raceDate = turkeyDate(now);
+  const today = turkeyDate(now);
+  const raceDate =
+    input.raceDate === today || input.raceDate === addDays(today, -1)
+      ? input.raceDate
+      : today;
   const selectionsJson = JSON.stringify(input.legs);
 
   const existing = await env.DB.prepare(
@@ -107,7 +122,7 @@ export async function saveMyCoupon(
 
   const count = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM my_coupons WHERE user_id = ? AND race_date = ?`
-  ).bind(userId, raceDate).first<{ n: number }>();
+  ).bind(userId, today).first<{ n: number }>();
   if (Number(count?.n ?? 0) >= MY_COUPONS_CONFIG.maxSavesPerDay) {
     return { ok: false, error: "MY_COUPONS_DAILY_LIMIT" };
   }
@@ -159,15 +174,23 @@ function addDays(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/* Winning horse per race for one meeting, from the same results the coupon evaluation uses. */
+/*
+ * Winning horse per race for one meeting, from the same results the coupon
+ * evaluation uses; a foreign (YD) meeting's come from foreign_results
+ * (../foreign/results.ts). City names never overlap between the two.
+ */
 async function winnersFor(env: Env, raceDate: string, city: string): Promise<Map<number, number>> {
   const rows = await env.DB.prepare(
     `SELECT lr.race_number, lrf.horse_number
      FROM learning_races lr
      JOIN learning_runner_features lrf
        ON lrf.race_date = lr.race_date AND lrf.city = lr.city AND lrf.race_number = lr.race_number
-     WHERE lr.race_date = ? AND lr.city = ? AND lrf.finish_position = 1`
-  ).bind(raceDate, city).all<any>();
+     WHERE lr.race_date = ? AND lr.city = ? AND lrf.finish_position = 1
+     UNION ALL
+     SELECT race_number, horse_number
+     FROM foreign_results
+     WHERE race_date = ? AND city = ? AND finish_position = 1`
+  ).bind(raceDate, city, raceDate, city).all<any>();
 
   const winners = new Map<number, number>();
   for (const row of rows.results ?? []) {

@@ -125,7 +125,7 @@ describe("withForeignWinProbs", () => {
 
 describe("/api/foreign winProb tier gate", () => {
   async function envWithMeeting(): Promise<any> {
-    const env: any = { DB: createSqliteD1(["migrations/0034_foreign_meetings.sql"]) };
+    const env: any = { DB: createSqliteD1(["migrations/0034_foreign_meetings.sql", "migrations/0051_foreign_results.sql"]) };
     await env.DB.prepare(
       "CREATE TABLE foreign_expert_pages (race_date TEXT, city TEXT, source_key TEXT, picks_json TEXT)"
     ).run();

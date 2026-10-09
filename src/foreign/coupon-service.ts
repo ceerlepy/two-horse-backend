@@ -23,7 +23,9 @@ import {
 import {
   foreignCouponLegs,
   foreignCouponWindows,
-  type CouponRaceInput
+  foreignPoolLegCount,
+  type CouponRaceInput,
+  type ForeignPool
 } from "./model-coupon";
 
 import type {
@@ -35,7 +37,10 @@ export interface ForeignCouponResult {
   date: string;
   city: string;
   country: string | null;
-  sixfold: number;
+  pool: ForeignPool;
+  /* Window number, under the key the domestic response uses for the pool. */
+  sixfold?: number;
+  fivefold?: number;
   startRace: number;
   endRace: number;
   startTime: string | null;
@@ -48,14 +53,14 @@ export interface ForeignCouponResult {
 
 
 /*
- * The user's own altılı for a foreign meeting, at the budget they
- * picked. Same window and pricing rules as the card's fixed-budget
+ * The user's own altılı (or beşli) for a foreign meeting, at the budget
+ * they picked. Same window and pricing rules as the card's fixed-budget
  * coupon (./model-coupon.ts) and the same optimiser as the domestic
  * coupons, so a foreign coupon reads exactly like a domestic one.
  *
- * Nothing is persisted: the sixfold snapshot and evaluation tables are
- * keyed on domestic meetings, and a foreign card has no results feed
- * here to evaluate against.
+ * Nothing is persisted here: the snapshot and evaluation tables are
+ * keyed on domestic meetings. A member who saves the coupon to
+ * "Kuponlarım" gets it scored from ./results.ts.
  */
 export async function generateForeignSixFoldCoupons(
   env: Env,
@@ -63,11 +68,17 @@ export async function generateForeignSixFoldCoupons(
     city: string;
     budgetTl: number;
     sixfold: number;
+    pool?: ForeignPool;
     multiplier?: number;
     raceDate?: string;
   }
 ): Promise<ForeignCouponResult> {
   const raceDate = input.raceDate ?? turkeyDate();
+  const pool = input.pool ?? "sixfold";
+  const unavailable =
+    pool === "fivefold"
+      ? "FIVE_FOLD_WINDOW_NOT_AVAILABLE"
+      : "SIX_FOLD_WINDOW_NOT_AVAILABLE";
 
   const row =
     await env.DB.prepare(`
@@ -98,16 +109,17 @@ export async function generateForeignSixFoldCoupons(
     ) as unknown as CouponRaceInput[];
 
   const startRaceNumber =
-    foreignCouponWindows(priced).get(input.sixfold);
+    foreignCouponWindows(priced, pool).get(input.sixfold);
 
   if (startRaceNumber === undefined) {
-    throw new Error("SIX_FOLD_WINDOW_NOT_AVAILABLE");
+    throw new Error(unavailable);
   }
 
-  const prepared = foreignCouponLegs(priced, startRaceNumber);
+  const prepared =
+    foreignCouponLegs(priced, startRaceNumber, foreignPoolLegCount(pool));
 
   if (!prepared) {
-    throw new Error("SIX_FOLD_WINDOW_NOT_AVAILABLE");
+    throw new Error(unavailable);
   }
 
   const unitPriceTl = sixFoldUnitPrice({ isForeign: true });
@@ -124,7 +136,10 @@ export async function generateForeignSixFoldCoupons(
     date: raceDate,
     city: row.city,
     country: row.country ?? null,
-    sixfold: input.sixfold,
+    pool,
+    ...(pool === "fivefold"
+      ? { fivefold: input.sixfold }
+      : { sixfold: input.sixfold }),
     startRace: prepared.races[0].raceNumber,
     endRace: prepared.races[prepared.races.length - 1].raceNumber,
     startTime: prepared.races[0].time ?? null,

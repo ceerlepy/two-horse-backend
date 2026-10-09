@@ -330,14 +330,6 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
     },400);
    }
 
-   /* TJK runs no Beşli Ganyan on a foreign card. */
-   if(foreign && pool!=="sixfold") {
-    return json({
-     ok:false,
-     error:"INVALID_POOL"
-    },400);
-   }
-
    if(couponSession) {
     const maxBudgetTl=
      TIER_LIMITS[couponSession.tier].maxCouponBudgetTl;
@@ -375,6 +367,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
          city,
          budgetTl,
          sixfold,
+         pool:pool as "sixfold" | "fivefold",
          multiplier
         }
        )
