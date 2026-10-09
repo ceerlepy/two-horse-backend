@@ -58,6 +58,19 @@ function componentFeatures(
   };
 }
 
+/* 50 + (score - 50) x data completeness, completeness clamped to 0..1. */
+export function shrinkTowardMiddle(
+  score: number,
+  completeness: number
+): number {
+  const weight =
+    Number.isFinite(completeness)
+      ? Math.min(1, Math.max(0, completeness))
+      : 0;
+
+  return Math.round((50 + (score - 50) * weight) * 100) / 100;
+}
+
 export function scoreRace<
   T extends ScoringRunner
 >(
@@ -113,6 +126,19 @@ export function scoreRace<
 
           modelScore: {
             ...modelScore,
+
+            /*
+             * No AGF yet (overnight until race morning): the weighted
+             * score is built from whatever parts exist, so a horse with
+             * only expert picks could read 100. Pull it toward the
+             * race-average 50 by how much of the score is populated.
+             */
+            score:
+              shrinkTowardMiddle(
+                modelScore.score,
+                modelScore.confidence
+              ),
+
             winProbability: null,
             scoreSource:
               "weighted" as const,
