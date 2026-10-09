@@ -104,6 +104,36 @@ export function foreignRaceStarts(
 }
 
 
+/* The calendar day before a YYYY-MM-DD date. */
+export function previousDate(
+  date: string
+): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+
+/*
+ * Whether a card dated `raceDate` still has a race to come: its last
+ * start is less than an hour ago (or ahead). Used after midnight, when
+ * an American card keeps running under yesterday's date.
+ */
+export function foreignCardStillRunning(
+  raceDate: string,
+  races: Array<{ raceNumber: number; time?: string | null }>,
+  now = new Date()
+): boolean {
+  const starts = [...foreignRaceStarts(raceDate, races).values()];
+
+  if (!starts.length) return false;
+
+  const last = Math.max(...starts.map(start => start.getTime()));
+
+  return last + 60 * 60_000 > now.getTime();
+}
+
+
 function nameKey(
   value: string
 ): string {

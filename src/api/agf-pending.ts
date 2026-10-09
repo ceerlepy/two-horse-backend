@@ -1,9 +1,8 @@
 /*
  * TJK opens AGF on race morning. Before that the learned model has no
- * anchor and scoring falls back to the old weighted score, which picks
- * the winner less often than the AGF favourite. A race with no AGF on
- * any runner is therefore served without scores, uncertainty or coupon
- * advice, and coupons for it are refused, until AGF arrives.
+ * anchor and scoring falls back to the old weighted score with missing
+ * inputs. Such races are flagged so the app can say so in one notice;
+ * the cards themselves stay as they are.
  */
 export function isAgfPending(
   race: any
@@ -18,35 +17,14 @@ export function isAgfPending(
 }
 
 
-export function hideScoresUntilAgf<T extends { races?: any[] }>(
+export function markAgfPending<T extends { races?: any[] }>(
   meetings: T[]
 ): T[] {
   return meetings.map(meeting => ({
     ...meeting,
 
-    races: (meeting.races ?? []).map(race => {
-      if (!isAgfPending(race)) return race;
-
-      return {
-        ...race,
-        agfPending: true,
-        uncertainty: null,
-        couponStrategy: null,
-
-        runners: race.runners.map((runner: any) =>
-          runner?.modelScore
-            ? {
-                ...runner,
-                modelScore: {
-                  ...runner.modelScore,
-                  score: null,
-                  confidence: null,
-                  winProbability: null
-                }
-              }
-            : runner
-        )
-      };
-    })
+    races: (meeting.races ?? []).map(race =>
+      isAgfPending(race) ? { ...race, agfPending: true } : race
+    )
   }));
 }
