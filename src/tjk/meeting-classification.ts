@@ -2,6 +2,14 @@ import type {
   TjkProgramInput
 } from "../types/models";
 
+import {
+  countryOfForeignMeeting
+} from "../foreign/discovery";
+
+import {
+  foreignCountryGroup
+} from "../foreign/calibration";
+
 export interface MeetingLike {
   city: string;
   url: string;
@@ -40,6 +48,40 @@ export function isCompositeTjkMeetingName(
   );
 }
 
+/*
+ * A foreign (TJK "YD") meeting that slipped past the "(YD n)" label
+ * check. On 9 Oct 2026 tomorrow's stored card carried seven of them
+ * (Turffontein, Chantilly, York, ...) next to Ankara, İzmir and
+ * Diyarbakır, so the home screen listed them as Turkish meetings.
+ * TJK names foreign venues "<Venue> <Country>" and gives them a SehirId
+ * above the domestic range (1-9, Karma 17).
+ */
+export function isForeignTjkMeeting(
+  city: string,
+  url?: string | null
+): boolean {
+  if (
+    countryOfForeignMeeting(city) ||
+    foreignCountryGroup(city) !== "other"
+  ) {
+    return true;
+  }
+
+  if (url) {
+    try {
+      const id = Number(
+        new URL(url, "https://www.tjk.org").searchParams.get("SehirId")
+      );
+
+      if (Number.isInteger(id) && id > 17) return true;
+    } catch {
+      // not a URL: decided by name alone
+    }
+  }
+
+  return false;
+}
+
 export function filterCanonicalTjkMeetings<
   T extends MeetingLike
 >(
@@ -49,6 +91,10 @@ export function filterCanonicalTjkMeetings<
     meeting =>
       !isCompositeTjkMeetingName(
         meeting.city
+      ) &&
+      !isForeignTjkMeeting(
+        meeting.city,
+        meeting.url
       )
   );
 }

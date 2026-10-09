@@ -234,6 +234,10 @@ describe("AI'ya sor on a foreign card", () => {
       )
       .run();
 
+    await env.DB.prepare(
+      "CREATE TABLE foreign_results (race_date TEXT, city TEXT, race_number INTEGER, horse_number INTEGER, horse_name TEXT, finish_position INTEGER, fetched_at TEXT)"
+    ).run();
+
     return { env, run };
   }
 
@@ -281,6 +285,41 @@ describe("AI'ya sor on a foreign card", () => {
 
     expect(
       await askAi(env, "u1", "premium", { ...foreignAsk("Favori kim?"), raceNumber: 9 }, NOW)
+    ).toEqual({ ok: false, error: "RACE_NOT_FOUND" });
+  });
+
+  it("answers about the whole meeting from the screen's own button", async () => {
+    const { env, run } = await envWithForeign();
+
+    await env.DB.prepare(
+      "INSERT INTO foreign_results VALUES ('2026-10-05', ?, 2, 5, 'LATE CALL', 1, 'now')"
+    ).bind(FOREIGN_CITY).run();
+
+    const result =
+      await askAi(env, "u1", "premium", { ...foreignAsk("Bugün en sağlam koşu hangisi?"), raceNumber: 0 }, NOW);
+    expect(result).toMatchObject({ ok: true });
+
+    const prompt = (run.mock.calls[0] as any)[1].messages[1].content;
+    expect(prompt).toContain("Keeneland ABD (ABD), the whole card");
+    expect(prompt).toMatch(/Race 2 \(20:35, 1700m Kum, 3 runners\): #5 LATE CALL/);
+    expect(prompt).toContain("official result: 1. #5 LATE CALL");
+
+    /* A domestic race has no whole-meeting question. */
+    expect(
+      await askAi(env, "u1", "premium", ask("Favori kim?", { city: "Bursa", raceNumber: 0 }), NOW)
+    ).toEqual({ ok: false, error: "INVALID_QUESTION" });
+  });
+
+  it("finds an American card after midnight under its own date", async () => {
+    const { env } = await envWithForeign();
+    const afterMidnight = new Date("2026-10-05T22:30:00Z");
+
+    expect(
+      await askAi(env, "u1", "premium", { ...foreignAsk("Favori kim?"), raceDate: "2026-10-05" }, afterMidnight)
+    ).toMatchObject({ ok: true });
+
+    expect(
+      await askAi(env, "u1", "premium", { ...foreignAsk("Favori kim?") }, afterMidnight)
     ).toEqual({ ok: false, error: "RACE_NOT_FOUND" });
   });
 });
