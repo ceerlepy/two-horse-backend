@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { json, errorMessage, turkeyDate } from "../shared";
 import { getToday } from "../storage/program-repository";
 import { toPublicMeetings, toPublicHistory } from "./public-projection";
+import { hideScoresUntilAgf } from "./agf-pending";
 import { toCompactMeetings } from "./compact-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
 import { isTodayOver, nextDayForToday, refreshNextDayProgramIfDue } from "../tjk/next-day-service";
@@ -149,7 +150,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   const meetings=attachValues(await getToday(env),await loadTodayValues(env,turkeyDate()).catch(()=>({status:"unavailable",byRunner:new Map()})));
   if(meetings.length===0) ctx.waitUntil(refreshProgramIfDue(env).catch(console.error));
   else { ctx.waitUntil(refreshProgramIfDue(env).catch(console.error)); ctx.waitUntil(refreshExpertsIfDue(env).catch(console.error)); }
-  const publicMeetings=toPublicMeetings(meetings,session.tier);
+  const publicMeetings=hideScoresUntilAgf(toPublicMeetings(meetings,session.tier));
   // Tomorrow's card (display only, no scores) once today's last race has started.
   // Early expert pick counts ride along (tier-gated like expertConsensus).
   const storedNextDay=await nextDayForToday(env,meetings).catch(()=>null);

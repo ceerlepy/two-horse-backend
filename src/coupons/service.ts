@@ -11,6 +11,10 @@ import {
 } from "../storage/program-repository";
 
 import {
+  isAgfPending
+} from "../api/agf-pending";
+
+import {
   sixFoldUnitPrice,
   fiveFoldUnitPrice
 } from "./types";
@@ -249,6 +253,15 @@ export async function generateSixFoldCoupons(
   ) {
     throw new Error(
       "SIX_FOLD_WINDOW_NOT_AVAILABLE"
+    );
+  }
+
+  /* No AGF yet: the model cannot price these legs (see agf-pending). */
+  if (
+    selectedRaces.some(isAgfPending)
+  ) {
+    throw new Error(
+      "AGF_NOT_OPEN"
     );
   }
 
@@ -647,6 +660,15 @@ export async function generateFiveFoldCoupons(
   ) {
     throw new Error(
       "FIVE_FOLD_WINDOW_NOT_AVAILABLE"
+    );
+  }
+
+  /* No AGF yet: the model cannot price these legs (see agf-pending). */
+  if (
+    selectedRaces.some(isAgfPending)
+  ) {
+    throw new Error(
+      "AGF_NOT_OPEN"
     );
   }
 
