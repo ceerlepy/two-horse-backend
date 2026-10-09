@@ -79,6 +79,10 @@ import {
 } from "./foreign/service";
 
 import {
+  refreshForeignResultsIfDue
+} from "./foreign/results";
+
+import {
   refreshValueModel
 } from "./value-model/service";
 
@@ -156,6 +160,15 @@ async function runScheduledPipeline(
     "foreign.refresh",
     () =>
       refreshForeignMeetingsIfDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "foreign.results",
+    () =>
+      refreshForeignResultsIfDue(
         env
       )
   );

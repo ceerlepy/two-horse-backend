@@ -29,6 +29,18 @@ export const FOREIGN_MODEL_COUPON_CONFIG = {
 } as const;
 
 
+/*
+ * TJK runs a Beşli Ganyan on foreign cards too: the meeting page marks
+ * its first race with a bare "5'Lİ GANYAN", exactly like a domestic
+ * card, and the parser reads it into fivefoldStartNumbers.
+ */
+export type ForeignPool = "sixfold" | "fivefold";
+
+export function foreignPoolLegCount(pool: ForeignPool): number {
+  return pool === "fivefold" ? 5 : 6;
+}
+
+
 export interface CouponRunnerInput {
   number: number;
   name: string;
@@ -39,6 +51,7 @@ export interface CouponRaceInput {
   raceNumber: number;
   time?: string | null;
   sixfoldStartNumbers?: number[];
+  fivefoldStartNumbers?: number[];
   runners: CouponRunnerInput[];
 }
 
@@ -60,17 +73,23 @@ export interface ForeignModelCoupon {
 /*
  * TJK marks the first race of each altılı window on the meeting page
  * ("1. 6'LI GANYAN bu koşudan başlar"), so the legs are that race and
- * the five after it. Matched by race number, never by position: races
- * with no runners are dropped before this point and would shift a
- * positional window onto the wrong races.
+ * the five after it (four for a beşli). Matched by race number, never
+ * by position: races with no runners are dropped before this point and
+ * would shift a positional window onto the wrong races.
  */
 export function foreignCouponWindows(
-  races: CouponRaceInput[]
+  races: CouponRaceInput[],
+  pool: ForeignPool = "sixfold"
 ): Map<number, number> {
   const windows = new Map<number, number>();
 
   for (const race of races) {
-    for (const window of race.sixfoldStartNumbers ?? []) {
+    const starts =
+      pool === "fivefold"
+        ? race.fivefoldStartNumbers
+        : race.sixfoldStartNumbers;
+
+    for (const window of starts ?? []) {
       if (!windows.has(window)) {
         windows.set(window, race.raceNumber);
       }
@@ -83,11 +102,12 @@ export function foreignCouponWindows(
 
 function legRaces(
   races: CouponRaceInput[],
-  startRaceNumber: number
+  startRaceNumber: number,
+  legCount: number
 ): CouponRaceInput[] {
   const found: CouponRaceInput[] = [];
 
-  for (let i = 0; i < FOREIGN_MODEL_COUPON_CONFIG.legCount; i += 1) {
+  for (let i = 0; i < legCount; i += 1) {
     const race =
       races.find(item => item.raceNumber === startRaceNumber + i);
 
@@ -107,9 +127,10 @@ function legRaces(
  */
 export function foreignCouponLegs(
   races: CouponRaceInput[],
-  startRaceNumber: number
+  startRaceNumber: number,
+  legCount: number = FOREIGN_MODEL_COUPON_CONFIG.legCount
 ): { legs: CouponLegInput[]; races: CouponRaceInput[] } | null {
-  const found = legRaces(races, startRaceNumber);
+  const found = legRaces(races, startRaceNumber, legCount);
 
   if (!found.length) return null;
 

@@ -13,7 +13,7 @@ import {
 const NOW = new Date("2026-10-05T10:00:00Z");
 
 async function testEnv(): Promise<any> {
-  const env: any = { DB: createSqliteD1(["migrations/0047_my_coupons.sql"]) };
+  const env: any = { DB: createSqliteD1(["migrations/0047_my_coupons.sql", "migrations/0051_foreign_results.sql"]) };
   await env.DB.prepare(
     "CREATE TABLE learning_races (race_date TEXT, city TEXT, race_number INTEGER)"
   ).run();
@@ -105,5 +105,36 @@ describe("Kuponlarım", () => {
     await cleanupMyCoupons(env, NOW);
     const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM my_coupons").first();
     expect(row.n).toBe(0);
+  });
+
+  it("grades a foreign coupon from TJK's foreign results, on the card's own date", async () => {
+    const env = await testEnv();
+    /* 00:30 on 6 Oct in Turkey: an American card dated 5 Oct is still running. */
+    const lateNight = new Date("2026-10-05T21:30:00Z");
+    const coupon = {
+      ...fivefold(),
+      city: "Keeneland ABD",
+      raceDate: "2026-10-05"
+    };
+
+    const saved = await saveMyCoupon(env, "u1", parseMyCouponInput(coupon)!, lateNight);
+    expect(saved.ok).toBe(true);
+
+    for (const [raceNumber, horseNumber] of [[4, 2], [5, 3], [6, 9], [7, 6], [8, 7]]) {
+      await env.DB.prepare(
+        "INSERT INTO foreign_results VALUES ('2026-10-05', 'Keeneland ABD', ?, ?, 'X', 1, 'now')"
+      ).bind(raceNumber, horseNumber).run();
+    }
+
+    const [entry] = await listMyCoupons(env, "u1", lateNight);
+    expect(entry.raceDate).toBe("2026-10-05");
+    expect(entry.evaluated).toBe(true);
+    expect(entry.hitLegs).toBe(4);
+    expect(entry.allLegsHit).toBe(false);
+
+    /* A date that is neither today nor yesterday falls back to today. */
+    const stale = await saveMyCoupon(env, "u1", parseMyCouponInput({ ...coupon, raceDate: "2026-09-01" })!, lateNight);
+    const rows = await env.DB.prepare("SELECT race_date FROM my_coupons WHERE id = ?").bind((stale as any).id).all();
+    expect(rows.results[0].race_date).toBe("2026-10-06");
   });
 });

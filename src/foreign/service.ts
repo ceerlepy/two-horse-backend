@@ -41,6 +41,11 @@ import {
 } from "./model-coupon";
 
 import {
+  getForeignResults,
+  type ForeignResultRunner
+} from "./results";
+
+import {
   discoverForeignMeetingLinks,
   raceDateOfForeignLink,
   type ForeignMeetingLink
@@ -90,7 +95,11 @@ export interface ForeignRace {
    * the card -- see ./model-coupon.ts.
    */
   sixfoldStartNumbers?: number[];
+  /* Same for the meeting's beşli window (TJK runs one on most foreign cards). */
+  fivefoldStartNumbers?: number[];
   aiPick?: ForeignAiPick | null;
+  /* TJK's official top three once the race is run (./results.ts); free for all. */
+  result?: ForeignResultRunner[];
 }
 
 export interface ForeignAiCoupon {
@@ -131,6 +140,7 @@ async function fetchMeeting(
       distanceMeters: race.distanceMeters ?? null,
       track: race.track ?? null,
       sixfoldStartNumbers: race.sixfoldStartNumbers ?? [],
+      fivefoldStartNumbers: race.fivefoldStartNumbers ?? [],
       runners: race.runners.map(runner => ({
         number: runner.number,
         name: runner.name,
@@ -281,6 +291,8 @@ export async function getForeignMeetings(
       ? await getBankoForeignPicks(env, raceDate)
       : new Map<string, BankoPicks>();
 
+  const resultsByCity = await getForeignResults(env, raceDate);
+
   const rows = await env.DB.prepare(`
     SELECT city, country, yd_order, program_json, fetched_at
     FROM foreign_meetings
@@ -298,6 +310,14 @@ export async function getForeignMeetings(
       races = [];
     }
     const picks = picksByCity.get(row.city);
+    const results = resultsByCity.get(row.city);
+
+    if (results) {
+      races = races.map(race => {
+        const result = results.get(race.raceNumber);
+        return result ? { ...race, result: result.slice(0, 3) } : race;
+      });
+    }
 
     if (picks) {
       races = races.map(race => {

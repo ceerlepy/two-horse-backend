@@ -28,6 +28,8 @@ function races() {
       track: "Kum",
       sixfoldStartNumbers:
         raceNumber === 1 ? [1] : raceNumber === 3 ? [2] : [],
+      /* TJK's bare "5'Lİ GANYAN" marker on race 4. */
+      fivefoldStartNumbers: raceNumber === 4 ? [1] : [],
       runners: [40, 25, 20, 15].map((agfPercent, i) => ({
         number: i + 1,
         name: `HORSE ${i + 1}`,
@@ -129,5 +131,38 @@ describe("a foreign meeting's altılı at the user's own budget", () => {
       });
 
     expect(second.startRace).toBe(3);
+  });
+
+  it("builds the beşli window TJK marks, with five legs", async () => {
+    const env = await envWithMeeting();
+
+    const result =
+      await generateForeignSixFoldCoupons(env, {
+        city: CITY, budgetTl: 500, sixfold: 1, pool: "fivefold", raceDate: RACE_DATE
+      });
+
+    expect(result.pool).toBe("fivefold");
+    expect(result.fivefold).toBe(1);
+    expect(result.sixfold).toBeUndefined();
+    expect(result.startRace).toBe(4);
+    expect(result.endRace).toBe(8);
+    expect(result.unitPriceTl).toBe(1);
+
+    for (const coupon of result.coupons) {
+      expect(coupon.totalTl).toBeLessThanOrEqual(500);
+      expect(coupon.legs.map(leg => leg.raceNumber)).toEqual([4, 5, 6, 7, 8]);
+    }
+  });
+
+  it("refuses a beşli on a card stored before the marker was kept", async () => {
+    const env = await envWithMeeting(
+      races().map(race => ({ ...race, fivefoldStartNumbers: undefined }))
+    );
+
+    await expect(
+      generateForeignSixFoldCoupons(env, {
+        city: CITY, budgetTl: 500, sixfold: 1, pool: "fivefold", raceDate: RACE_DATE
+      })
+    ).rejects.toThrow("FIVE_FOLD_WINDOW_NOT_AVAILABLE");
   });
 });

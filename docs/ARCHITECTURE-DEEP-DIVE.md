@@ -360,9 +360,30 @@ rather than guessing. Verified live on all 7 foreign meetings of
 the user picked (`coupon-service.ts`), returning the domestic
 response's shape so the app's coupon screen renders it unchanged. Not
 persisted: the sixfold snapshot and evaluation tables are keyed on
-domestic meetings and no foreign results feed exists here, so the app
-also hides "Kuponlarıma kaydet" on a foreign coupon. `pool=fivefold`
-is refused, since TJK runs no Beşli Ganyan on a foreign card.
+domestic meetings.
+
+### Foreign beşli and results (9 Ekim 2026)
+
+TJK does run a Beşli Ganyan on foreign cards: the meeting page carries
+the same bare "5'Lİ GANYAN" marker as a domestic card, and the parser
+already read it into `fivefoldStartNumbers`. `service.ts` now keeps it,
+and `pool=fivefold` with `foreign=1` builds the five-leg window the same
+way (an earlier note here said the opposite; that was wrong). Cards
+stored before this change have no marker and answer
+`FIVE_FOLD_WINDOW_NOT_AVAILABLE` until the next programme refresh.
+
+`results.ts` reads the official finishing order from TJK's daily results
+page, using the `SehirId` the programme link already carries, with the
+domestic `parseOfficialResultsHtml` (plain HTTP, no browser). It runs from
+the cron every 20 minutes, and only fetches a meeting when one of its
+races started at least 15 minutes ago and has no stored result; after-
+midnight American races are rolled onto the next day. A race is stored
+only when final and when its winner's name matches the programme's horse
+under that number. Rows live in `foreign_results` (400 days), the top
+three are served as `result` on each race of `/api/foreign`, and
+"Kuponlarım" (`coupons/my-coupons.ts`) scores a saved foreign coupon from
+them. A save may send `raceDate` (today or yesterday only) so an American
+card saved after midnight keeps its own date.
 
 ---
 
