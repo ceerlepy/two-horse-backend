@@ -10,6 +10,8 @@ import {
   previousDate
 } from "../src/foreign/results";
 
+import { shrinkTowardMiddle } from "../src/scoring/race-score";
+
 const runner = (number: number, agf: number | null) => ({
   horse_number: number,
   agf_percent: agf,
@@ -57,5 +59,16 @@ describe("late foreign cards", () => {
     expect(foreignCardStillRunning("2026-10-09", races, new Date("2026-10-09T22:15:00Z"))).toBe(true);
     // 05:00 Turkey time: last race over for more than an hour.
     expect(foreignCardStillRunning("2026-10-09", races, new Date("2026-10-10T02:00:00Z"))).toBe(false);
+  });
+});
+
+
+describe("no-AGF score", () => {
+  it("pulls thin-data scores toward the middle", () => {
+    expect(shrinkTowardMiddle(100, 0.4)).toBe(70);
+    expect(shrinkTowardMiddle(100, 0.9)).toBe(95);
+    expect(shrinkTowardMiddle(30, 0.4)).toBe(42);
+    expect(shrinkTowardMiddle(80, 0)).toBe(50);
+    expect(shrinkTowardMiddle(80, 1.2)).toBe(80);
   });
 });
