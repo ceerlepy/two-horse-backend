@@ -163,8 +163,21 @@ const DELETE_EN = `
 <p>To stop the free trial from being reused, only a one-way hash of your email is kept. Deleting your account does not cancel a Google Play subscription; cancel it in Google Play → Payments &amp; subscriptions.</p>
 `;
 
+const HOME = `
+<h1>Two Horse</h1>
+<p>Türkiye at yarışları için program, AGF, sonuçlar ve model tahminleri sunan Android uygulaması. Uygulama bahis almaz, bahis sitelerine yönlendirmez; tahminler bahis tavsiyesi değildir. 18 yaş ve üzeri içindir.</p>
+<p class="muted">An Android app with race programs, odds, results and model-based predictions for horse racing in Turkey. It takes no bets and does not link to betting sites; predictions are not betting advice. For ages 18 and over.</p>
+<div class="box">
+<a href="/gizlilik">Gizlilik Politikası</a> · <a href="/privacy">Privacy Policy</a><br>
+<a href="/hesap-silme">Hesap silme</a> · <a href="/delete-account">Account deletion</a><br>
+İletişim / Contact: <a href="mailto:${SUPPORT}">${SUPPORT}</a>
+</div>
+`;
+
 export function legalPage(pathname: string): Response | null {
   switch (pathname.replace(/\/+$/, "")) {
+    case "":
+      return page("tr", "Two Horse", HOME);
     case "/gizlilik":
       return page("tr", "Two Horse Gizlilik Politikası", PRIVACY_TR);
     case "/privacy":
