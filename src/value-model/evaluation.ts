@@ -11,8 +11,11 @@ import { valueLabel } from "./predictions";
  * evaluationRaces races with the market they were anchored on (AGF, or
  * ganyan where there is no AGF). If the model is worse, labels are hidden
  * (status "paused") until a later evaluation recovers. Monthly: refit the
- * coefficients on the stored features and adopt them only if they beat the
- * coefficients in use on the newest 20% of races.
+ * coefficients on the last year of races (archive training rows from
+ * training.ts, replaced by the frozen live prediction wherever one exists)
+ * and adopt a variant only if it beats the coefficients in use on the
+ * newest 20% of races by minHoldoutGain with a 95% interval above zero.
+ * One variant is fitted per tick to stay inside the cron CPU budget.
  */
 export const EVALUATION_CONFIG = {
   evaluateEveryDays: 7,
@@ -22,7 +25,9 @@ export const EVALUATION_CONFIG = {
   minRacesToRetrain: 1500,
   retrainLookbackDays: 365,
   minHoldoutGain: 0.002,
-  minHistoryDays: 200
+  minHistoryDays: 200,
+  /* a skipped refit (too few races) is retried this often */
+  retrySkippedDays: 1
 } as const;
 
 export type ValueModelStatus = "active" | "paused" | "warming";
@@ -35,12 +40,13 @@ export interface StoredState {
   coefficients_json: string | null;
   coefficients_version: string | null;
   retrained_at: string | null;
+  retrain_json?: string | null;
 }
 
 export async function loadState(env: Env): Promise<StoredState> {
   const row = await env.DB.prepare(`SELECT * FROM value_model_state WHERE id = 1`).first<any>();
   return row ?? { status: "active", status_reason: null, evaluated_at: null, evaluation_json: null,
-    coefficients_json: null, coefficients_version: null, retrained_at: null };
+    coefficients_json: null, coefficients_version: null, retrained_at: null, retrain_json: null };
 }
 
 export function coefficientsFrom(state: StoredState): Coefficients {
@@ -52,6 +58,7 @@ export function coefficientsFrom(state: StoredState): Coefficients {
 
 export interface LabelledRow {
   raceKey: string;
+  raceCode?: number | null;
   raceDate: string;
   variant: Variant;
   pModel: number;
@@ -63,12 +70,13 @@ export interface LabelledRow {
 
 export async function loadLabelled(env: Env, sinceDate: string): Promise<LabelledRow[]> {
   const rows = await env.DB.prepare(`
-    SELECT race_date, city, race_number, variant, p_model, p_agf, p_ganyan, finish_position, features_json
+    SELECT race_date, city, race_number, race_code, variant, p_model, p_agf, p_ganyan, finish_position, features_json
     FROM value_model_predictions
     WHERE frozen_at IS NOT NULL AND finish_position IS NOT NULL AND race_date >= ?
   `).bind(sinceDate).all<any>();
   return (rows.results ?? []).map((r: any) => ({
     raceKey: `${r.race_date}|${r.city}|${r.race_number}`,
+    raceCode: r.race_code == null ? null : Number(r.race_code),
     raceDate: r.race_date,
     variant: r.variant,
     pModel: Number(r.p_model),
@@ -77,6 +85,35 @@ export async function loadLabelled(env: Env, sinceDate: string): Promise<Labelle
     won: Number(r.finish_position) === 1,
     features: JSON.parse(r.features_json || "[]")
   }));
+}
+
+/* Archive training rows (training.ts); pModel is unused by the refit and set to the market. */
+export async function loadArchiveTraining(env: Env, sinceDate: string): Promise<LabelledRow[]> {
+  const rows = await env.DB.prepare(`
+    SELECT race_code, race_date, variant, p_agf, p_ganyan, won, features_json
+    FROM value_model_training_rows WHERE race_date >= ?
+  `).bind(sinceDate).all<any>();
+  return (rows.results ?? []).map((r: any) => {
+    const pAgf = r.p_agf == null ? null : Number(r.p_agf);
+    const pGanyan = r.p_ganyan == null ? null : Number(r.p_ganyan);
+    return {
+      raceKey: `archive|${r.race_code}`,
+      raceCode: Number(r.race_code),
+      raceDate: r.race_date,
+      variant: r.variant,
+      pModel: (pGanyan ?? pAgf) as number,
+      pAgf,
+      pGanyan,
+      won: Number(r.won) === 1,
+      features: JSON.parse(r.features_json || "[]")
+    };
+  });
+}
+
+/* Live frozen rows win over archive rows of the same race (they carry the bet-time market). */
+export function mergeTrainingRows(live: LabelledRow[], archive: LabelledRow[]): LabelledRow[] {
+  const liveCodes = new Set(live.map(r => r.raceCode).filter((x): x is number => x != null));
+  return [...archive.filter(r => !liveCodes.has(r.raceCode as number)), ...live];
 }
 
 /* Races with exactly one winner; probabilities renormalised over the starters. */
@@ -180,49 +217,74 @@ function variantRaces(races: LabelledRow[][], v: Variant): LabelledRow[][] {
     (v === "agf" ? r.pAgf != null : r.pGanyan != null) && (v !== "full" || r.pAgf != null)));
 }
 
-interface Design { x: Float64Array[]; y: number[]; races: number[][]; cols: number }
+interface Design { x: Float64Array; y: Uint8Array; starts: Int32Array; cols: number }
 
+/* Flat row-major design matrix; starts[r]..starts[r+1] are race r's rows. */
 function design(races: LabelledRow[][], v: Variant, spec: VariantCoefficients): Design {
   const idx = spec.features.map(f => VALUE_MODEL_FEATURES.indexOf(f.name as FeatureName));
   const cols = 1 + 2 * spec.features.length;
-  const x: Float64Array[] = [], y: number[] = [], groups: number[][] = [];
-  for (const race of races) {
-    const g: number[] = [];
+  const n = races.reduce((s, race) => s + race.length, 0);
+  const x = new Float64Array(n * cols), y = new Uint8Array(n), starts = new Int32Array(races.length + 1);
+  let i = 0;
+  races.forEach((race, g) => {
+    starts[g] = i;
     for (const r of race) {
-      const row = new Float64Array(cols);
+      const o = i * cols;
       const p = r[ANCHOR[v]] as number;
-      row[0] = Math.log(v === "agf" ? Math.max(p, 1e-4) : p);
+      x[o] = Math.log(v === "agf" ? Math.max(p, 1e-4) : p);
       spec.features.forEach((f, j) => {
         const val = r.features[idx[j]];
-        if (val == null) { row[1 + 2 * j + 1] = 1; return; }
-        row[1 + 2 * j] = Math.max(-4, Math.min(4, (val - f.mean) / (f.sd || 1)));
+        if (val == null) { x[o + 2 + 2 * j] = 1; return; }
+        x[o + 1 + 2 * j] = Math.max(-4, Math.min(4, (val - f.mean) / (f.sd || 1)));
       });
-      g.push(x.length); x.push(row); y.push(r.won ? 1 : 0);
+      y[i] = r.won ? 1 : 0;
+      i++;
     }
-    groups.push(g);
-  }
-  return { x, y, races: groups, cols };
+  });
+  starts[races.length] = i;
+  return { x, y, starts, cols };
 }
 
-function nll(d: Design, b: Float64Array, grad?: Float64Array): number {
-  let total = 0;
-  for (const g of d.races) {
-    const u = g.map(i => { let s = 0; const row = d.x[i]; for (let k = 0; k < d.cols; k++) s += row[k] * b[k]; return s; });
-    const m = Math.max(...u);
-    const e = u.map(v => Math.exp(v - m));
-    const z = e.reduce((s, v) => s + v, 0);
-    g.forEach((i, j) => {
-      const p = e[j] / z;
-      if (d.y[i]) total -= Math.log(p);
-      if (grad) { const row = d.x[i]; const w = p - d.y[i]; for (let k = 0; k < d.cols; k++) grad[k] += w * row[k]; }
-    });
+/* Per-race negative log-likelihood; adds the gradient into grad when given. */
+function raceLosses(d: Design, b: Float64Array, grad?: Float64Array): Float64Array {
+  const { x, y, starts, cols } = d;
+  const losses = new Float64Array(starts.length - 1);
+  const u = new Float64Array(64);
+  for (let g = 0; g + 1 < starts.length; g++) {
+    const a = starts[g], n = starts[g + 1] - a;
+    const buf = n <= u.length ? u : new Float64Array(n);
+    let max = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const o = (a + i) * cols;
+      let s = 0;
+      for (let k = 0; k < cols; k++) s += x[o + k] * b[k];
+      buf[i] = s;
+      if (s > max) max = s;
+    }
+    let z = 0;
+    for (let i = 0; i < n; i++) { buf[i] = Math.exp(buf[i] - max); z += buf[i]; }
+    for (let i = 0; i < n; i++) {
+      const p = buf[i] / z;
+      if (y[a + i]) losses[g] = -Math.log(p);
+      if (grad) {
+        const w = p - y[a + i], o = (a + i) * cols;
+        for (let k = 0; k < cols; k++) grad[k] += w * x[o + k];
+      }
+    }
   }
-  return total;
+  return losses;
 }
 
-export function fitVariant(races: LabelledRow[][], v: Variant, template: VariantCoefficients, l2 = 5): VariantCoefficients {
+/*
+ * warmStart: begin from these coefficients (same feature list) and run
+ * fewer steps; used for the full-data refit after the holdout fit.
+ */
+export function fitVariant(
+  races: LabelledRow[][], v: Variant, template: VariantCoefficients, l2 = 5,
+  warmStart: VariantCoefficients | null = null, steps = 600
+): VariantCoefficients {
   /* standardisation from the training rows */
-  const features = template.features.map((f, j) => {
+  const features = template.features.map(f => {
     const idx = VALUE_MODEL_FEATURES.indexOf(f.name as FeatureName);
     const vals = races.flat().map(r => r.features[idx]).filter((x): x is number => x != null);
     const mean = vals.length ? vals.reduce((s, x) => s + x, 0) / vals.length : 0;
@@ -231,12 +293,13 @@ export function fitVariant(races: LabelledRow[][], v: Variant, template: Variant
   });
   const spec: VariantCoefficients = { ...template, features };
   const d = design(races, v, spec);
-  const b = new Float64Array(d.cols); b[0] = 1;
+  const b = warmStart ? coefficientVector(warmStart, d.cols) : new Float64Array(d.cols);
+  if (!warmStart) b[0] = 1;
   const m = new Float64Array(d.cols), s = new Float64Array(d.cols);
   const lr = 0.02, b1 = 0.9, b2 = 0.999;
-  for (let t = 1; t <= 600; t++) {
+  for (let t = 1; t <= steps; t++) {
     const g = new Float64Array(d.cols);
-    nll(d, b, g);
+    raceLosses(d, b, g);
     for (let k = 1; k < d.cols; k++) g[k] += 2 * l2 * b[k];
     for (let k = 0; k < d.cols; k++) {
       m[k] = b1 * m[k] + (1 - b1) * g[k];
@@ -252,45 +315,117 @@ export function fitVariant(races: LabelledRow[][], v: Variant, template: Variant
   };
 }
 
-export function holdoutLogLoss(races: LabelledRow[][], v: Variant, spec: VariantCoefficients): number {
-  const d = design(races, v, spec);
-  const b = new Float64Array(d.cols);
+function coefficientVector(spec: VariantCoefficients, cols: number): Float64Array {
+  const b = new Float64Array(cols);
   b[0] = spec.anchorCoef;
   spec.features.forEach((f, j) => { b[1 + 2 * j] = f.coef; b[2 + 2 * j] = f.naCoef; });
-  return d.races.length ? nll(d, b) / d.races.length : Infinity;
+  return b;
 }
 
-export async function retrainIfDue(env: Env, state: StoredState): Promise<void> {
-  if (state.status === "warming") return;
-  if (state.retrained_at && Date.now() - Date.parse(state.retrained_at) < EVALUATION_CONFIG.retrainEveryDays * 86_400_000) return;
+export function holdoutLogLoss(races: LabelledRow[][], v: Variant, spec: VariantCoefficients): number {
+  const d = design(races, v, spec);
+  const losses = raceLosses(d, coefficientVector(spec, d.cols));
+  return losses.length ? losses.reduce((s, x) => s + x, 0) / losses.length : Infinity;
+}
 
-  const current = coefficientsFrom(state);
-  const races = groupRaces(await loadLabelled(env, addDays(turkeyDate(), -EVALUATION_CONFIG.retrainLookbackDays)));
-  const summary: Record<string, unknown> = { races: races.length };
-  const next: Coefficients = JSON.parse(JSON.stringify(current));
-  let adopted = false;
+/* Paired per-race comparison on the same races: mean log-loss gain and its 95% interval. */
+export function holdoutComparison(races: LabelledRow[][], v: Variant, current: VariantCoefficients, candidate: VariantCoefficients) {
+  const a = raceLosses(design(races, v, current), coefficientVector(current, 1 + 2 * current.features.length));
+  const b = raceLosses(design(races, v, candidate), coefficientVector(candidate, 1 + 2 * candidate.features.length));
+  const n = a.length;
+  const diffs = Array.from(a, (x, i) => x - b[i]);
+  const gain = n ? diffs.reduce((s, x) => s + x, 0) / n : 0;
+  const sd = n > 1 ? Math.sqrt(diffs.reduce((s, x) => s + (x - gain) ** 2, 0) / (n - 1)) : 0;
+  const se = n ? sd / Math.sqrt(n) : 0;
+  const mean = (l: Float64Array) => (l.length ? l.reduce((s, x) => s + x, 0) / l.length : Infinity);
+  return { races: n, before: mean(a), after: mean(b), gain, gainLow: gain - 1.96 * se, gainHigh: gain + 1.96 * se };
+}
 
-  if (races.length >= EVALUATION_CONFIG.minRacesToRetrain) {
-    for (const v of ["full", "ganyan", "agf"] as Variant[]) {
-      const rv = variantRaces(races, v);
-      if (rv.length < 500) { summary[v] = { races: rv.length, skipped: "too few races" }; continue; }
-      const cut = Math.floor(rv.length * 0.8);
-      const candidate = fitVariant(rv.slice(0, cut), v, current[v]);
-      const before = holdoutLogLoss(rv.slice(cut), v, current[v]);
-      const after = holdoutLogLoss(rv.slice(cut), v, candidate);
-      const accept = before - after >= EVALUATION_CONFIG.minHoldoutGain;
-      summary[v] = { races: rv.length, holdoutBefore: before, holdoutAfter: after, adopted: accept };
-      if (accept) { next[v] = fitVariant(rv, v, current[v]); adopted = true; }
+export function acceptRefit(c: ReturnType<typeof holdoutComparison>): boolean {
+  return c.gain >= EVALUATION_CONFIG.minHoldoutGain && c.gainLow > 0;
+}
+
+const VARIANTS: Variant[] = ["full", "ganyan", "agf"];
+const PROGRESS_KEY = "retrain-progress";
+
+interface RetrainProgress {
+  startedAt: string;
+  done: Variant[];
+  next: Coefficients;
+  adopted: boolean;
+  summary: Record<string, unknown>;
+}
+
+export async function loadRetrainRaces(env: Env): Promise<LabelledRow[][]> {
+  const since = addDays(turkeyDate(), -EVALUATION_CONFIG.retrainLookbackDays);
+  const [live, archive] = await Promise.all([loadLabelled(env, since), loadArchiveTraining(env, since)]);
+  return groupRaces(mergeTrainingRows(live, archive));
+}
+
+export function retrainDue(state: StoredState, now = Date.now()): boolean {
+  if (state.status === "warming") return false;
+  if (!state.retrained_at) return true;
+  const age = now - Date.parse(state.retrained_at);
+  let skipped = false;
+  try { skipped = Boolean(JSON.parse(state.retrain_json || "{}").skipped); } catch { /* treat as a real run */ }
+  const every = skipped ? EVALUATION_CONFIG.retrySkippedDays : EVALUATION_CONFIG.retrainEveryDays;
+  return age >= every * 86_400_000;
+}
+
+/* Fits one variant per call; the last one writes the outcome to value_model_state. */
+export async function retrainIfDue(env: Env, state: StoredState, trainingReady = true): Promise<void> {
+  const saved = await env.DB.prepare(`SELECT value_json FROM value_model_cache WHERE cache_key = ?`)
+    .bind(PROGRESS_KEY).first<any>();
+  let progress: RetrainProgress | null = saved ? JSON.parse(saved.value_json) : null;
+  if (!progress && (!trainingReady || !retrainDue(state))) return;
+
+  const races = await loadRetrainRaces(env);
+  const now = new Date().toISOString();
+
+  if (!progress) {
+    if (races.length < EVALUATION_CONFIG.minRacesToRetrain) {
+      await env.DB.prepare(`UPDATE value_model_state SET retrained_at=?, retrain_json=? WHERE id=1`)
+        .bind(now, JSON.stringify({ races: races.length, skipped: `needs ${EVALUATION_CONFIG.minRacesToRetrain} labelled races` }))
+        .run();
+      return;
     }
-  } else {
-    summary.skipped = `needs ${EVALUATION_CONFIG.minRacesToRetrain} labelled races`;
+    progress = { startedAt: now, done: [], next: JSON.parse(JSON.stringify(coefficientsFrom(state))), adopted: false, summary: { races: races.length } };
   }
 
-  const now = new Date().toISOString();
-  if (adopted) next._meta = { ...current._meta, version: `value-retrained-${now.slice(0, 10)}` };
-  await env.DB.prepare(`
-    UPDATE value_model_state SET retrained_at=?, retrain_json=?,
-      coefficients_json = COALESCE(?, coefficients_json), coefficients_version = COALESCE(?, coefficients_version)
-    WHERE id=1
-  `).bind(now, JSON.stringify(summary), adopted ? JSON.stringify(next) : null, adopted ? next._meta.version : null).run();
+  const v = VARIANTS.find(x => !progress!.done.includes(x));
+  if (v) {
+    const current = progress.next[v];
+    const rv = variantRaces(races, v);
+    if (rv.length < 500) {
+      progress.summary[v] = { races: rv.length, skipped: "too few races" };
+    } else {
+      const cut = Math.floor(rv.length * 0.8);
+      const candidate = fitVariant(rv.slice(0, cut), v, current);
+      const comparison = holdoutComparison(rv.slice(cut), v, current, candidate);
+      const accept = acceptRefit(comparison);
+      progress.summary[v] = { races: rv.length, holdout: comparison, adopted: accept };
+      if (accept) { progress.next[v] = fitVariant(rv, v, current, 5, candidate, 200); progress.adopted = true; }
+    }
+    progress.done.push(v);
+  }
+
+  if (progress.done.length < VARIANTS.length) {
+    await env.DB.prepare(`
+      INSERT INTO value_model_cache(cache_key, value_json, updated_at) VALUES(?,?,?)
+      ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
+    `).bind(PROGRESS_KEY, JSON.stringify(progress), now).run();
+    return;
+  }
+
+  const next = progress.next;
+  if (progress.adopted) next._meta = { ...next._meta, version: `value-retrained-${now.slice(0, 10)}`, trainedTo: now.slice(0, 10) };
+  await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE value_model_state SET retrained_at=?, retrain_json=?,
+        coefficients_json = COALESCE(?, coefficients_json), coefficients_version = COALESCE(?, coefficients_version)
+      WHERE id=1
+    `).bind(now, JSON.stringify(progress.summary), progress.adopted ? JSON.stringify(next) : null,
+      progress.adopted ? next._meta.version : null),
+    env.DB.prepare(`DELETE FROM value_model_cache WHERE cache_key = ?`).bind(PROGRESS_KEY)
+  ]);
 }

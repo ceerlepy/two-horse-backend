@@ -8,6 +8,8 @@ import { EVALUATION_CONFIG, coefficientsFrom, evaluateIfDue, loadState, retrainI
 import { GALLOP_CONFIG, refreshGallops } from "./gallops";
 import { ODDS_CONFIG, refreshGanyanOdds } from "./odds";
 import { freezeStartedRaces, labelPredictions, refreshPredictions, valueLabel } from "./predictions";
+import { TRAINING_CONFIG, pendingTrainingDates, refreshTrainingRows, trainingCoverage } from "./training";
+import { gallopBackfillState } from "./gallops";
 
 /*
  * One cron step for the value model. Order matters: freeze races that went
@@ -35,10 +37,17 @@ export async function refreshValueModel(env: Env): Promise<void> {
     await observed(env, "value-model.predict", () => refreshPredictions(env, coefficientsFrom(state)));
   }
   await observed(env, "value-model.label", () => labelPredictions(env));
-  await observed(env, "value-model.retrain", () => retrainIfDue(env, state));
+  await observed(env, "value-model.training", () => refreshTrainingRows(env));
+  await observed(env, "value-model.retrain", async () => retrainIfDue(env, state, await trainingReady(env)));
   await observed(env, "value-model.cleanup", () => cleanupValueModel(env));
 
   await markSuccess(env, "value-model");
+}
+
+/* The refit waits for the archive training rows, so it never fits on a half-built year. */
+async function trainingReady(env: Env): Promise<boolean> {
+  if (!(await gallopBackfillState(env)).done) return false;
+  return (await pendingTrainingDates(env, TRAINING_CONFIG.datesPerTick + 1)).length <= TRAINING_CONFIG.datesPerTick;
 }
 
 /* Once a day: keep the archive and caches bounded. */
@@ -55,7 +64,9 @@ export async function cleanupValueModel(env: Env): Promise<void> {
     env.DB.prepare(`DELETE FROM horse_gallop_state WHERE fetched_at < ?`).bind(before(GALLOP_CONFIG.retentionDays)),
     env.DB.prepare(`DELETE FROM ganyan_odds_snapshots WHERE race_date < ?`).bind(before(ODDS_CONFIG.retentionDays)),
     env.DB.prepare(`DELETE FROM ganyan_odds_polls WHERE race_date < ?`).bind(before(ODDS_CONFIG.retentionDays)),
-    env.DB.prepare(`DELETE FROM value_model_predictions WHERE race_date < ?`).bind(before(400))
+    env.DB.prepare(`DELETE FROM value_model_predictions WHERE race_date < ?`).bind(before(400)),
+    env.DB.prepare(`DELETE FROM value_model_training_rows WHERE race_date < ?`).bind(before(TRAINING_CONFIG.retentionDays)),
+    env.DB.prepare(`DELETE FROM value_model_training_dates WHERE race_date < ?`).bind(before(TRAINING_CONFIG.retentionDays))
   ]);
   await markSuccess(env, key);
 }
@@ -154,6 +165,8 @@ export async function valueModelStatus(env: Env): Promise<Record<string, unknown
     evaluation: state.evaluation_json ? JSON.parse(state.evaluation_json) : null,
     coefficientsVersion: state.coefficients_version ?? coefficientsFrom(state)._meta.version,
     retrainedAt: state.retrained_at,
+    retrain: state.retrain_json ? JSON.parse(state.retrain_json) : null,
+    training: { ...(await trainingCoverage(env)), gallopBackfill: await gallopBackfillState(env) },
     archive: { ...coverage, backfillStart: ARCHIVE_CONFIG.backfillStart, minHistoryDays: EVALUATION_CONFIG.minHistoryDays }
   };
 }
