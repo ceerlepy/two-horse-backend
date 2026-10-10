@@ -20,6 +20,14 @@
   "browser": {
     "binding": "BROWSER"
   },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": [
+        "destek@twohorse.app"
+      ]
+    }
+  ],
   "vars": {
     "APP_NAME": "Two Horse Backend",
     "APP_VERSION": "0.3.0"

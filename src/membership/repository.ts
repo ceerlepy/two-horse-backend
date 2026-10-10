@@ -468,6 +468,12 @@ export async function deleteUserAccount(
     ),
 
     env.DB.prepare(
+      `DELETE FROM password_reset_codes WHERE email = ?`
+    ).bind(
+      user.email
+    ),
+
+    env.DB.prepare(
       `DELETE FROM coupon_request_log WHERE user_id = ?`
     ).bind(
       user.id
