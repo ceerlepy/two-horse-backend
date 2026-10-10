@@ -49,6 +49,10 @@ import {
 } from "./results/runtime";
 
 import {
+  refreshLiveWinners
+} from "./results/live-winners";
+
+import {
   evaluatePendingSixFoldCoupons,
   evaluatePendingFiveFoldCoupons
 } from "./coupons/repository";
@@ -250,6 +254,15 @@ async function runScheduledPipeline(
     "results.ingest-official",
     () =>
       ingestOfficialResultsDue(
+        env
+      )
+  );
+
+  await observed(
+    env,
+    "results.live-winners",
+    () =>
+      refreshLiveWinners(
         env
       )
   );

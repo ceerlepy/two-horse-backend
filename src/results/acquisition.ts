@@ -182,7 +182,7 @@ function extractCityId(
 }
 
 
-async function discoverCityResultUrl(
+export async function discoverCityResultUrl(
   input: {
     raceDate: string;
     city: string;

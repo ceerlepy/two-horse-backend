@@ -180,17 +180,27 @@ function addDays(date: string, days: number): string {
  * (../foreign/results.ts). City names never overlap between the two.
  */
 async function winnersFor(env: Env, raceDate: string, city: string): Promise<Map<number, number>> {
+  /*
+   * Live winners (../results/live-winners.ts) mark a leg minutes after its
+   * race; the official result, when present, comes later in the order and
+   * overrides them.
+   */
   const rows = await env.DB.prepare(
-    `SELECT lr.race_number, lrf.horse_number
+    `SELECT race_number, horse_number, 0 AS priority
+     FROM live_race_winners
+     WHERE race_date = ? AND city = ?
+     UNION ALL
+     SELECT lr.race_number, lrf.horse_number, 1 AS priority
      FROM learning_races lr
      JOIN learning_runner_features lrf
        ON lrf.race_date = lr.race_date AND lrf.city = lr.city AND lrf.race_number = lr.race_number
      WHERE lr.race_date = ? AND lr.city = ? AND lrf.finish_position = 1
      UNION ALL
-     SELECT race_number, horse_number
+     SELECT race_number, horse_number, 1 AS priority
      FROM foreign_results
-     WHERE race_date = ? AND city = ? AND finish_position = 1`
-  ).bind(raceDate, city, raceDate, city).all<any>();
+     WHERE race_date = ? AND city = ? AND finish_position = 1
+     ORDER BY priority`
+  ).bind(raceDate, city, raceDate, city, raceDate, city).all<any>();
 
   const winners = new Map<number, number>();
   for (const row of rows.results ?? []) {
