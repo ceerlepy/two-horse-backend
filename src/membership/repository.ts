@@ -543,6 +543,27 @@ export async function getLatestPurchase(
     : null;
 }
 
+/* The purchase the user made last, whatever its stored expiry. */
+export async function getNewestPurchaseToken(
+  env: Env,
+  userId: string
+): Promise<string | null> {
+  const row =
+    await env.DB.prepare(
+      `SELECT purchase_token
+       FROM play_purchases
+       WHERE user_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+      .bind(
+        userId
+      )
+      .first<{ purchase_token: string }>();
+
+  return row?.purchase_token ?? null;
+}
+
 export async function touchUpdatedAt(
   env: Env,
   userId: string
@@ -573,6 +594,47 @@ export async function touchLastLogin(
       userId
     )
     .run();
+}
+
+/*
+ * Google says the purchase no longer entitles the user (revoked,
+ * expired, on hold): pull the stored expiry back so effectiveTier
+ * drops them to free right away.
+ */
+export async function endPlaySubscription(
+  env: Env,
+  userId: string,
+  expiresAt: string,
+  purchaseToken: string,
+  rawStatus: string
+): Promise<void> {
+  const now =
+    isoNow();
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users
+       SET subscription_expires_at = ?,
+           subscription_auto_renew = 0,
+           subscription_pending_product_id = NULL,
+           updated_at = ?
+       WHERE id = ? AND tier_source = 'play_subscription'`
+    ).bind(
+      expiresAt,
+      now,
+      userId
+    ),
+    env.DB.prepare(
+      `UPDATE play_purchases
+       SET raw_status = ?, expiry_time_millis = ?, verified_at = ?
+       WHERE purchase_token = ?`
+    ).bind(
+      rawStatus,
+      Date.parse(expiresAt),
+      now,
+      purchaseToken
+    )
+  ]);
 }
 
 export async function applyVerifiedPurchase(
