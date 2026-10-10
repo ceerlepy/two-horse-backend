@@ -173,7 +173,7 @@ export async function requestPasswordReset(
   await env.EMAIL.send({
     from: {
       email: RESET_SENDER,
-      name: "Two Horse"
+      name: "Two Horse App"
     },
     to: email,
     subject: message.subject,
