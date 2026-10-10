@@ -47,6 +47,8 @@ import {
   deleteAccount
 } from "../membership/service";
 import { TIER_LIMITS } from "../membership/tier";
+import { requestPasswordReset, confirmPasswordReset } from "../membership/password-reset";
+import { legalPage } from "./legal-pages";
 import { checkCouponAllowance, recordCouponRequest } from "../membership/coupon-allowance";
 import { getCouponHistory } from "../coupons/history";
 import { askAi } from "../ask/service";
@@ -69,6 +71,11 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    cfRay:request.headers.get("cf-ray")
   }
  );
+
+ if(request.method==="GET") {
+  const legal=legalPage(url.pathname);
+  if(legal) return legal;
+ }
 
  if(url.pathname==="/api/health") return json({ok:true,app:env.APP_NAME,version:env.APP_VERSION,timestamp:new Date().toISOString()});
 
@@ -110,6 +117,34 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
    const error=errorMessage(e);
    const status=error==="EMAIL_ALREADY_REGISTERED"?409:(error==="INVALID_EMAIL"||error==="WEAK_PASSWORD")?400:500;
    return json({ok:false,error},status);
+  }
+ }
+
+ if(url.pathname==="/api/auth/password-reset/request" && request.method==="POST") {
+  try {
+   const body=await request.json<any>();
+   const email=String(body?.email ?? "");
+   if(!email.trim()) return json({ok:false,error:"EMAIL_REQUIRED"},400);
+   await requestPasswordReset(env,email,body?.lang==="en"?"en":"tr");
+   return json({ok:true});
+  } catch(e) {
+   logger.error(env,"auth.password-reset.send-failed",{error:errorMessage(e)});
+   return json({ok:false,error:"EMAIL_SEND_FAILED"},502);
+  }
+ }
+
+ if(url.pathname==="/api/auth/password-reset/confirm" && request.method==="POST") {
+  try {
+   const body=await request.json<any>();
+   const {token,user}=await confirmPasswordReset(env,{
+    email:String(body?.email ?? ""),
+    code:String(body?.code ?? ""),
+    newPassword:String(body?.newPassword ?? "")
+   });
+   return json({ok:true,token,user});
+  } catch(e) {
+   const error=errorMessage(e);
+   return json({ok:false,error},error==="WEAK_PASSWORD"||error==="INVALID_RESET_CODE"?400:500);
   }
  }
 
