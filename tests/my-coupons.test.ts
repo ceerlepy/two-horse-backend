@@ -13,7 +13,7 @@ import {
 const NOW = new Date("2026-10-05T10:00:00Z");
 
 async function testEnv(): Promise<any> {
-  const env: any = { DB: createSqliteD1(["migrations/0047_my_coupons.sql", "migrations/0051_foreign_results.sql"]) };
+  const env: any = { DB: createSqliteD1(["migrations/0047_my_coupons.sql", "migrations/0051_foreign_results.sql", "migrations/0053_live_race_winners.sql"]) };
   await env.DB.prepare(
     "CREATE TABLE learning_races (race_date TEXT, city TEXT, race_number INTEGER)"
   ).run();
@@ -75,6 +75,21 @@ describe("Kuponlarım", () => {
     await addWinner(env, 8, 7);
     mine = await listMyCoupons(env, "u1", NOW);
     expect(mine[0]).toMatchObject({ evaluated: true, legCount: 5, hitLegs: 4, allLegsHit: false });
+  });
+
+  it("marks a leg from the live winner before the official result, which then wins", async () => {
+    const env = await testEnv();
+    await saveMyCoupon(env, "u1", parseMyCouponInput(fivefold())!, NOW);
+
+    await env.DB.prepare(
+      "INSERT INTO live_race_winners VALUES ('2026-10-05', 'Bursa', 4, 2, '2026-10-05T09:00:00Z')"
+    ).run();
+    let mine = await listMyCoupons(env, "u1", NOW);
+    expect(mine[0].legs.map(l => l.winner)).toEqual([2, null, null, null, null]);
+
+    await addWinner(env, 4, 1);
+    mine = await listMyCoupons(env, "u1", NOW);
+    expect(mine[0].legs[0].winner).toBe(1);
   });
 
   it("deletes only the member's own coupon", async () => {
