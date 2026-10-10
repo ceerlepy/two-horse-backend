@@ -2726,9 +2726,7 @@ Referans AGF, AGF yoksa ganyan.
 **Kapı** (`evaluation.ts`): arşiv son 200 günü kapsayana kadar `warming`
 (tahmin yok). Haftalık: son 500 donmuş+etiketli koşuda log-loss model vs
 referans; ≥150 koşuda kazanç CI üst sınırı < 0 ya da ≥300 koşuda kazanç
-< 0 → `paused` ve API etiketleri göstermez. Aylık: ≥1500 koşu varsa son
-365 günle %80/%20 kronolojik yeniden eğitim; holdout'ta en az 0.002
-iyileşirse yeni katsayılar `value_model_state`'e yazılır.
+< 0 → `paused` ve API etiketleri göstermez. Aylık yeniden eğitim §71.3.
 
 **API.** `/api/today` koşucuya `valueModel {probability, agfProbability,
 ganyanProbability, odds, valueRatio, label, variant, computedAt}`, koşuya
@@ -2770,6 +2768,15 @@ Denenen dört parametre: pist durumu tercihi, uzmanlık, hipodrom geçmişi, jok
 - Jokey–antrenör ikilisi: +0,0002.
 
 Yeni veri gerekmiyor; mevcut arşivdeki geçmiş koşulardan hesaplanıyor. Katsayılar `value-v3-2026-10-05`.
+
+## 71.3 Aylık yeniden eğitim arşivden (2026-10-10)
+
+Önceden aylık eğitim yalnızca canlı donmuş tahminlerle çalışıyordu ve 1.500 koşu birikmesini (~Aralık ortası) bekliyordu. Artık son 365 günün TJK sonuç arşivi kullanılıyor.
+
+- **İdman tamamlama** (`gallops.ts`): arşivin son 400 gününde koşmuş ve idmanı hiç çekilmemiş atlar, at kimliği sırasıyla (imleç `value_model_cache` `gallop-backfill`) günün atlarından kalan tur kapasitesiyle çekilir (tur başına en fazla 30). Bir kez biter. İdman saklama süresi 120 → 430 gün.
+- **Eğitim satırları** (`training.ts`, tablo `value_model_training_rows`): idman tamamlama bittikten sonra her turda en yeni 3 arşiv günü işlenir. Her market koşusu için canlı modelin o sabah hesaplayacağı özellikler (geçmiş, jokey penceresi, kulvar hücreleri ve idmanlar; hepsi koşu gününden önce) ve final piyasa (AGF + final ganyan) saklanır. `featureVersion` değişince günler yeniden üretilir. Saklama 400 gün.
+- **Eğitim** (`evaluation.ts`): arşiv satırları + canlı donmuş satırlar; aynı koşunun canlı satırı varsa (bahis anı piyasası) o kullanılır. Eğitim, arşiv satırları hazır olmadan başlamaz. Her turda bir varyant uydurulur (cron CPU sınırı). Kabul: son %20 koşuda eşleştirilmiş log-loss kazancı ≥ 0,002 **ve** %95 aralığının alt sınırı > 0. Kabul edilen varyant tüm veriyle yeniden uydurulur. Atlanan eğitim (yetersiz koşu) günlük, tamamlanan eğitim 30 günde bir tekrarlanır. Sonuç `value_model_state.retrain_json`, ilerleme `GET /api/debug/value-model` içinde `training`.
+- Haftalık kapı değişmedi: yalnızca canlı tahminlerle ölçer ve model AGF'nin gerisine düşerse etiketleri kapatır.
 
 
 ## 72. Model puanı: elle verilen ağırlıklardan öğrenilmiş puana (2026-10-07)
