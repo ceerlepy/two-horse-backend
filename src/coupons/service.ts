@@ -32,6 +32,10 @@ import {
 } from "./repository";
 
 import {
+  riskLoverLegs
+} from "./risk-lover";
+
+import {
   currentSixFoldTemperature,
   currentFiveFoldTemperature
 } from "./calibration";
@@ -351,6 +355,33 @@ export async function generateSixFoldCoupons(
       temperature
     });
 
+  const riskLegs =
+    await riskLoverLegs(
+      env,
+      raceDate,
+      String(meeting.city),
+      selectedRaces,
+      legs
+    );
+
+  const riskLoverCoupons =
+    riskLegs
+      ? optimizeSixFoldCoupons({
+          legs: riskLegs,
+
+          budgetTl:
+            input.budgetTl,
+
+          unitPriceTl,
+
+          multiplier:
+            input.multiplier ??
+            1,
+
+          temperature
+        })
+      : [];
+
   let snapshotPersisted =
     false;
 
@@ -466,7 +497,9 @@ export async function generateSixFoldCoupons(
 
     snapshotPersistenceReason,
 
-    coupons
+    coupons,
+
+    riskLoverCoupons
   };
 }
 
@@ -749,6 +782,33 @@ export async function generateFiveFoldCoupons(
       temperature
     });
 
+  const riskLegs =
+    await riskLoverLegs(
+      env,
+      raceDate,
+      String(meeting.city),
+      selectedRaces,
+      legs
+    );
+
+  const riskLoverCoupons =
+    riskLegs
+      ? optimizeSixFoldCoupons({
+          legs: riskLegs,
+
+          budgetTl:
+            input.budgetTl,
+
+          unitPriceTl,
+
+          multiplier:
+            input.multiplier ??
+            1,
+
+          temperature
+        })
+      : [];
+
   let snapshotPersisted =
     false;
 
@@ -864,6 +924,8 @@ export async function generateFiveFoldCoupons(
 
     snapshotPersistenceReason,
 
-    coupons
+    coupons,
+
+    riskLoverCoupons
   };
 }
