@@ -2,21 +2,30 @@ import type { Env } from "../env";
 import { acquireHttpHtml } from "../acquisition/http";
 import { turkeyDate } from "../shared";
 import { decodeEntities } from "./archive-parser";
-import { tjkNumericId } from "./cities";
+import { addDays, tjkNumericId } from "./cities";
 import type { Gallop } from "./features";
 
 /*
  * A horse's latest training gallops (TJK keeps the newest 50 on
  * İdman İstatistikleri). The value model only looks back 30 days, so one
  * fetch per horse per race day is enough.
+ *
+ * The archive refit (training.ts) needs gallops before past races too, so
+ * a one-off backfill walks every horse of the last backfillDays of the
+ * result archive in horse-id order (a cursor, so a page that keeps
+ * failing cannot stall it) with the tick capacity today's runners leave.
+ * Rows are kept long enough to cover the refit window.
  */
 export const GALLOP_CONFIG = {
   horsesPerTick: 30,
   concurrency: 5,
   refetchAfterHours: 12,
   fetchTimeoutMs: 15_000,
-  retentionDays: 120
+  retentionDays: 430,
+  backfillDays: 400
 } as const;
+
+const BACKFILL_KEY = "gallop-backfill";
 
 export function gallopUrl(horseId: number): string {
   return `https://www.tjk.org/TR/YarisSever/Query/Data/IdmanIstatistikleri?QueryParameter_AtId=${horseId}`;
@@ -80,7 +89,65 @@ async function storeGallops(env: Env, horseId: number, gallops: Gallop[]): Promi
   for (let i = 0; i < statements.length; i += 60) await env.DB.batch(statements.slice(i, i + 60));
 }
 
-/* Today's runners whose gallops are missing or older than refetchAfterHours. */
+async function fetchAndStore(env: Env, ids: number[]): Promise<{ fetched: number; failed: number }> {
+  let fetched = 0, failed = 0;
+  for (let i = 0; i < ids.length; i += GALLOP_CONFIG.concurrency) {
+    await Promise.all(ids.slice(i, i + GALLOP_CONFIG.concurrency).map(async id => {
+      try {
+        const page = await acquireHttpHtml(gallopUrl(id), { timeoutMs: GALLOP_CONFIG.fetchTimeoutMs, minimumBytes: 50 });
+        await storeGallops(env, id, parseGallops(page.html));
+        fetched++;
+      } catch {
+        failed++;
+      }
+    }));
+  }
+  return { fetched, failed };
+}
+
+export interface GallopBackfill {
+  cursor: number;
+  done: boolean;
+  fetched: number;
+  failed: number;
+}
+
+export async function gallopBackfillState(env: Env): Promise<GallopBackfill> {
+  const row = await env.DB.prepare(`SELECT value_json FROM value_model_cache WHERE cache_key = ?`)
+    .bind(BACKFILL_KEY).first<any>();
+  return row ? JSON.parse(row.value_json) : { cursor: 0, done: false, fetched: 0, failed: 0 };
+}
+
+/* Archive horses never fetched, next in horse-id order after the cursor. */
+export async function backfillGallops(env: Env, limit: number, today = turkeyDate()): Promise<GallopBackfill> {
+  const state = await gallopBackfillState(env);
+  if (state.done || limit <= 0) return state;
+  const rows = await env.DB.prepare(`
+    SELECT DISTINCT u.horse_id FROM result_archive_runners u
+    LEFT JOIN horse_gallop_state s ON s.horse_id = u.horse_id
+    WHERE u.race_date >= ? AND u.horse_id > ? AND s.horse_id IS NULL
+    ORDER BY u.horse_id
+    LIMIT ?
+  `).bind(addDays(today, -GALLOP_CONFIG.backfillDays), state.cursor, limit).all<any>();
+  const ids = (rows.results ?? []).map((r: any) => Number(r.horse_id));
+  const result = await fetchAndStore(env, ids);
+  const next: GallopBackfill = {
+    cursor: ids.length ? ids[ids.length - 1] : state.cursor,
+    done: ids.length < limit,
+    fetched: state.fetched + result.fetched,
+    failed: state.failed + result.failed
+  };
+  await env.DB.prepare(`
+    INSERT INTO value_model_cache(cache_key, value_json, updated_at) VALUES(?,?,?)
+    ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
+  `).bind(BACKFILL_KEY, JSON.stringify(next), new Date().toISOString()).run();
+  return next;
+}
+
+/*
+ * Today's runners whose gallops are missing or older than refetchAfterHours
+ * first; whatever capacity is left goes to the archive backfill.
+ */
 export async function refreshGallops(env: Env, today = turkeyDate()): Promise<{ fetched: number; failed: number }> {
   const cutoff = new Date(Date.now() - GALLOP_CONFIG.refetchAfterHours * 3_600_000).toISOString();
   const rows = await env.DB.prepare(`
@@ -96,20 +163,9 @@ export async function refreshGallops(env: Env, today = turkeyDate()): Promise<{ 
     LIMIT ?
   `).bind(today, new Date().toISOString(), cutoff, GALLOP_CONFIG.horsesPerTick).all<any>();
   const ids = (rows.results ?? []).map((r: any) => tjkNumericId(r.identity)).filter((x): x is number => x != null);
-
-  let fetched = 0, failed = 0;
-  for (let i = 0; i < ids.length; i += GALLOP_CONFIG.concurrency) {
-    await Promise.all(ids.slice(i, i + GALLOP_CONFIG.concurrency).map(async id => {
-      try {
-        const page = await acquireHttpHtml(gallopUrl(id), { timeoutMs: GALLOP_CONFIG.fetchTimeoutMs, minimumBytes: 50 });
-        await storeGallops(env, id, parseGallops(page.html));
-        fetched++;
-      } catch {
-        failed++;
-      }
-    }));
-  }
-  return { fetched, failed };
+  const result = await fetchAndStore(env, ids);
+  await backfillGallops(env, GALLOP_CONFIG.horsesPerTick - ids.length, today);
+  return result;
 }
 
 export async function loadGallops(env: Env, horseIds: number[]): Promise<Map<number, Gallop[]>> {
