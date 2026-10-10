@@ -25,6 +25,13 @@ export interface CouponLegInput {
 
   uncertainty: number;
 
+  /*
+   * "Risk sever" coupons: a horse that must be on the ticket in this
+   * leg (the value model's surprise). Every selection size then keeps
+   * the best-ranked horse(s) plus this one.
+   */
+  forcedHorseNumber?: number | null;
+
   runners:
     CouponRunner[];
 }
@@ -97,6 +104,9 @@ interface PreparedLeg {
 
   runners:
     PreparedRunner[];
+
+  /* Smallest selection size; 2 when a forced horse is not the top pick. */
+  minCount: number;
 }
 
 
@@ -328,6 +338,36 @@ function prepareLeg(
   temperature:
     number
 ): PreparedLeg {
+  const runners =
+    runnerProbabilities(
+      leg.runners,
+      temperature
+    );
+
+  let minCount = 1;
+
+  /*
+   * A forced horse moves up to second place, so taking the first n
+   * horses always means "the best n-1 plus the forced one" and the
+   * rest of the optimizer works unchanged.
+   */
+  const forcedIndex =
+    leg.forcedHorseNumber == null
+      ? -1
+      : runners.findIndex(
+          runner =>
+            runner.horseNumber ===
+            leg.forcedHorseNumber
+        );
+
+  if (forcedIndex >= 1) {
+    const [forced] =
+      runners.splice(forcedIndex, 1);
+
+    runners.splice(1, 0, forced);
+    minCount = 2;
+  }
+
   return {
     raceNumber:
       leg.raceNumber,
@@ -341,11 +381,9 @@ function prepareLeg(
         )
       ),
 
-    runners:
-      runnerProbabilities(
-        leg.runners,
-        temperature
-      )
+    runners,
+
+    minCount
   };
 }
 
@@ -433,7 +471,7 @@ function enumerateHalf(
     const leg = legs[index];
 
     for (
-      let count = 1;
+      let count = leg.minCount;
       count <= leg.runners.length;
       count += 1
     ) {
