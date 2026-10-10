@@ -111,9 +111,37 @@ export function attachValues(meetings: any[], values: { status: string; byRunner
         const v = values.byRunner.get(`${meeting.city ?? race.city}|${race.race_number}|${runner.horse_number}`);
         if (v) runner.valueModel = v;
       }
+      race.surpriseNumber = valueSurpriseNumber(race.runners ?? []);
     }
   }
   return meetings;
+}
+
+/*
+ * The card's "Sürpriz": a horse the crowd does not rate (outside the AGF
+ * top three) that the value model says AGF underrates, the strongest of
+ * them by the model's chance. Owner's definition, 2026-10-10: "AGF'de 6.
+ * 7. sırada ama model onu kuvvetlendiriyorsa o sürprizdir". Underrated
+ * horses beat their AGF by ~14% in the archive walk-forward. Expert
+ * "sürpriz" picks are not blended in: they won 0.78x their AGF. Null
+ * when no such horse exists or AGF is incomplete; the app then falls
+ * back to the best-scored horse outside the AGF top three.
+ */
+export function valueSurpriseNumber(runners: any[]): number | null {
+  if (runners.length < 4 || runners.some(r => r.agf_percent == null || !Number.isFinite(Number(r.agf_percent)))) return null;
+  const agfTopThree = new Set(
+    [...runners]
+      .sort((a, b) => Number(b.agf_percent) - Number(a.agf_percent) || a.horse_number - b.horse_number)
+      .slice(0, 3)
+      .map(r => r.horse_number)
+  );
+  let best: any = null;
+  for (const runner of runners) {
+    const v: RunnerValue | undefined = runner.valueModel;
+    if (agfTopThree.has(runner.horse_number) || v?.label !== "underrated") continue;
+    if (!best || v.probability > best.valueModel.probability) best = runner;
+  }
+  return best ? best.horse_number : null;
 }
 
 export async function valueModelStatus(env: Env): Promise<Record<string, unknown>> {
