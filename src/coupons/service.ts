@@ -32,7 +32,8 @@ import {
 } from "./repository";
 
 import {
-  riskLoverLegs
+  riskLoverLegs,
+  riskLoverTiers
 } from "./risk-lover";
 
 import {
@@ -366,7 +367,7 @@ export async function generateSixFoldCoupons(
 
   const riskLoverCoupons =
     riskLegs
-      ? optimizeSixFoldCoupons({
+      ? riskLoverTiers(optimizeSixFoldCoupons({
           legs: riskLegs,
 
           budgetTl:
@@ -379,7 +380,7 @@ export async function generateSixFoldCoupons(
             1,
 
           temperature
-        })
+        }))
       : [];
 
   let snapshotPersisted =
@@ -793,7 +794,7 @@ export async function generateFiveFoldCoupons(
 
   const riskLoverCoupons =
     riskLegs
-      ? optimizeSixFoldCoupons({
+      ? riskLoverTiers(optimizeSixFoldCoupons({
           legs: riskLegs,
 
           budgetTl:
@@ -806,7 +807,7 @@ export async function generateFiveFoldCoupons(
             1,
 
           temperature
-        })
+        }))
       : [];
 
   let snapshotPersisted =

@@ -25,8 +25,34 @@ import type {
  * 1500 TL 123 -> 125) while the estimated payout rose (1000 TL -29% ->
  * +22%; -44% -> -28% without the three biggest payouts). Payouts were
  * estimated from AGF and the gain is not statistically proven.
+ * 2000 TL: 134 -> 136 hits, -26% -> -1%; 3000 TL: 170 -> 162 hits,
+ * -12% -> -18%. So the coupon is only offered for tiers in
+ * RISK_LOVER_BUDGET_RANGE_TL, at most RISK_LOVER_MAX_COUPONS of them.
  */
 export const RISK_LOVER_SURPRISE_LEGS = 2;
+
+export const RISK_LOVER_BUDGET_RANGE_TL = {
+  min: 1000,
+  max: 2000
+} as const;
+
+export const RISK_LOVER_MAX_COUPONS = 2;
+
+/*
+ * Keeps the highest RISK_LOVER_MAX_COUPONS tiers whose budget falls in
+ * RISK_LOVER_BUDGET_RANGE_TL, in their original (ascending) order.
+ */
+export function riskLoverTiers<T extends { targetBudgetTl: number }>(
+  coupons: T[]
+): T[] {
+  return coupons
+    .filter(
+      coupon =>
+        coupon.targetBudgetTl >= RISK_LOVER_BUDGET_RANGE_TL.min &&
+        coupon.targetBudgetTl <= RISK_LOVER_BUDGET_RANGE_TL.max
+    )
+    .slice(-RISK_LOVER_MAX_COUPONS);
+}
 
 export async function riskLoverLegs(
   env: Env,

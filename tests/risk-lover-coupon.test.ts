@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { optimizeSixFoldCoupons, type CouponLegInput } from "../src/coupons/optimizer";
+import { riskLoverTiers } from "../src/coupons/risk-lover";
 
 function leg(raceNumber: number, probabilities: number[], forcedHorseNumber: number | null = null): CouponLegInput {
   return {
@@ -47,5 +48,26 @@ describe("risk sever coupon", () => {
     const plain = optimizeSixFoldCoupons({ legs, budgetTl: 500, unitPriceTl: 1.25 });
     const nulls = optimizeSixFoldCoupons({ legs: legs.map(l => ({ ...l, forcedHorseNumber: null })), budgetTl: 500, unitPriceTl: 1.25 });
     expect(nulls).toEqual(plain);
+  });
+});
+
+describe("riskLoverTiers", () => {
+  const tiers = (budgets: number[]) =>
+    budgets.map(targetBudgetTl => ({ targetBudgetTl }));
+
+  it("keeps at most two tiers between 1000 and 2000 TL", () => {
+    expect(
+      riskLoverTiers(tiers([500, 750, 1300, 1900, 2450, 3000]))
+        .map(t => t.targetBudgetTl)
+    ).toEqual([1300, 1900]);
+
+    expect(
+      riskLoverTiers(tiers([500, 750, 950, 1150, 1300, 1500]))
+        .map(t => t.targetBudgetTl)
+    ).toEqual([1300, 1500]);
+  });
+
+  it("offers nothing when no tier is in range", () => {
+    expect(riskLoverTiers(tiers([500, 750, 900]))).toEqual([]);
   });
 });
