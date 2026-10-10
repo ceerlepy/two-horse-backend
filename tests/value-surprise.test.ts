@@ -30,4 +30,13 @@ describe("value-model surprise", () => {
       runner(1, 40), runner(2, 30), runner(3, 20), runner(4, null, 0.2, "underrated")
     ])).toBeNull();
   });
+
+  it("accepts an outsider the model rates 10-20% above its AGF share", () => {
+    const field = [runner(1, 40, 0.38), runner(2, 30, 0.28), runner(3, 20, 0.19)];
+    expect(valueSurpriseNumber([...field, runner(4, 10, 0.115, null)])).toBe(4);
+    expect(valueSurpriseNumber([...field, runner(4, 10, 0.105, null)])).toBeNull();
+    expect(valueSurpriseNumber([
+      runner(1, 60, 0.6), runner(2, 20, 0.2), runner(3, 17, 0.17), runner(4, 3, 0.039, null)
+    ])).toBeNull();
+  });
 });

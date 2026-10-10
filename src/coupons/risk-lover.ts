@@ -28,6 +28,8 @@ import type {
  * 2000 TL: 134 -> 136 hits, -26% -> -1%; 3000 TL: 170 -> 162 hits,
  * -12% -> -18%. So the coupon is only offered for tiers in
  * RISK_LOVER_BUDGET_RANGE_TL, at most RISK_LOVER_MAX_COUPONS of them.
+ * With the 1.1x surprise (SURPRISE_CONFIG) 6/6 hits rose further:
+ * 1000 TL 105, 1500 TL 135, 2000 TL 145 (estimated payout -4/-4/-13%).
  */
 export const RISK_LOVER_SURPRISE_LEGS = 2;
 

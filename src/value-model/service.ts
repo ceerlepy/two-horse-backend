@@ -129,8 +129,22 @@ export function attachValues(meetings: any[], values: { status: string; byRunner
 }
 
 /*
+ * Looser than the "underrated" label (1.2x): outsiders the model rates
+ * 10-20% above AGF won 1.20x their AGF in the archive walk-forward, and
+ * the Risk sever coupon built on the 1.1x surprise hit 6/6 more often
+ * (579 altılı: 1000 TL 102 -> 105, 1500 TL 125 -> 135, 2000 TL 136 ->
+ * 145; /mnt/project-files/analysis/kupon-surpriz-testi-2026-10-10).
+ * The label itself stays at 1.2x.
+ */
+export const SURPRISE_CONFIG = {
+  minRatio: 1.1,
+  minProbability: 0.04
+} as const;
+
+/*
  * The card's "Sürpriz": a horse the crowd does not rate (outside the AGF
- * top three) that the value model says AGF underrates, the strongest of
+ * top three) that the value model rates at least SURPRISE_CONFIG.minRatio
+ * above its AGF share, the strongest of
  * them by the model's chance. Owner's definition, 2026-10-10: "AGF'de 6.
  * 7. sırada ama model onu kuvvetlendiriyorsa o sürprizdir". Underrated
  * horses beat their AGF by ~14% in the archive walk-forward. Expert
@@ -146,10 +160,14 @@ export function valueSurpriseNumber(runners: any[]): number | null {
       .slice(0, 3)
       .map(r => r.horse_number)
   );
+  const agfTotal = runners.reduce((sum, r) => sum + Math.max(0, Number(r.agf_percent)), 0);
+  if (agfTotal <= 0) return null;
   let best: any = null;
   for (const runner of runners) {
     const v: RunnerValue | undefined = runner.valueModel;
-    if (agfTopThree.has(runner.horse_number) || v?.label !== "underrated") continue;
+    if (agfTopThree.has(runner.horse_number) || !v || !Number.isFinite(v.probability)) continue;
+    const agfShare = Math.max(0, Number(runner.agf_percent)) / agfTotal;
+    if (v.probability < SURPRISE_CONFIG.minProbability || v.probability < SURPRISE_CONFIG.minRatio * agfShare) continue;
     if (!best || v.probability > best.valueModel.probability) best = runner;
   }
   return best ? best.horse_number : null;
