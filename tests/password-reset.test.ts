@@ -146,7 +146,7 @@ describe("legal pages", () => {
     for (const path of ["/gizlilik", "/privacy", "/hesap-silme", "/delete-account/"]) {
       const response = legalPage(path)!;
       expect(response.headers.get("content-type")).toContain("text/html");
-      expect(await response.text()).toContain("destek@twohorse.app");
+      expect(await response.text()).toContain("twohorse.support@gmail.com");
     }
     expect(legalPage("/api/today")).toBeNull();
   });

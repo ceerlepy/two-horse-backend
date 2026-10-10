@@ -4,7 +4,7 @@
  * /hesap-silme and /delete-account (also on twohorse.app once the
  * domain points at this worker).
  */
-const SUPPORT = "destek@twohorse.app";
+const SUPPORT = "twohorse.support@gmail.com";
 const UPDATED_TR = "10 Ekim 2026";
 const UPDATED_EN = "10 October 2026";
 

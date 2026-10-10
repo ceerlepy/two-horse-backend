@@ -31,7 +31,7 @@ import {
  * of the code is stored; it lives 15 minutes, allows 5 wrong tries,
  * and a new code can be asked for once a minute.
  */
-export const RESET_SENDER = "destek@twohorse.app";
+export const RESET_SENDER = "noreply@twohorse.app";
 
 const CODE_TTL_MS = 15 * 60_000;
 const RESEND_AFTER_MS = 60_000;
