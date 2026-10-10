@@ -143,7 +143,7 @@ describe("password reset", () => {
 
 describe("legal pages", () => {
   it("serves the privacy and deletion pages in both languages", async () => {
-    for (const path of ["/gizlilik", "/privacy", "/hesap-silme", "/delete-account/"]) {
+    for (const path of ["/", "/gizlilik", "/privacy", "/hesap-silme", "/delete-account/"]) {
       const response = legalPage(path)!;
       expect(response.headers.get("content-type")).toContain("text/html");
       expect(await response.text()).toContain("twohorse.support@gmail.com");
