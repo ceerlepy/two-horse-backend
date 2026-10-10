@@ -71,6 +71,22 @@ export const SHIPPED_SCORE_COEFFICIENTS =
   coefficients as unknown as LearnedScoreCoefficients;
 
 /*
+ * Expert first choices (banko / favori / yıldız) add a small, fixed
+ * nudge per expert, capped at three. The bounded fit gives expert_score
+ * zero weight because AGF already prices the picks; the owner asked for
+ * expert opinion to count as long as it does not hurt (2026-10-10).
+ * Measured on 788 races with expert coverage, AGF anchor, train before
+ * 20 Sep / test after: 0.05 per pick was neutral (log-loss gain +0.0007
+ * +/- 0.0014 on 348 test races, top-1 30.5% -> 30.5%, top-3 unchanged).
+ * The full expert_score, which also counts rival and surprise mentions,
+ * made log-loss worse at any positive weight, and expert "sürpriz"
+ * horses won only 0.78x what their AGF implied, so those stay out.
+ * Kept outside score-coefficients.json so the weekly refit cannot drop it.
+ */
+export const EXPERT_PRIMARY_PICK_COEF = 0.05;
+export const EXPERT_PRIMARY_PICK_CAP = 3;
+
+/*
  * AGF is the anchor, so the whole race needs it: one runner with no
  * published share means the learned score is unavailable and the caller
  * keeps the weighted score.
@@ -112,7 +128,9 @@ export function learnedWinProbabilities(
   features: LearnedFeatures[],
   model:
     LearnedScoreCoefficients =
-      SHIPPED_SCORE_COEFFICIENTS
+      SHIPPED_SCORE_COEFFICIENTS,
+  expertPrimaryPicks:
+    Array<number | null | undefined> = []
 ): number[] | null {
   if (!canScoreLearned(agfPercent)) {
     return null;
@@ -169,6 +187,22 @@ export function learnedWinProbabilities(
             Math.max(
               -4,
               Math.min(4, z)
+            );
+        }
+
+        const picks =
+          expertPrimaryPicks[index];
+
+        if (
+          picks != null &&
+          Number.isFinite(picks) &&
+          picks > 0
+        ) {
+          utility +=
+            EXPERT_PRIMARY_PICK_COEF *
+            Math.min(
+              EXPERT_PRIMARY_PICK_CAP,
+              picks
             );
         }
 
