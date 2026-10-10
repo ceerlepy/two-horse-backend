@@ -27,7 +27,9 @@ import {
   deleteUserAccount,
   getPurchaseOwner,
   getLatestPurchase,
-  touchUpdatedAt
+  touchUpdatedAt,
+  endPlaySubscription,
+  getNewestPurchaseToken
 } from "./repository";
 
 import {
@@ -160,15 +162,20 @@ export async function resolveSession(
 const SUBSCRIPTION_RECHECK_INTERVAL_MS =
   60 * 60 * 1000;
 
+const SUBSCRIPTION_ACTIVE_RECHECK_INTERVAL_MS =
+  6 * 60 * 60 * 1000;
+
 /*
  * Subscriptions renew monthly on Google's side, but the stored
  * expiry only moves when we ask Google again. Once the stored
  * expiry has passed, re-ask at most once an hour (updated_at is
  * the throttle) so a renewed subscriber keeps access and a
- * cancelled one drops to free.
+ * cancelled one drops to free. While the stored expiry is still
+ * ahead, re-ask every 6 hours anyway: a subscription Google
+ * refunded and revoked must not keep paid access until month end.
  */
-function shouldRecheckSubscription(
-  user: UserRecord,
+export function shouldRecheckSubscription(
+  user: Pick<UserRecord, "tierSource" | "subscriptionExpiresAt" | "updatedAt">,
   now: Date = new Date()
 ): boolean {
   if (
@@ -189,14 +196,53 @@ function shouldRecheckSubscription(
       user.updatedAt
     );
 
-  return (
-    expiresAt <= now.getTime() &&
-    !(
-      updatedAt >
-        now.getTime() -
-          SUBSCRIPTION_RECHECK_INTERVAL_MS
-    )
+  const interval =
+    expiresAt <= now.getTime()
+      ? SUBSCRIPTION_RECHECK_INTERVAL_MS
+      : SUBSCRIPTION_ACTIVE_RECHECK_INTERVAL_MS;
+
+  return !(
+    updatedAt >
+      now.getTime() -
+        interval
   );
+}
+
+/*
+ * When Google answers that the latest purchase no longer entitles
+ * the user (revoked after a refund, expired, on hold), access ends
+ * now instead of at the expiry we stored earlier. A normal cancel
+ * stays SUBSCRIPTION_STATE_CANCELED with a future expiry, which
+ * verifyPlaySubscription still reports as active.
+ */
+export function inactiveEntitlementEnd(
+  storedExpiresAt: string | null,
+  googleExpiryMillis: number,
+  now: Date = new Date()
+): string | null {
+  if (!storedExpiresAt) {
+    return null;
+  }
+
+  const stored =
+    Date.parse(
+      storedExpiresAt
+    );
+
+  const end =
+    Math.min(
+      Number.isFinite(stored)
+        ? stored
+        : now.getTime(),
+      Number.isFinite(googleExpiryMillis)
+        ? googleExpiryMillis
+        : now.getTime(),
+      now.getTime()
+    );
+
+  return end < stored || !Number.isFinite(stored)
+    ? new Date(end).toISOString()
+    : null;
 }
 
 const SUBSCRIPTION_REFRESH_INTERVAL_MS =
@@ -278,6 +324,40 @@ async function recheckSubscription(
             pendingProductId:
               purchase.pendingProductId
           }
+        );
+
+        return (
+          await getUserById(
+            env,
+            user.id
+          )
+        ) ?? user;
+      }
+
+      const end =
+        inactiveEntitlementEnd(
+          user.subscriptionExpiresAt,
+          purchase.expiryTimeMillis
+        );
+
+      /*
+       * A token replaced by an upgrade or downgrade also reads as
+       * inactive; only end access when it is the user's newest purchase.
+       */
+      if (
+        !purchase.active &&
+        end &&
+        await getNewestPurchaseToken(
+          env,
+          user.id
+        ) === latest.purchaseToken
+      ) {
+        await endPlaySubscription(
+          env,
+          user.id,
+          end,
+          latest.purchaseToken,
+          purchase.rawStatus
         );
 
         return (
