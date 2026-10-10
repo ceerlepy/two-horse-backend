@@ -298,6 +298,12 @@ export function toCompactRace(
     race?.expertSourceCount
   );
 
+  assign(
+    out,
+    "surpriseNumber",
+    race?.surpriseNumber
+  );
+
   out.runners =
     (race?.runners ?? []).map(
       toCompactRunner
