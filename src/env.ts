@@ -2,7 +2,7 @@ export interface Env {
   AI: Ai;
   BROWSER: BrowserRun;
   DB: D1Database;
-  /* Cloudflare Email Sending, from destek@twohorse.app (password reset). */
+  /* Cloudflare Email Sending, from noreply@twohorse.app (password reset). */
   EMAIL?: SendEmail;
   APP_NAME: string;
   APP_VERSION: string;
