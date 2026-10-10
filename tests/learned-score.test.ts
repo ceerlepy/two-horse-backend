@@ -10,6 +10,7 @@ import {
 
 import {
   SHIPPED_SCORE_COEFFICIENTS,
+  EXPERT_PRIMARY_PICK_COEF,
   displayScore,
   learnedWinProbabilities
 } from "../src/scoring/learned-score";
@@ -390,6 +391,34 @@ describe(
           single.legs[0]
             .coverageProbability
         ).toBeCloseTo(0.70, 6);
+      }
+    );
+  }
+);
+
+describe(
+  "expert first-choice nudge",
+  () => {
+    it(
+      "lifts a picked horse by a small fixed amount, capped at three picks",
+      () => {
+        const agf = [30, 30, 40];
+        const none =
+          learnedWinProbabilities(agf, [{}, {}, {}])!;
+        const picked =
+          learnedWinProbabilities(agf, [{}, {}, {}], undefined, [2, 0, 0])!;
+        const many =
+          learnedWinProbabilities(agf, [{}, {}, {}], undefined, [9, 0, 0])!;
+        const three =
+          learnedWinProbabilities(agf, [{}, {}, {}], undefined, [3, 0, 0])!;
+
+        expect(none[0]).toBeCloseTo(none[1], 9);
+        expect(
+          Math.log(picked[0] / picked[1])
+        ).toBeCloseTo(2 * EXPERT_PRIMARY_PICK_COEF, 9);
+        expect(many[0]).toBeCloseTo(three[0], 9);
+        /* AGF still leads: 40% stays ahead of a 30% horse with two picks */
+        expect(picked[2]).toBeGreaterThan(picked[0]);
       }
     );
   }

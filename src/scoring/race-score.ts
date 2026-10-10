@@ -112,6 +112,14 @@ export function scoreRace<
             ) ?? {}
           )
         })
+      ),
+
+      undefined,
+
+      runners.map(
+        runner =>
+          runner.expertConsensus
+            ?.primaryCount
       )
     );
 
