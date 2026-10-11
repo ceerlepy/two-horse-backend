@@ -62,7 +62,7 @@ export interface HorseModelScore {
   /*
    * Which path produced `score`. "weighted" is the fallback.
    */
-  scoreSource?: "learned" | "weighted";
+  scoreSource?: "learned" | "weighted" | "no-agf";
 
   /*
    * The hand-weighted score, kept for diagnostics and comparison.

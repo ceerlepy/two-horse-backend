@@ -17,8 +17,7 @@ import { aggregateExpertPredictions } from "./aggregator";
 import type { ExpertConsensus, ExpertPredictionRow } from "./aggregation-types";
 import { raceUncertainty, scoreRace } from "../scoring/race-score";
 import { recommendCouponStrategy } from "../coupon/strategy";
-import { displayScore } from "../scoring/learned-score";
-import { loadNextDayUtilities, nextDayProbabilities, nextDayRaceKey, type NextDayUtilityMap } from "../value-model/next-day-model";
+import { applyNoAgfModel, loadNextDayUtilities, nextDayRaceKey, type NextDayUtilityMap } from "../value-model/next-day-model";
 import { directPageDateEvidence } from "./discovery";
 import {
   acquireExpertDocument,
@@ -669,12 +668,7 @@ type NextDayModelScore = {
 
 type NextDayRunners = NextDayProgram["meetings"][number]["races"][number]["runners"];
 
-/*
- * The weighted no-AGF score, replaced by tomorrow's model
- * (src/value-model/next-day-model.ts) when the cron has computed every
- * runner's utility: its win probability, shown as today's learned score
- * is (50 = the race's average chance), with expert picks as a small nudge.
- */
+/* The weighted no-AGF score, or tomorrow's model once the cron has its utilities. */
 function scoreNextDay(
   runners: NextDayRunners,
   consensusOf: (horseNumber: number) => ExpertConsensus,
@@ -692,20 +686,7 @@ function scoreNextDay(
       expertConsensus: consensusOf(runner.horse_number)
     }))
   );
-  if (!utilities || runners.length < 2 || !runners.every(r => utilities.has(r.horse_number))) return scored;
-
-  const probabilities = nextDayProbabilities(
-    scored.map(r => utilities.get(r.horse_number) as number),
-    scored.map(r => r.modelScore.components.find(c => c.key === "expert")?.score ?? null)
-  );
-  return scored.map((runner, i) => ({
-    ...runner,
-    modelScore: {
-      ...runner.modelScore,
-      score: displayScore(probabilities[i], scored.length),
-      winProbability: probabilities[i]
-    }
-  }));
+  return applyNoAgfModel(scored, utilities);
 }
 
 /* Each runner's no-AGF score, as the race screen reads modelScore. */
