@@ -41,16 +41,17 @@ export const RISK_LOVER_BUDGET_RANGE_TL = {
 export const RISK_LOVER_MAX_COUPONS = 2;
 
 /*
- * Keeps the highest RISK_LOVER_MAX_COUPONS tiers whose budget falls in
- * RISK_LOVER_BUDGET_RANGE_TL, in their original (ascending) order.
+ * Keeps the highest RISK_LOVER_MAX_COUPONS price bands that lie inside
+ * RISK_LOVER_BUDGET_RANGE_TL (1000-1500 and 1500-2000), in their
+ * original (ascending) order.
  */
-export function riskLoverTiers<T extends { targetBudgetTl: number }>(
+export function riskLoverTiers<T extends { bandMinTl: number; targetBudgetTl: number }>(
   coupons: T[]
 ): T[] {
   return coupons
     .filter(
       coupon =>
-        coupon.targetBudgetTl >= RISK_LOVER_BUDGET_RANGE_TL.min &&
+        coupon.bandMinTl >= RISK_LOVER_BUDGET_RANGE_TL.min &&
         coupon.targetBudgetTl <= RISK_LOVER_BUDGET_RANGE_TL.max
     )
     .slice(-RISK_LOVER_MAX_COUPONS);

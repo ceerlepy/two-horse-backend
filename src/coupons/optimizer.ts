@@ -62,6 +62,10 @@ export interface OptimizedSixFoldCoupon {
   profile:
     string;
 
+  /* Lower edge of this coupon's price band; targetBudgetTl is the upper. */
+  bandMinTl:
+    number;
+
   targetBudgetTl:
     number;
 
@@ -111,87 +115,55 @@ interface PreparedLeg {
 
 
 /*
- * A user's budget field is the CEILING they're willing to spend, not
- * a single amount to spend in full -- this ladder turns that ceiling
- * into several concrete coupons at increasing budgets, so someone
- * can see what a small, cautious stake buys next to what their full
- * budget buys, instead of only ever seeing one number.
+ * A user's budget field is the CEILING they're willing to spend. It is
+ * cut into price bands (0-500, 500-1000, ... up to the ceiling) and
+ * each band gets one coupon: the cheapest one in the band whose chance
+ * is within stopTolerance of the best the band can buy. So a coupon
+ * does not stretch to a round number; it stops where more horses stop
+ * adding real chance, and its price is whatever that costs.
  *
- * fixedTiersTl: always offered first, identical for every user
- * regardless of their max budget (as long as they can afford them) --
- * a stable "entry point" coupon size people can compare day to day.
+ * Up to nestedUpToTl each coupon also contains the previous one, so a
+ * cheaper coupon never hits where a dearer one misses. Above it every
+ * band is built on its own: chaining all bands lost real hits there.
  *
- * variableTierCount: how many more coupons fill the gap from the
- * highest affordable fixed tier up to the user's own max budget,
- * evenly spaced so the steps between them feel proportional rather
- * than arbitrary. The last of these is always exactly the user's max
- * budget (never overshoots it, never leaves it unused).
+ * Backtest (579 past altılı, AGF probabilities;
+ * /mnt/project-files/analysis/kupon-bant-testi-2026-10-11): up to
+ * 2000 TL the nested bands hit as often as the old independent tiers
+ * for the money (1356 TL 118 vs 1366 TL 117) and never miss where a
+ * cheaper one hit; the 4500-5000 band chained to every lower band hit
+ * 174 times against 196 built on its own.
  *
- * roundToNearestTl: the 3 tiers strictly between the highest fixed
- * tier and the max budget are rounded to a clean number; only the
- * final (max-budget) tier is left exact.
+ * minTicketTl: TJK's minimum stake per ticket.
  */
-export const COUPON_BUDGET_LADDER_CONFIG = {
-  fixedTiersTl: [500, 750],
-  variableTierCount: 4,
-  roundToNearestTl: 50
+export const COUPON_BAND_CONFIG = {
+  stepTl: 500,
+  nestedUpToTl: 2000,
+  stopTolerance: 0.05,
+  minTicketTl: 20
 } as const;
 
-export function buildCouponBudgetLadder(
+export interface CouponBand {
+  minTl: number;
+  maxTl: number;
+}
+
+export function buildCouponBands(
   maxBudgetTl: number
-): number[] {
-  const fixedTiers =
-    COUPON_BUDGET_LADDER_CONFIG.fixedTiersTl.filter(
-      tier => tier <= maxBudgetTl
-    );
+): CouponBand[] {
+  const bands: CouponBand[] = [];
 
-  const baseTl =
-    fixedTiers.length
-      ? fixedTiers[fixedTiers.length - 1]
-      : 0;
-
-  const tiers: number[] = [...fixedTiers];
-
-  /*
-   * Tracked separately from tiers[tiers.length - 1]: when there are
-   * no fixed tiers yet (tiers is still empty), comparing a candidate
-   * against an empty array's last element (undefined) would make
-   * every "> " comparison false and silently drop every tier.
-   */
-  let lastValue = baseTl;
-
-  if (maxBudgetTl > baseTl) {
-    const count =
-      COUPON_BUDGET_LADDER_CONFIG.variableTierCount;
-
-    const step =
-      (maxBudgetTl - baseTl) / count;
-
-    for (let i = 1; i <= count; i += 1) {
-      const isLast = i === count;
-
-      const raw =
-        baseTl + step * i;
-
-      const value =
-        isLast
-          ? maxBudgetTl
-          : Math.round(
-              raw /
-              COUPON_BUDGET_LADDER_CONFIG.roundToNearestTl
-            ) *
-            COUPON_BUDGET_LADDER_CONFIG.roundToNearestTl;
-
-      if (value > lastValue) {
-        tiers.push(value);
-        lastValue = value;
-      }
-    }
+  for (
+    let minTl = 0;
+    minTl < maxBudgetTl - 1e-9;
+    minTl += COUPON_BAND_CONFIG.stepTl
+  ) {
+    bands.push({
+      minTl,
+      maxTl: Math.min(minTl + COUPON_BAND_CONFIG.stepTl, maxBudgetTl)
+    });
   }
 
-  return tiers.length
-    ? tiers
-    : [maxBudgetTl];
+  return bands;
 }
 
 
@@ -442,74 +414,81 @@ function ticketCost(
 }
 
 
-interface HalfCandidate {
+interface FrontierEntry {
   counts: number[];
   combinations: number;
   survival: number;
 }
 
-function enumerateHalf(
-  legs: PreparedLeg[]
-): HalfCandidate[] {
-  const output: HalfCandidate[] = [];
+/*
+ * Every affordable coupon shape, keyed by its combination count, with
+ * the best survival probability for that count. The total count is the
+ * product of the leg counts and the survival the product of the leg
+ * coverages, so keeping the best entry per running product is exact.
+ * minCounts lets a coupon be forced to contain a cheaper one.
+ */
+function couponFrontier(
+  legs: PreparedLeg[],
+  maxCombinations: number,
+  minCounts: number[]
+): FrontierEntry[] {
+  let states =
+    new Map<number, FrontierEntry>([
+      [1, { counts: [], combinations: 1, survival: 1 }]
+    ]);
 
-  function visit(
-    index: number,
-    counts: number[],
-    combinations: number,
-    survival: number
-  ): void {
-    if (index === legs.length) {
-      output.push({
-        counts:[...counts],
-        combinations,
-        survival
-      });
-      return;
+  legs.forEach((leg, index) => {
+    const coverage: number[] = [];
+    let running = 0;
+
+    for (const runner of leg.runners) {
+      running += runner.probability;
+      coverage.push(running);
     }
 
-    const leg = legs[index];
+    const from =
+      Math.max(leg.minCount, minCounts[index] ?? 1);
 
-    for (
-      let count = leg.minCount;
-      count <= leg.runners.length;
-      count += 1
-    ) {
-      counts.push(count);
+    const next =
+      new Map<number, FrontierEntry>();
 
-      visit(
-        index + 1,
-        counts,
-        combinations * count,
-        survival *
-          selectedCoverage(
-            leg,
-            count
-          )
-      );
+    for (const state of states.values()) {
+      for (let count = from; count <= leg.runners.length; count += 1) {
+        const combinations = state.combinations * count;
 
-      counts.pop();
+        if (combinations > maxCombinations) break;
+
+        const survival = state.survival * coverage[count - 1];
+        const current = next.get(combinations);
+
+        if (!current || survival > current.survival + 1e-15) {
+          next.set(combinations, {
+            counts: [...state.counts, count],
+            combinations,
+            survival
+          });
+        }
+      }
     }
-  }
 
-  visit(0, [], 1, 1);
-  return output;
+    states = next;
+  });
+
+  return [...states.values()];
 }
 
-function globallyOptimalCounts(
+function bandCounts(
   legs: PreparedLeg[],
+  band: CouponBand,
   unitPriceTl: number,
   multiplier: number,
-  budgetTl: number
+  minCounts: number[]
 ): number[] {
   const combinationPrice =
     unitPriceTl * multiplier;
 
   const maxCombinations =
-    Math.floor(
-      (budgetTl + 1e-9) /
-      combinationPrice
-    );
+    Math.floor((band.maxTl + 1e-9) / combinationPrice);
 
   if (maxCombinations < 1) {
     throw new Error(
@@ -517,192 +496,61 @@ function globallyOptimalCounts(
     );
   }
 
-  const split =
-    Math.floor(
-      legs.length / 2
-    );
+  const frontier =
+    couponFrontier(legs, maxCombinations, minCounts);
 
-  const left =
-    enumerateHalf(
-      legs.slice(0, split)
-    );
-
-  const right =
-    enumerateHalf(
-      legs.slice(split)
-    )
-      .filter(
-        item =>
-          item.combinations <=
-          maxCombinations
-      )
-      .sort(
-        (a,b) =>
-          a.combinations -
-          b.combinations
-      );
-
-  if (!right.length) {
+  if (!frontier.length) {
     throw new Error(
       "NO_AFFORDABLE_COUPON"
     );
   }
 
-  const prefixBest:
-    HalfCandidate[] = [];
+  const top =
+    frontier.reduce((best, item) =>
+      item.survival > best.survival + 1e-15 ||
+      (Math.abs(item.survival - best.survival) <= 1e-15 &&
+        item.combinations > best.combinations)
+        ? item
+        : best
+    );
 
-  let best:
-    HalfCandidate | null =
-    null;
+  const minCombinations =
+    Math.ceil(
+      (Math.max(band.minTl, COUPON_BAND_CONFIG.minTicketTl) - 1e-9) /
+      combinationPrice
+    );
 
-  for (const item of right) {
-    if (
-      best == null ||
-      item.survival >
-        best.survival + 1e-15 ||
-      (
-        Math.abs(
-          item.survival -
-          best.survival
-        ) <= 1e-15 &&
-        item.combinations >
-          best.combinations
+  const enough =
+    frontier
+      .filter(item =>
+        item.combinations >= minCombinations &&
+        item.survival >=
+          (1 - COUPON_BAND_CONFIG.stopTolerance) * top.survival
       )
-    ) {
-      best = item;
-    }
-
-    prefixBest.push(best);
-  }
-
-  function lastAffordable(
-    value: number
-  ): number {
-    let lo = 0;
-    let hi = right.length;
-
-    while (lo < hi) {
-      const mid =
-        Math.floor(
-          (lo + hi) / 2
-        );
-
-      if (
-        right[mid].combinations <=
-        value
-      ) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
-    }
-
-    return lo - 1;
-  }
-
-  let winner:
-    {
-      counts: number[];
-      survival: number;
-      combinations: number;
-    } | null =
-    null;
-
-  for (const lhs of left) {
-    if (
-      lhs.combinations >
-      maxCombinations
-    ) {
-      continue;
-    }
-
-    const limit =
-      Math.floor(
-        maxCombinations /
-        lhs.combinations
+      .sort((a, b) =>
+        a.combinations - b.combinations ||
+        b.survival - a.survival
       );
 
-    const index =
-      lastAffordable(limit);
-
-    if (index < 0) {
-      continue;
-    }
-
-    const rhs =
-      prefixBest[index];
-
-    const survival =
-      lhs.survival *
-      rhs.survival;
-
-    const combinations =
-      lhs.combinations *
-      rhs.combinations;
-
-    if (
-      winner == null ||
-      survival >
-        winner.survival + 1e-15 ||
-      (
-        Math.abs(
-          survival -
-          winner.survival
-        ) <= 1e-15 &&
-        combinations >
-          winner.combinations
-      )
-    ) {
-      winner = {
-        counts:[
-          ...lhs.counts,
-          ...rhs.counts
-        ],
-        survival,
-        combinations
-      };
-    }
-  }
-
-  if (!winner) {
-    throw new Error(
-      "NO_AFFORDABLE_COUPON"
-    );
-  }
-
-  return winner.counts;
+  /* A small field can be fully covered below the band: keep its best. */
+  return (enough[0] ?? top).counts;
 }
 
 
-function optimizeForBudgetTier(
+function couponFromCounts(
   legs:
     PreparedLeg[],
-  tierBudgetTl:
-    number,
+  band:
+    CouponBand,
+  counts:
+    number[],
   unitPriceTl:
     number,
   multiplier:
     number
 ): OptimizedSixFoldCoupon {
-  /*
-   * Every tier spends up to its own full budget for the best
-   * achievable survival probability -- the ladder itself (which
-   * tier this is) is what expresses "cautious" vs "aggressive" now,
-   * not a fraction held back within a single budget. If this tier's
-   * budget can't afford even one combination, globallyOptimalCounts
-   * below throws BUDGET_BELOW_MINIMUM for it -- no artificial floor
-   * is applied here that would silently overspend the tier.
-   */
-  const effectiveBudget =
-    tierBudgetTl;
-
-  const counts =
-    globallyOptimalCounts(
-      legs,
-      unitPriceTl,
-      multiplier,
-      effectiveBudget
-    );
+  const tierBudgetTl =
+    band.maxTl;
 
   const cost =
     ticketCost(
@@ -768,9 +616,14 @@ function optimizeForBudgetTier(
     profile:
       String(tierBudgetTl),
 
+    bandMinTl:
+      Number(
+        band.minTl.toFixed(2)
+      ),
+
     targetBudgetTl:
       Number(
-        effectiveBudget
+        tierBudgetTl
           .toFixed(2)
       ),
 
@@ -837,10 +690,8 @@ export function optimizeSixFoldCoupons(
 ): OptimizedSixFoldCoupon[] {
   /*
    * input.budgetTl is the user's MAX budget, a ceiling -- not a
-   * single amount to spend in full. See buildCouponBudgetLadder
-   * above: it is expanded into several coupons at increasing budget
-   * tiers (two fixed entry-point tiers, then evenly-spaced tiers up
-   * to and including this max), one per tier.
+   * single amount to spend in full. See buildCouponBands above: it is
+   * cut into 500 TL price bands up to this max, one coupon per band.
    *
    * Shared by both TJK accumulator pools this system supports:
    * Altılı Ganyan (6 legs) and Beşli Ganyan (5 legs). Nothing below
@@ -905,18 +756,42 @@ export function optimizeSixFoldCoupons(
         )
     );
 
-  const tiers =
-    buildCouponBudgetLadder(
-      input.budgetTl
-    );
+  const coupons: OptimizedSixFoldCoupon[] = [];
+  let floors: number[] = [];
+  let previous: number[] | null = null;
 
-  return tiers.map(
-    tierBudgetTl =>
-      optimizeForBudgetTier(
+  for (const band of buildCouponBands(input.budgetTl)) {
+    const nested =
+      band.maxTl <= COUPON_BAND_CONFIG.nestedUpToTl + 1e-9;
+
+    const counts =
+      bandCounts(
         prepared,
-        tierBudgetTl,
+        band,
+        input.unitPriceTl,
+        multiplier,
+        nested ? floors : []
+      );
+
+    if (nested) floors = counts;
+
+    /* A band that cannot improve on the previous coupon adds nothing. */
+    if (previous && counts.every((count, index) => count === previous?.[index])) {
+      continue;
+    }
+
+    previous = counts;
+
+    coupons.push(
+      couponFromCounts(
+        prepared,
+        band,
+        counts,
         input.unitPriceTl,
         multiplier
       )
-  );
+    );
+  }
+
+  return coupons;
 }

@@ -31,7 +31,7 @@ import {
  */
 export const COUPON_CAPTURE_CONFIG = {
   /* Gold's max budget, so the ladder matches what members see. */
-  budgetTl: 1500,
+  budgetTl: 1000,
   captureBeforeFirstLegMinutes: 15,
   retentionDays: 365
 } as const;
