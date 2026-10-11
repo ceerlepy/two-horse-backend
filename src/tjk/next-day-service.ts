@@ -69,6 +69,9 @@ export interface NextDayRunner {
   expertPickCount?: number;
   /* Of those, sources calling it banko/favori/yıldız. */
   expertPrimaryCount?: number;
+  /* Strongest role sources gave it, and how many gave that role. */
+  expertRole?: "favorite" | "strong" | "second" | "surprise";
+  expertRoleCount?: number;
   expertSummary?: string;
 }
 

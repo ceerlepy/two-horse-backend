@@ -9,6 +9,7 @@ import {
   canonicalCardFromProgram,
   hasNextDayDateEvidence,
   matchNextDayPicks,
+  nextDayExpertRole,
   refreshNextDayExpertsIfDue
 } from "../src/experts/next-day-service";
 import type { NextDayProgram } from "../src/tjk/next-day-service";
@@ -304,6 +305,7 @@ describe("attachNextDayExperts", () => {
     const json = JSON.stringify(out);
     expect(json).not.toContain("expertPickCount");
     expect(json).not.toContain("expertPrimaryCount");
+    expect(json).not.toContain("expertRole");
     expect(json).not.toContain("expertSummary");
     expect(json).not.toContain("modelFavoriteNumber");
   });
@@ -312,6 +314,8 @@ describe("attachNextDayExperts", () => {
     const out = await attachNextDayExperts(await seeded(), CARD, "premium");
     const race: any = out.meetings[0].races[0];
     expect(race.runners[0].expertPrimaryCount).toBe(2);
+    expect(race.runners[0].expertRole).toBe("favorite");
+    expect(race.runners[0].expertRoleCount).toBe(2);
     expect(race.modelFavoriteNumber).toBe(3);
     /* race 2 has no form, HP, weight or picks: nothing to pick from */
     expect(out.meetings[0].races[1]).not.toHaveProperty("modelFavoriteNumber");
@@ -334,6 +338,16 @@ describe("attachNextDayExperts", () => {
     };
     const out = await attachNextDayExperts(env, card, "gold");
     expect((out.meetings[0].races[0] as any).modelFavoriteNumber).toBe(2);
+  });
+});
+
+describe("nextDayExpertRole", () => {
+  const base = { primaryCount: 0, strongOnlyCount: 0, secondaryCount: 0, surpriseOnlyCount: 0 } as any;
+  it("names the strongest role and how many sources gave it", () => {
+    expect(nextDayExpertRole({ ...base, secondaryCount: 2, surpriseOnlyCount: 1 })).toEqual({ role: "second", count: 2 });
+    expect(nextDayExpertRole({ ...base, primaryCount: 1, secondaryCount: 3 })).toEqual({ role: "favorite", count: 1 });
+    expect(nextDayExpertRole({ ...base, surpriseOnlyCount: 1 })).toEqual({ role: "surprise", count: 1 });
+    expect(nextDayExpertRole(base)).toBeNull();
   });
 });
 
