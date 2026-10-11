@@ -53,21 +53,16 @@ describe("risk sever coupon", () => {
 
 describe("riskLoverTiers", () => {
   const tiers = (budgets: number[]) =>
-    budgets.map(targetBudgetTl => ({ targetBudgetTl }));
+    budgets.map(targetBudgetTl => ({ bandMinTl: targetBudgetTl - 500, targetBudgetTl }));
 
-  it("keeps at most two tiers between 1000 and 2000 TL", () => {
+  it("keeps the 1000-1500 and 1500-2000 bands", () => {
     expect(
-      riskLoverTiers(tiers([500, 750, 1300, 1900, 2450, 3000]))
+      riskLoverTiers(tiers([500, 1000, 1500, 2000, 2500, 3000]))
         .map(t => t.targetBudgetTl)
-    ).toEqual([1300, 1900]);
-
-    expect(
-      riskLoverTiers(tiers([500, 750, 950, 1150, 1300, 1500]))
-        .map(t => t.targetBudgetTl)
-    ).toEqual([1300, 1500]);
+    ).toEqual([1500, 2000]);
   });
 
-  it("offers nothing when no tier is in range", () => {
-    expect(riskLoverTiers(tiers([500, 750, 900]))).toEqual([]);
+  it("offers nothing when no band is in range", () => {
+    expect(riskLoverTiers(tiers([500, 1000]))).toEqual([]);
   });
 });

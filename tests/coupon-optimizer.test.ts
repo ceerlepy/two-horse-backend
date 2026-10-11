@@ -5,8 +5,8 @@ import {
 } from "vitest";
 
 import {
-  buildCouponBudgetLadder,
-  COUPON_BUDGET_LADDER_CONFIG,
+  buildCouponBands,
+  COUPON_BAND_CONFIG,
   optimizeSixFoldCoupons
 } from "../src/coupons/optimizer";
 
@@ -46,94 +46,65 @@ function leg(
 }
 
 
-describe(
-  "buildCouponBudgetLadder",
-  () => {
-    it(
-      "always offers the two fixed entry tiers when affordable, then 4 evenly-spaced tiers up to the max",
-      () => {
-        const tiers =
-          buildCouponBudgetLadder(3000);
+describe("buildCouponBands", () => {
+  it("cuts the max budget into 500 TL bands", () => {
+    expect(buildCouponBands(2000)).toEqual([
+      { minTl: 0, maxTl: 500 },
+      { minTl: 500, maxTl: 1000 },
+      { minTl: 1000, maxTl: 1500 },
+      { minTl: 1500, maxTl: 2000 }
+    ]);
+  });
 
-        expect(tiers[0]).toBe(500);
-        expect(tiers[1]).toBe(750);
-        expect(tiers).toHaveLength(6);
-        expect(tiers[tiers.length - 1]).toBe(3000);
+  it("ends the last band at an uneven max", () => {
+    expect(buildCouponBands(1200).at(-1)).toEqual({ minTl: 1000, maxTl: 1200 });
+    expect(buildCouponBands(300)).toEqual([{ minTl: 0, maxTl: 300 }]);
+  });
 
-        // strictly increasing, never exceeds the requested max
-        for (let i = 1; i < tiers.length; i++) {
-          expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
-        }
+  it("gives Gold's 1000 TL two coupons and 5000 TL ten", () => {
+    expect(buildCouponBands(1000)).toHaveLength(2);
+    expect(buildCouponBands(5000)).toHaveLength(10);
+  });
 
-        expect(Math.max(...tiers)).toBeLessThanOrEqual(3000);
-      }
-    );
+  it("matches the configured rules", () => {
+    expect(COUPON_BAND_CONFIG.stepTl).toBe(500);
+    expect(COUPON_BAND_CONFIG.nestedUpToTl).toBe(2000);
+  });
+});
 
-    it(
-      "scales the variable tiers proportionally for a much larger max budget",
-      () => {
-        const tiers =
-          buildCouponBudgetLadder(10000);
+describe("band coupons", () => {
+  const legs = () => [1, 2, 3, 4, 5, 6].map(n => leg(n, 10, 0.5));
 
-        expect(tiers[0]).toBe(500);
-        expect(tiers[1]).toBe(750);
-        expect(tiers[tiers.length - 1]).toBe(10000);
+  it("keeps each coupon inside its band and nests them up to 2000 TL", () => {
+    const coupons =
+      optimizeSixFoldCoupons({ legs: legs(), budgetTl: 3000, unitPriceTl: 1.25 });
 
-        for (let i = 1; i < tiers.length; i++) {
-          expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
-        }
-      }
-    );
+    for (const coupon of coupons) {
+      expect(coupon.totalTl).toBeLessThanOrEqual(coupon.targetBudgetTl + 1e-9);
+      expect(coupon.totalTl).toBeGreaterThanOrEqual(
+        Math.max(coupon.bandMinTl, COUPON_BAND_CONFIG.minTicketTl) - 1e-9
+      );
+    }
 
-    it(
-      "drops a fixed tier the max budget can't afford",
-      () => {
-        const tiers =
-          buildCouponBudgetLadder(600);
+    const nested = coupons.filter(c => c.targetBudgetTl <= 2000);
 
-        expect(tiers[0]).toBe(500);
-        expect(tiers).not.toContain(750);
-        expect(tiers[tiers.length - 1]).toBe(600);
-      }
-    );
+    for (let i = 1; i < nested.length; i++) {
+      nested[i].legs.forEach((selection, index) => {
+        expect(selection.horses.length)
+          .toBeGreaterThanOrEqual(nested[i - 1].legs[index].horses.length);
+      });
+    }
+  });
 
-    it(
-      "degrades to a single coupon when the max budget is below every fixed tier",
-      () => {
-        const tiers =
-          buildCouponBudgetLadder(300);
+  it("never prices a coupon below TJK's minimum stake", () => {
+    const coupons =
+      optimizeSixFoldCoupons({ legs: legs(), budgetTl: 500, unitPriceTl: 1.25 });
 
-        expect(Math.max(...tiers)).toBeLessThanOrEqual(300);
-        expect(tiers.length).toBeGreaterThan(0);
-
-        for (let i = 1; i < tiers.length; i++) {
-          expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
-        }
-      }
-    );
-
-    it(
-      "never produces a tier at or above the requested max other than the final one",
-      () => {
-        const tiers =
-          buildCouponBudgetLadder(3000);
-
-        for (let i = 0; i < tiers.length - 1; i++) {
-          expect(tiers[i]).toBeLessThan(3000);
-        }
-      }
-    );
-
-    it(
-      "matches the configured fixed tiers exactly",
-      () => {
-        expect(
-          COUPON_BUDGET_LADDER_CONFIG.fixedTiersTl
-        ).toEqual([500, 750]);
-      }
-    );
-  }
-);
+    expect(coupons).toHaveLength(1);
+    expect(coupons[0].totalTl).toBeGreaterThanOrEqual(COUPON_BAND_CONFIG.minTicketTl);
+    expect(coupons[0].totalTl).toBeLessThanOrEqual(500);
+  });
+});
 
 
 describe(

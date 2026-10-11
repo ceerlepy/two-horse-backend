@@ -99,12 +99,7 @@ describe(
 
         expect(optimizer)
           .toContain(
-            "globallyOptimalCounts"
-          );
-
-        expect(optimizer)
-          .toContain(
-            "enumerateHalf"
+            "couponFrontier"
           );
 
         expect(optimizer)
