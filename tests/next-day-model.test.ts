@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextDayProbabilities, nextDayUtilities } from "../src/value-model/next-day-model";
+import { applyNoAgfModel, nextDayProbabilities, nextDayUtilities } from "../src/value-model/next-day-model";
 import { scoreNextDayRace } from "../src/experts/next-day-service";
 import type { FeatureVector } from "../src/value-model/features";
 
@@ -38,5 +38,21 @@ describe("tomorrow's model", () => {
     expect(full.get(1)!.score).toBeGreaterThan(full.get(2)!.score);
     const partial = scoreNextDayRace(runners, noExperts, new Map([[1, 1], [2, 0]]));
     expect(partial.get(1)!.score).toBe(partial.get(2)!.score);
+  });
+});
+
+describe("applyNoAgfModel", () => {
+  const runner = (n: number, source: "learned" | "weighted") => ({
+    horse_number: n,
+    modelScore: { score: 50, confidence: 0.5, components: [], scoreSource: source, winProbability: null }
+  });
+  it("leaves races AGF has reached alone", () => {
+    const scored = [runner(1, "learned"), runner(2, "learned")];
+    expect(applyNoAgfModel(scored, new Map([[1, 1], [2, 0]]))).toBe(scored);
+  });
+  it("scores pre-AGF races from the utilities", () => {
+    const out = applyNoAgfModel([runner(1, "weighted"), runner(2, "weighted")], new Map([[1, 1], [2, 0]]));
+    expect(out[0].modelScore.scoreSource).toBe("no-agf");
+    expect(out[0].modelScore.winProbability).toBeGreaterThan(out[1].modelScore.winProbability);
   });
 });

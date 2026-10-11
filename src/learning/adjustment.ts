@@ -177,7 +177,7 @@ export function applyLearningAdjustment(
    * base and learned top-1 both 30.09%). So it only applies to the
    * hand-weighted fallback.
    */
-  if (score.scoreSource === "learned") {
+  if (score.scoreSource === "learned" || score.scoreSource === "no-agf") {
     return {
       ...score,
       baseScore: score.score,

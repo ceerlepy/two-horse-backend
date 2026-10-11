@@ -7,6 +7,8 @@ import { addDays, domesticCity, tjkNumericId } from "./cities";
 import { computeFeatures, type FeatureRunner, type FeatureVector, type PastRun } from "./features";
 import { loadGallops } from "./gallops";
 import { loadDrawStats, loadHistory, loadJockeys } from "./predictions";
+import { displayScore } from "../scoring/learned-score";
+import type { HorseModelScore } from "../scoring/types";
 
 /*
  * Tomorrow's model: a no-AGF win model for the D+1 card, built from what
@@ -108,76 +110,165 @@ export async function loadNextDayUtilities(env: Env, date: string): Promise<Next
   return out;
 }
 
-/* Cron: compute tomorrow's utilities when the card exists and the last run is stale. */
-export async function refreshNextDayModel(env: Env, now = new Date()): Promise<number> {
-  const target = addDays(turkeyDate(now), 1);
-  const stored = await env.DB.prepare(`SELECT program_json, fetched_at FROM next_day_programs WHERE race_date = ?`)
-    .bind(target).first<any>();
-  if (!stored) return 0;
+interface UtilityRunner extends FeatureRunner {
+  hp: number | null;
+}
 
-  const key = nextDayCacheKey(target);
-  const cached = await env.DB.prepare(`SELECT updated_at FROM value_model_cache WHERE cache_key = ?`)
-    .bind(key).first<any>();
-  if (cached) {
-    const age = now.getTime() - Date.parse(cached.updated_at);
-    const cardIsNewer = Date.parse(stored.fetched_at) > Date.parse(cached.updated_at);
-    if (age < NEXT_DAY_MODEL_CONFIG.refreshMinutes * 60_000 && !cardIsNewer) return 0;
-  }
+interface UtilityRace {
+  key: string;
+  cityId: number | null;
+  distanceMeters: number | null;
+  surface: string | null;
+  runners: UtilityRunner[];
+}
 
-  const program = JSON.parse(stored.program_json) as NextDayProgram;
-  const drawStats = await loadDrawStats(env, target);
-  const races: Record<string, Record<string, number>> = {};
+async function raceUtilities(
+  env: Env, date: string, race: UtilityRace, drawStats: Awaited<ReturnType<typeof loadDrawStats>>
+): Promise<number[]> {
+  const runners = race.runners;
+  const horseIds = runners.map(r => r.horseId).filter((x): x is number => x != null);
+  const history = await loadHistory(env, horseIds, date);
+  const lastJockeys = [...history.values()].map(h => h[h.length - 1]?.jockeyId ?? null);
+  const jockeyIds = [...new Set([...runners.map(r => r.jockeyId), ...lastJockeys].filter((x): x is number => x != null))];
+  const jockeys = await loadJockeys(env, jockeyIds, date);
+  const gallops = await loadGallops(env, horseIds);
+  const features = computeFeatures(
+    { raceDate: date, distanceMeters: race.distanceMeters, surface: race.surface, history, jockeys, gallops, cityId: race.cityId, drawStats },
+    runners
+  );
+  return nextDayUtilities(features, runners.map(r => {
+    const runs: PastRun[] = (r.horseId != null ? history.get(r.horseId) : undefined) ?? [];
+    return { hp: r.hp, weight: r.weight, lastFinish: runs.length ? runs[runs.length - 1].finish ?? null : null };
+  }));
+}
+
+async function storeUtilities(env: Env, date: string, races: UtilityRace[], now: Date): Promise<number> {
+  const drawStats = await loadDrawStats(env, date);
+  const out: Record<string, Record<string, number>> = {};
   let count = 0;
-
-  for (const meeting of program.meetings) {
-    const cityId = domesticCity(meeting.city)?.id ?? null;
-    for (const race of meeting.races) {
-      if (race.runners.length < 2) continue;
-      const runners: FeatureRunner[] = race.runners.map(r => ({
-        horseNumber: r.horse_number,
-        horseId: tjkNumericId(horseIdentity(r.horse_name, r.horse_profile_url)),
-        jockeyId: tjkNumericId(jockeyIdentity(r.jockey, r.jockey_profile_url)),
-        weight: r.weight,
-        agfPercent: null,
-        odds: null,
-        startPosition: r.start_position
-      }));
-      const horseIds = runners.map(r => r.horseId).filter((x): x is number => x != null);
-      const history = await loadHistory(env, horseIds, target);
-      const lastJockeys = [...history.values()].map(h => h[h.length - 1]?.jockeyId ?? null);
-      const jockeyIds = [...new Set([...runners.map(r => r.jockeyId), ...lastJockeys].filter((x): x is number => x != null))];
-      const jockeys = await loadJockeys(env, jockeyIds, target);
-      const gallops = await loadGallops(env, horseIds);
-
-      const features = computeFeatures(
-        { raceDate: target, distanceMeters: race.distance_meters, surface: race.track, history, jockeys, gallops, cityId, drawStats },
-        runners
-      );
-      const extras = runners.map((r, i) => {
-        const runs: PastRun[] = (r.horseId != null ? history.get(r.horseId) : undefined) ?? [];
-        return {
-          hp: race.runners[i].hp,
-          weight: race.runners[i].weight,
-          lastFinish: runs.length ? runs[runs.length - 1].finish ?? null : null
-        };
-      });
-      const utilities = nextDayUtilities(features, extras);
-      races[nextDayRaceKey(meeting.city, race.race_number)] = Object.fromEntries(
-        runners.map((r, i) => [String(r.horseNumber), Math.round(utilities[i] * 1e6) / 1e6])
-      );
-      count += runners.length;
-    }
+  for (const race of races) {
+    if (race.runners.length < 2) continue;
+    const utilities = await raceUtilities(env, date, race, drawStats);
+    out[race.key] = Object.fromEntries(
+      race.runners.map((r, i) => [String(r.horseNumber), Math.round(utilities[i] * 1e6) / 1e6])
+    );
+    count += race.runners.length;
   }
-
   await env.DB.batch([
     env.DB.prepare(`
       INSERT INTO value_model_cache(cache_key, value_json, updated_at) VALUES(?,?,?)
       ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
-    `).bind(key, JSON.stringify({ version: coefficients._meta.version, races }), now.toISOString()),
+    `).bind(nextDayCacheKey(date), JSON.stringify({ version: coefficients._meta.version, races: out }), now.toISOString()),
     env.DB.prepare(`DELETE FROM value_model_cache WHERE cache_key LIKE 'nextday-model:%' AND cache_key < ?`)
       .bind(nextDayCacheKey(turkeyDate(now)))
   ]);
   return count;
+}
+
+async function isStale(env: Env, date: string, now: Date, sourceUpdatedAt: string | null): Promise<boolean> {
+  const cached = await env.DB.prepare(`SELECT updated_at FROM value_model_cache WHERE cache_key = ?`)
+    .bind(nextDayCacheKey(date)).first<any>();
+  if (!cached) return true;
+  const age = now.getTime() - Date.parse(cached.updated_at);
+  const sourceIsNewer = sourceUpdatedAt != null && Date.parse(sourceUpdatedAt) > Date.parse(cached.updated_at);
+  return age >= NEXT_DAY_MODEL_CONFIG.refreshMinutes * 60_000 || sourceIsNewer;
+}
+
+/*
+ * Cron: utilities for tomorrow's card (from noon, when TJK publishes it)
+ * and for today's races AGF has not reached yet (after midnight the card
+ * becomes today's program, which stays without AGF until the morning).
+ */
+export async function refreshNextDayModel(env: Env, now = new Date()): Promise<number> {
+  let count = 0;
+  const today = turkeyDate(now);
+  const target = addDays(today, 1);
+
+  const stored = await env.DB.prepare(`SELECT program_json, fetched_at FROM next_day_programs WHERE race_date = ?`)
+    .bind(target).first<any>();
+  if (stored && await isStale(env, target, now, stored.fetched_at)) {
+    const program = JSON.parse(stored.program_json) as NextDayProgram;
+    const races: UtilityRace[] = program.meetings.flatMap(meeting => meeting.races.map(race => ({
+      key: nextDayRaceKey(meeting.city, race.race_number),
+      cityId: domesticCity(meeting.city)?.id ?? null,
+      distanceMeters: race.distance_meters,
+      surface: race.track,
+      runners: race.runners.map(r => ({
+        horseNumber: r.horse_number,
+        horseId: tjkNumericId(horseIdentity(r.horse_name, r.horse_profile_url)),
+        jockeyId: tjkNumericId(jockeyIdentity(r.jockey, r.jockey_profile_url)),
+        weight: r.weight,
+        hp: r.hp,
+        agfPercent: null,
+        odds: null,
+        startPosition: r.start_position
+      }))
+    })));
+    count += await storeUtilities(env, target, races, now);
+  }
+
+  const pending = await env.DB.prepare(`
+    SELECT r.city, r.race_number, r.distance_meters, r.track
+    FROM races r
+    WHERE r.race_date = ? AND (r.starts_at IS NULL OR r.starts_at > ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM runners u WHERE u.race_date = r.race_date AND u.city = r.city
+          AND u.race_number = r.race_number AND u.agf_percent > 0
+      )
+  `).bind(today, now.toISOString()).all<any>();
+  if ((pending.results ?? []).length && await isStale(env, today, now, null)) {
+    const runnerRows = await env.DB.prepare(`
+      SELECT city, race_number, horse_number, horse_id, jockey_id, weight, hp, start_position
+      FROM runners WHERE race_date = ? ORDER BY city, race_number, horse_number
+    `).bind(today).all<any>();
+    const races: UtilityRace[] = (pending.results ?? []).map((race: any) => ({
+      key: nextDayRaceKey(race.city, Number(race.race_number)),
+      cityId: domesticCity(race.city)?.id ?? null,
+      distanceMeters: race.distance_meters == null ? null : Number(race.distance_meters),
+      surface: race.track,
+      runners: (runnerRows.results ?? [])
+        .filter((r: any) => r.city === race.city && Number(r.race_number) === Number(race.race_number))
+        .map((r: any) => ({
+          horseNumber: Number(r.horse_number),
+          horseId: tjkNumericId(r.horse_id),
+          jockeyId: tjkNumericId(r.jockey_id),
+          weight: r.weight == null ? null : Number(r.weight),
+          hp: r.hp == null ? null : Number(r.hp),
+          agfPercent: null,
+          odds: null,
+          startPosition: r.start_position == null ? null : Number(r.start_position)
+        }))
+    }));
+    count += await storeUtilities(env, today, races, now);
+  }
+  return count;
+}
+
+/*
+ * The no-AGF model's score in place of the weighted fallback, when every
+ * runner has a utility: its win probability, shown as today's learned
+ * score is (50 = the race's average chance), with expert picks as a
+ * small nudge. Anything else is returned unchanged.
+ */
+export function applyNoAgfModel<T extends { horse_number: number; modelScore: HorseModelScore }>(
+  scored: T[],
+  utilities: Map<number, number> | null | undefined
+): T[] {
+  if (!utilities || scored.length < 2) return scored;
+  if (!scored.every(r => r.modelScore.scoreSource !== "learned" && utilities.has(r.horse_number))) return scored;
+  const probabilities = nextDayProbabilities(
+    scored.map(r => utilities.get(r.horse_number) as number),
+    scored.map(r => r.modelScore.components.find(c => c.key === "expert")?.score ?? null)
+  );
+  return scored.map((runner, i) => ({
+    ...runner,
+    modelScore: {
+      ...runner.modelScore,
+      score: displayScore(probabilities[i], scored.length),
+      winProbability: probabilities[i],
+      scoreSource: "no-agf" as const
+    }
+  }));
 }
 
 /* Tomorrow's horses, so their gallops are fetched before the model runs. */

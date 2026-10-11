@@ -3,6 +3,7 @@ import type { TjkProgramInput } from "../types/models";
 import { turkeyDate, turkeyDateTime } from "../shared";
 import { aggregateExpertPredictions } from "../experts/aggregator";
 import { scoreRace, raceUncertainty } from "../scoring/race-score";
+import { applyNoAgfModel, loadNextDayUtilities, nextDayRaceKey } from "../value-model/next-day-model";
 
 import {
   loadLearnedFeatures,
@@ -306,6 +307,18 @@ export async function getToday(env: Env): Promise<any> {
    */
   const learnedFeatures =
     await loadLearnedFeatures(
+      env,
+      date
+    ).catch(
+      () => new Map()
+    );
+
+  /*
+   * Before AGF reaches a race, the no-AGF model's utilities (cron, see
+   * src/value-model/next-day-model.ts) replace the weighted fallback.
+   */
+  const noAgfUtilities =
+    await loadNextDayUtilities(
       env,
       date
     ).catch(
@@ -677,11 +690,22 @@ export async function getToday(env: Env): Promise<any> {
               );
 
             const baseScoredRunners =
-              scoreRace(
-                fieldCoverageAdjustedRunners,
+              applyNoAgfModel(
+                scoreRace(
+                  fieldCoverageAdjustedRunners,
 
-                learnedFeatures.get(
-                  raceFeatureKey(
+                  learnedFeatures.get(
+                    raceFeatureKey(
+                      m.city,
+                      Number(
+                        race.race_number
+                      )
+                    )
+                  )
+                ),
+
+                noAgfUtilities.get(
+                  nextDayRaceKey(
                     m.city,
                     Number(
                       race.race_number
