@@ -21,6 +21,8 @@ export interface PastRun {
   raceDate: string;            // YYYY-MM-DD
   fig: number | null;
   won: boolean;
+  /* Finishing position; optional because only tomorrow's model reads it. */
+  finish?: number | null;
   pWin: number | null;
   distanceMeters: number | null;
   surface: string | null;

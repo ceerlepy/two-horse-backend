@@ -6,6 +6,7 @@ import { ARCHIVE_CONFIG, archiveCoverage, refreshResultArchive } from "./archive
 import { addDays } from "./cities";
 import { EVALUATION_CONFIG, coefficientsFrom, evaluateIfDue, loadState, retrainIfDue } from "./evaluation";
 import { GALLOP_CONFIG, refreshGallops } from "./gallops";
+import { nextDayHorseIds, refreshNextDayModel } from "./next-day-model";
 import { ODDS_CONFIG, refreshGanyanOdds } from "./odds";
 import { freezeStartedRaces, labelPredictions, refreshPredictions, valueLabel } from "./predictions";
 import { TRAINING_CONFIG, pendingTrainingDates, refreshTrainingRows, trainingCoverage } from "./training";
@@ -21,7 +22,7 @@ export async function refreshValueModel(env: Env): Promise<void> {
 
   await observed(env, "value-model.freeze", () => freezeStartedRaces(env));
   await observed(env, "value-model.odds", () => refreshGanyanOdds(env));
-  await observed(env, "value-model.gallops", () => refreshGallops(env));
+  await observed(env, "value-model.gallops", async () => refreshGallops(env, turkeyDate(), await nextDayHorseIds(env)));
   await observed(env, "value-model.archive", () => refreshResultArchive(env));
 
   const today = turkeyDate();
@@ -36,6 +37,7 @@ export async function refreshValueModel(env: Env): Promise<void> {
   if (historyReady) {
     await observed(env, "value-model.predict", () => refreshPredictions(env, coefficientsFrom(state)));
   }
+  await observed(env, "value-model.next-day", () => refreshNextDayModel(env));
   await observed(env, "value-model.label", () => labelPredictions(env));
   await observed(env, "value-model.training", () => refreshTrainingRows(env));
   await observed(env, "value-model.retrain", async () => retrainIfDue(env, state, await trainingReady(env)));
