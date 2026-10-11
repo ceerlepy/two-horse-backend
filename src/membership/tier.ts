@@ -131,7 +131,7 @@ export const TIER_LIMITS: Record<
 
   gold: {
     canGenerateCoupons: true,
-    maxCouponBudgetTl: 1000,
+    maxCouponBudgetTl: 1500,
     maxCouponRequestsPerDay: 10,
     canViewCouponHistory: false,
     canViewHorseVideos: true,

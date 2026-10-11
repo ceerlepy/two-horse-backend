@@ -122,22 +122,25 @@ interface PreparedLeg {
  * does not stretch to a round number; it stops where more horses stop
  * adding real chance, and its price is whatever that costs.
  *
- * Up to nestedUpToTl each coupon also contains the previous one, so a
- * cheaper coupon never hits where a dearer one misses. Above it every
- * band is built on its own: chaining all bands lost real hits there.
+ * Up to nestedUpToTl (Gold's ceiling) each coupon also contains the
+ * previous one, so a cheaper coupon never hits where a dearer one
+ * misses: every band is built from the same model chances, only the
+ * number of horses differs. Above it every band is built on its own:
+ * chaining all bands lost real hits there.
  *
  * Backtest (579 past altılı, AGF probabilities;
  * /mnt/project-files/analysis/kupon-bant-testi-2026-10-11): up to
  * 2000 TL the nested bands hit as often as the old independent tiers
  * for the money (1356 TL 118 vs 1366 TL 117) and never miss where a
  * cheaper one hit; the 4500-5000 band chained to every lower band hit
- * 174 times against 196 built on its own.
+ * 174 times against 196 built on its own. Nested and independent hit
+ * the same up to 2000 TL (423 vs 423), so the owner chose 1500.
  *
  * minTicketTl: TJK's minimum stake per ticket.
  */
 export const COUPON_BAND_CONFIG = {
   stepTl: 500,
-  nestedUpToTl: 2000,
+  nestedUpToTl: 1500,
   stopTolerance: 0.05,
   minTicketTl: 20
 } as const;
