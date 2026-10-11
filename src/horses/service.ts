@@ -1,3 +1,4 @@
+import { findNextDayRace } from "../tjk/next-day-service";
 import type {
   Env
 } from "../env";
@@ -51,12 +52,20 @@ export async function getHorseVideos(
       .bind(raceDate, city, raceNumber, horseNumber)
       .first<{ horse_profile_url: string | null }>();
 
-  if (!runner?.horse_profile_url) {
+  /* Tomorrow's race (D+1): the link lives on the stored card. */
+  const profileUrl =
+    runner?.horse_profile_url ??
+    (await findNextDayRace(env, raceDate, city, raceNumber))
+      ?.runners.find(r => r.horse_number === horseNumber)
+      ?.horse_profile_url ??
+    null;
+
+  if (!profileUrl) {
     return { error: "NO_PROFILE_URL" };
   }
 
   const videos =
-    await fetchLast3HorseVideos(runner.horse_profile_url);
+    await fetchLast3HorseVideos(profileUrl);
 
   const fetchedAt = new Date().toISOString();
 

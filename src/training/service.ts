@@ -1,3 +1,4 @@
+import { findNextDayRace } from "../tjk/next-day-service";
 import type {
   Env
 } from "../env";
@@ -310,13 +311,19 @@ export async function getRaceTraining(
     .bind(raceDate, city, raceNumber)
     .first<{ performance_url: string | null }>();
 
-  if (!race?.performance_url) {
+  /* Tomorrow's race (D+1): the link lives on the stored card. */
+  const performanceUrl =
+    race?.performance_url ??
+    (await findNextDayRace(env, raceDate, city, raceNumber))?.performance_url ??
+    null;
+
+  if (!performanceUrl) {
     return { ...base, status: "unavailable", fetchedAt: null, horses: [] };
   }
 
   const fresh = await refreshRaceTraining(
     env,
-    { ...base, performanceUrl: race.performance_url },
+    { ...base, performanceUrl },
     TRAINING_CONFIG.onDemandFetchTimeoutMs
   );
 

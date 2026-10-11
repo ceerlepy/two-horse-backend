@@ -1,3 +1,5 @@
+import { attachNextDayExperts } from "../experts/next-day-service";
+import { addDays, loadNextDayProgram } from "../tjk/next-day-service";
 import type {
   Env
 } from "../env";
@@ -364,13 +366,17 @@ function findRace(
 }
 
 async function questionKey(
-  request: AskRequest
+  request: AskRequest,
+  today: string
 ): Promise<string> {
   return sha256(
     [
       request.city.trim().toLocaleLowerCase("tr-TR"),
       request.raceNumber,
-      request.foreign ? `yd:${request.raceDate ?? ""}` : "tr",
+      request.foreign
+        ? `yd:${request.raceDate ?? ""}`
+        /* Tomorrow's race shares a city and number with today's. */
+        : request.raceDate && request.raceDate > today ? `tr:${request.raceDate}` : "tr",
       request.language,
       normalizeQuestion(request.question)
     ].join("|")
@@ -450,7 +456,7 @@ export async function askAi(
   }
 
   const date = turkeyDate(now);
-  const key = await questionKey({ ...request, question });
+  const key = await questionKey({ ...request, question }, date);
   const before = await usage(env, userId, date, key);
 
   if (!before.repeated && before.used >= limit) {
@@ -494,7 +500,24 @@ export async function askAi(
           .catch(() => ({ status: "unavailable", byRunner: new Map() }))
       );
 
-    const race = findRace(meetings, request.city, request.raceNumber);
+    let race = findRace(meetings, request.city, request.raceNumber);
+
+    /*
+     * Tomorrow's race (D+1), asked the evening before: the stored card
+     * with its no-AGF scores and early expert picks. The app tells the
+     * member answers improve once morning data lands.
+     */
+    const tomorrow = addDays(date, 1);
+    if (!race && request.raceDate === tomorrow) {
+      const program = await loadNextDayProgram(env, tomorrow).catch(() => null);
+      if (program) {
+        race = findRace(
+          (await attachNextDayExperts(env, program, "premium")).meetings,
+          request.city,
+          request.raceNumber
+        );
+      }
+    }
 
     if (!race) {
       return { ok: false, error: "RACE_NOT_FOUND" };

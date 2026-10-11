@@ -7,7 +7,7 @@ import type { MembershipTier } from "../membership/tier";
 import { stripPremiumRunnerSignals } from "../membership/tier";
 import { errorMessage, sha256, turkeyDate } from "../shared";
 import { acquireLease, markFailure, markSuccess } from "../storage/state";
-import { addDays, loadNextDayProgram } from "../tjk/next-day-service";
+import { addDays, loadNextDayProgram, stripNextDayLinks } from "../tjk/next-day-service";
 import type { NextDayProgram } from "../tjk/next-day-service";
 
 import { expertAdapterFor } from "./adapters/registry";
@@ -532,7 +532,7 @@ export async function attachNextDayExperts(
   tier: MembershipTier
 ): Promise<NextDayProgram> {
   if (tier === "free") {
-    return stripNextDayExperts(program);
+    return stripNextDayLinks(stripNextDayExperts(program));
   }
 
   let rows: Array<ExpertPredictionRow & { city: string; race_number: number; horse_number: number }> = [];
@@ -559,7 +559,7 @@ export async function attachNextDayExperts(
     byRunner.set(k, list);
   }
 
-  return {
+  return stripNextDayLinks({
     ...program,
     meetings: program.meetings.map(meeting => ({
       ...meeting,
@@ -568,17 +568,39 @@ export async function attachNextDayExperts(
           aggregateExpertPredictions(
             byRunner.get(runnerKey(meeting.city, race.race_number, horseNumber)) ?? []
           );
-        const modelFavoriteNumber = nextDayModelFavorite(race.runners, consensusOf);
+        const scores = scoreNextDayRace(race.runners, consensusOf);
+        const modelFavoriteNumber = modelFavoriteOf(scores);
+        const raceSources = new Set(
+          rows
+            .filter(row =>
+              normalizeExpertSearchText(row.city) === normalizeExpertSearchText(meeting.city) &&
+              Number(row.race_number) === race.race_number)
+            .map(row => row.source_key)
+        ).size;
 
         return {
           ...race,
+          /*
+           * Same shape as today's races, so the app can show tomorrow
+           * with today's card and race screen: race date, the AGF
+           * pending flag, expert coverage, each runner's no-AGF
+           * modelScore and its expert consensus.
+           */
+          race_date: program.date,
+          agfPending: true,
+          ...(raceSources > 0 ? { expertSourceCount: raceSources } : {}),
           ...(modelFavoriteNumber !== null ? { modelFavoriteNumber } : {}),
-          runners: race.runners.map(runner => {
-            const list = byRunner.get(runnerKey(meeting.city, race.race_number, runner.horse_number));
+          runners: race.runners.map(stored => {
+            const consensus = consensusOf(stored.horse_number);
+            const runner: any = {
+              ...stored,
+              ...(scores.has(stored.horse_number) ? { modelScore: scores.get(stored.horse_number) } : {}),
+              ...(consensus.sourceCount > 0 ? { expertConsensus: publicConsensus(consensus) } : {})
+            };
+            const list = byRunner.get(runnerKey(meeting.city, race.race_number, stored.horse_number));
             if (!list?.length) return runner;
             const count = new Set(list.filter(isPositive).map(r => r.source_key)).size;
             if (count <= 0) return runner;
-            const consensus = aggregateExpertPredictions(list);
             const role = nextDayExpertRole(consensus);
             return {
               ...runner,
@@ -591,7 +613,18 @@ export async function attachNextDayExperts(
         };
       })
     }))
-  };
+  });
+}
+
+/* The consensus without the aggregator's internal weighted sums. */
+function publicConsensus(consensus: ExpertConsensus): Partial<ExpertConsensus> {
+  const {
+    weightedBanko, weightedFavorite, weightedStrong, weightedStar,
+    weightedRival, weightedSurprise, weightedAvoid,
+    weightedSupport, weightedOpposition,
+    ...rest
+  } = consensus;
+  return rest;
 }
 
 /*
@@ -622,7 +655,22 @@ export function nextDayModelFavorite(
   runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
   consensusOf: (horseNumber: number) => ExpertConsensus
 ): number | null {
-  if (runners.length < 2) return null;
+  return modelFavoriteOf(scoreNextDayRace(runners, consensusOf));
+}
+
+type NextDayModelScore = {
+  score: number;
+  confidence: number;
+  components: Array<{ key: string; score: number | null; configuredWeight: number; effectiveWeight: number }>;
+};
+
+/* Each runner's no-AGF score, as the race screen reads modelScore. */
+export function scoreNextDayRace(
+  runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
+  consensusOf: (horseNumber: number) => ExpertConsensus
+): Map<number, NextDayModelScore> {
+  const out = new Map<number, NextDayModelScore>();
+  if (!runners.length) return out;
 
   const scored = scoreRace(
     runners.map(runner => ({
@@ -637,9 +685,29 @@ export function nextDayModelFavorite(
     }))
   );
 
-  const ordered = [...scored].sort((a, b) => b.modelScore.score - a.modelScore.score);
-  if (ordered[0].modelScore.score <= ordered[1].modelScore.score) return null;
-  return ordered[0].horse_number;
+  const round2 = (value: number) => Math.round(value * 100) / 100;
+  for (const runner of scored) {
+    out.set(runner.horse_number, {
+      score: round2(runner.modelScore.score),
+      confidence: round2(runner.modelScore.confidence),
+      components: runner.modelScore.components.map(component => ({
+        key: component.key,
+        score: component.score === null ? null : round2(component.score),
+        configuredWeight: component.configuredWeight,
+        effectiveWeight: component.effectiveWeight
+      }))
+    });
+  }
+  return out;
+}
+
+function modelFavoriteOf(
+  scores: Map<number, NextDayModelScore>
+): number | null {
+  if (scores.size < 2) return null;
+  const ordered = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
+  if (ordered[0][1].score <= ordered[1][1].score) return null;
+  return ordered[0][0];
 }
 
 export function stripNextDayExperts(program: NextDayProgram): NextDayProgram {

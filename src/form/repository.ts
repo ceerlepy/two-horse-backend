@@ -1,3 +1,4 @@
+import { findNextDayRace } from "../tjk/next-day-service";
 import type {
   Env
 } from "../env";
@@ -432,8 +433,22 @@ export async function raceFormRuns(
       .bind(raceDate, city, raceNumber)
       .all<any>();
 
+  /*
+   * Tomorrow's race (D+1) is not in runners yet; its stored card
+   * carries the same TJK horse links.
+   */
+  let runnerList: any[] = runnerRows.results ?? [];
+  if (!runnerList.length) {
+    const nextDay = await findNextDayRace(env, raceDate, city, raceNumber);
+    runnerList = (nextDay?.runners ?? []).map(runner => ({
+      horse_number: runner.horse_number,
+      horse_name: runner.horse_name,
+      horse_profile_url: runner.horse_profile_url ?? null
+    }));
+  }
+
   const runners =
-    (runnerRows.results ?? []).map(
+    runnerList.map(
       (row: any) => ({
         horseNumber:
           Number(row.horse_number),
