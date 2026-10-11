@@ -61,21 +61,21 @@ describe("buildCouponBands", () => {
     expect(buildCouponBands(300)).toEqual([{ minTl: 0, maxTl: 300 }]);
   });
 
-  it("gives Gold's 1000 TL two coupons and 5000 TL ten", () => {
-    expect(buildCouponBands(1000)).toHaveLength(2);
+  it("gives Gold's 1500 TL three coupons and 5000 TL ten", () => {
+    expect(buildCouponBands(1500)).toHaveLength(3);
     expect(buildCouponBands(5000)).toHaveLength(10);
   });
 
   it("matches the configured rules", () => {
     expect(COUPON_BAND_CONFIG.stepTl).toBe(500);
-    expect(COUPON_BAND_CONFIG.nestedUpToTl).toBe(2000);
+    expect(COUPON_BAND_CONFIG.nestedUpToTl).toBe(1500);
   });
 });
 
 describe("band coupons", () => {
   const legs = () => [1, 2, 3, 4, 5, 6].map(n => leg(n, 10, 0.5));
 
-  it("keeps each coupon inside its band and nests them up to 2000 TL", () => {
+  it("keeps each coupon inside its band and nests them up to the nesting limit", () => {
     const coupons =
       optimizeSixFoldCoupons({ legs: legs(), budgetTl: 3000, unitPriceTl: 1.25 });
 
@@ -86,7 +86,7 @@ describe("band coupons", () => {
       );
     }
 
-    const nested = coupons.filter(c => c.targetBudgetTl <= 2000);
+    const nested = coupons.filter(c => c.targetBudgetTl <= COUPON_BAND_CONFIG.nestedUpToTl);
 
     for (let i = 1; i < nested.length; i++) {
       nested[i].legs.forEach((selection, index) => {
