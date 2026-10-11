@@ -1,4 +1,5 @@
-import { findNextDayRace } from "../tjk/next-day-service";
+import { addDays, findNextDayRace, loadNextDayProgram } from "../tjk/next-day-service";
+import { turkeyDate } from "../shared";
 import type {
   Env
 } from "../env";
@@ -59,6 +60,31 @@ export async function formCandidates(
     `)
       .all<any>();
 
+  /*
+   * Tomorrow's card lives in next_day_programs until race morning, so
+   * its horses are queued after today's: their recent runs are then
+   * ready when the app shows tomorrow's race screen the evening before.
+   */
+  const nextDay =
+    await loadNextDayProgram(
+      env,
+      addDays(turkeyDate(), 1)
+    ).catch(() => null);
+
+  const nextDayRows =
+    (nextDay?.meetings ?? []).flatMap(meeting =>
+      meeting.races.flatMap(race =>
+        race.runners
+          .filter(runner => runner.horse_profile_url)
+          .map(runner => ({
+            horse_name: runner.horse_name,
+            horse_profile_url: runner.horse_profile_url,
+            recent_form: runner.recent_form_raw ?? "",
+            first_start: race.starts_at ?? nextDay!.date
+          }))
+      )
+    );
+
   const states =
     options.force
       ? []
@@ -109,7 +135,7 @@ export async function formCandidates(
 
   for (
     const row of
-    result.results ?? []
+    [...(result.results ?? []), ...nextDayRows]
   ) {
     const horseKey =
       horseKeyFromProfileUrl(

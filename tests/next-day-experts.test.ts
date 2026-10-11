@@ -329,6 +329,8 @@ describe("attachNextDayExperts", () => {
     const race: any = out.meetings[0].races[0];
     expect(race.race_date).toBe("2026-10-06");
     expect(race.agfPending).toBe(true);
+    expect(race.uncertainty.level).toBeTruthy();
+    expect(race.couponStrategy.mode).toBeTruthy();
     expect(race.expertSourceCount).toBe(3);
     expect(race.runners[0].modelScore.score).toBeGreaterThan(race.runners[1].modelScore.score);
     expect(race.runners[0].expertConsensus.primaryCount).toBe(2);
