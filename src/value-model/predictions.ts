@@ -59,6 +59,7 @@ export async function loadHistory(env: Env, horseIds: number[], raceDate: string
       raceDate: r.race_date,
       fig: r.fig == null ? null : Number(r.fig),
       won: Number(r.finish_position) === 1,
+      finish: r.finish_position == null ? null : Number(r.finish_position),
       pWin: r.p_win == null ? null : Number(r.p_win),
       distanceMeters: r.distance_meters == null ? null : Number(r.distance_meters),
       surface: r.surface,

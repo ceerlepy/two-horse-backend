@@ -17,6 +17,8 @@ import { aggregateExpertPredictions } from "./aggregator";
 import type { ExpertConsensus, ExpertPredictionRow } from "./aggregation-types";
 import { raceUncertainty, scoreRace } from "../scoring/race-score";
 import { recommendCouponStrategy } from "../coupon/strategy";
+import { displayScore } from "../scoring/learned-score";
+import { loadNextDayUtilities, nextDayProbabilities, nextDayRaceKey, type NextDayUtilityMap } from "../value-model/next-day-model";
 import { directPageDateEvidence } from "./discovery";
 import {
   acquireExpertDocument,
@@ -552,6 +554,8 @@ export async function attachNextDayExperts(
     rows = [];
   }
 
+  const utilities = await loadNextDayUtilities(env, program.date).catch(() => new Map() as NextDayUtilityMap);
+
   const byRunner = new Map<string, ExpertPredictionRow[]>();
   for (const row of rows) {
     const k = runnerKey(row.city, Number(row.race_number), Number(row.horse_number));
@@ -569,9 +573,10 @@ export async function attachNextDayExperts(
           aggregateExpertPredictions(
             byRunner.get(runnerKey(meeting.city, race.race_number, horseNumber)) ?? []
           );
-        const scores = scoreNextDayRace(race.runners, consensusOf);
+        const raceUtilities = utilities.get(nextDayRaceKey(meeting.city, race.race_number)) ?? null;
+        const scores = scoreNextDayRace(race.runners, consensusOf, raceUtilities);
         const modelFavoriteNumber = modelFavoriteOf(scores);
-        const analysis = nextDayRaceAnalysis(race.runners, consensusOf);
+        const analysis = nextDayRaceAnalysis(race.runners, consensusOf, raceUtilities);
         const raceSources = new Set(
           rows
             .filter(row =>
@@ -646,13 +651,8 @@ export function nextDayExpertRole(
 }
 
 /*
- * Tomorrow's model favourite: the same no-AGF score the race screen
- * shows on race morning before AGF opens (form, HP, weight and expert
- * picks, pulled toward 50 by how much of it is populated). On 957
- * frozen races (19 Aug - 11 Oct 2026) its top pick won 25.7% against
- * 10.4% for a random runner and 23.3% for the horse most experts
- * named (AGF's favourite, not available the evening before: 33.4%).
- * Null when nothing separates the top two, e.g. no data at all.
+ * Tomorrow's model favourite (see scoreNextDay). Null when nothing
+ * separates the top two, e.g. no data at all.
  */
 export function nextDayModelFavorite(
   runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
@@ -667,14 +667,19 @@ type NextDayModelScore = {
   components: Array<{ key: string; score: number | null; configuredWeight: number; effectiveWeight: number }>;
 };
 
-/* Each runner's no-AGF score, as the race screen reads modelScore. */
-export function scoreNextDayRace(
-  runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
-  consensusOf: (horseNumber: number) => ExpertConsensus
-): Map<number, NextDayModelScore> {
-  const out = new Map<number, NextDayModelScore>();
-  if (!runners.length) return out;
+type NextDayRunners = NextDayProgram["meetings"][number]["races"][number]["runners"];
 
+/*
+ * The weighted no-AGF score, replaced by tomorrow's model
+ * (src/value-model/next-day-model.ts) when the cron has computed every
+ * runner's utility: its win probability, shown as today's learned score
+ * is (50 = the race's average chance), with expert picks as a small nudge.
+ */
+function scoreNextDay(
+  runners: NextDayRunners,
+  consensusOf: (horseNumber: number) => ExpertConsensus,
+  utilities: Map<number, number> | null
+) {
   const scored = scoreRace(
     runners.map(runner => ({
       horse_number: runner.horse_number,
@@ -687,6 +692,32 @@ export function scoreNextDayRace(
       expertConsensus: consensusOf(runner.horse_number)
     }))
   );
+  if (!utilities || runners.length < 2 || !runners.every(r => utilities.has(r.horse_number))) return scored;
+
+  const probabilities = nextDayProbabilities(
+    scored.map(r => utilities.get(r.horse_number) as number),
+    scored.map(r => r.modelScore.components.find(c => c.key === "expert")?.score ?? null)
+  );
+  return scored.map((runner, i) => ({
+    ...runner,
+    modelScore: {
+      ...runner.modelScore,
+      score: displayScore(probabilities[i], scored.length),
+      winProbability: probabilities[i]
+    }
+  }));
+}
+
+/* Each runner's no-AGF score, as the race screen reads modelScore. */
+export function scoreNextDayRace(
+  runners: NextDayRunners,
+  consensusOf: (horseNumber: number) => ExpertConsensus,
+  utilities: Map<number, number> | null = null
+): Map<number, NextDayModelScore> {
+  const out = new Map<number, NextDayModelScore>();
+  if (!runners.length) return out;
+
+  const scored = scoreNextDay(runners, consensusOf, utilities);
 
   const round2 = (value: number) => Math.round(value * 100) / 100;
   for (const runner of scored) {
@@ -709,22 +740,12 @@ export function scoreNextDayRace(
  * from the same no-AGF scores, as today's races get before AGF opens.
  */
 export function nextDayRaceAnalysis(
-  runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
-  consensusOf: (horseNumber: number) => ExpertConsensus
+  runners: NextDayRunners,
+  consensusOf: (horseNumber: number) => ExpertConsensus,
+  utilities: Map<number, number> | null = null
 ): { uncertainty: ReturnType<typeof raceUncertainty>; couponStrategy: ReturnType<typeof recommendCouponStrategy> } | null {
   if (runners.length < 2) return null;
-  const scored = scoreRace(
-    runners.map(runner => ({
-      horse_number: runner.horse_number,
-      agf_percent: null,
-      hp: runner.hp,
-      weight: runner.weight,
-      recent_form_raw: runner.recent_form_raw,
-      market_score: null,
-      field_score: null,
-      expertConsensus: consensusOf(runner.horse_number)
-    }))
-  );
+  const scored = scoreNextDay(runners, consensusOf, utilities);
   const uncertainty = raceUncertainty(scored);
   return { uncertainty, couponStrategy: recommendCouponStrategy(scored as any, uncertainty) };
 }

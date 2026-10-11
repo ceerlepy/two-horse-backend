@@ -1,0 +1,105 @@
+{
+  "_meta": {
+    "version": "nextday-v1-2026-10-11",
+    "trainedOn": "12,646 archive races 2024-09-01..2026-08-18, no AGF",
+    "tested": "829 live races 2026-08-19..2026-10-04: top-1 26.8%, top-3 60.3% (weighted fallback 24.2% / 53.6%)"
+  },
+  "expert": {
+    "mean": 64.485,
+    "sd": 6.7497,
+    "coef": 0.2
+  },
+  "features": [
+    {
+      "name": "fig_best3_rel",
+      "mean": 0.0,
+      "sd": 22.038493,
+      "coef": 0.470484,
+      "naCoef": 0.082151
+    },
+    {
+      "name": "fig_last_rel",
+      "mean": -0.0,
+      "sd": 37.172416,
+      "coef": 0.071279,
+      "naCoef": 0.088124
+    },
+    {
+      "name": "spec_best_rel",
+      "mean": -0.0,
+      "sd": 25.026693,
+      "coef": 0.311121,
+      "naCoef": -0.157426
+    },
+    {
+      "name": "idm_best400_z30_rel",
+      "mean": -0.0,
+      "sd": 0.53929,
+      "coef": 0.143562,
+      "naCoef": -0.166288
+    },
+    {
+      "name": "idm_n30",
+      "mean": 3.69897,
+      "sd": 1.85579,
+      "coef": 0.087759,
+      "naCoef": 0.0
+    },
+    {
+      "name": "draw_ae_rel",
+      "mean": 0.0,
+      "sd": 0.087059,
+      "coef": 0.064809,
+      "naCoef": 0.0
+    },
+    {
+      "name": "jockey_ae",
+      "mean": 0.992471,
+      "sd": 0.194244,
+      "coef": 0.152793,
+      "naCoef": 0.0
+    },
+    {
+      "name": "horse_ae",
+      "mean": 1.013143,
+      "sd": 0.394138,
+      "coef": -0.022241,
+      "naCoef": -0.449945
+    },
+    {
+      "name": "hp_rel",
+      "mean": 0.0,
+      "sd": 10.220702,
+      "coef": 0.447442,
+      "naCoef": -0.159732
+    },
+    {
+      "name": "wt_rel",
+      "mean": -0.0,
+      "sd": 2.380914,
+      "coef": -0.046573,
+      "naCoef": 0.0
+    },
+    {
+      "name": "lastfin",
+      "mean": 5.46961,
+      "sd": 3.215693,
+      "coef": -0.258155,
+      "naCoef": -0.683138
+    },
+    {
+      "name": "ln_prev",
+      "mean": 2.134846,
+      "sd": 0.939742,
+      "coef": -0.590771,
+      "naCoef": 0.0
+    },
+    {
+      "name": "ldays",
+      "mean": 2.892729,
+      "sd": 0.707511,
+      "coef": -0.094025,
+      "naCoef": -0.449945
+    }
+  ]
+}

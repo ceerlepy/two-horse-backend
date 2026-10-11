@@ -146,9 +146,12 @@ export async function backfillGallops(env: Env, limit: number, today = turkeyDat
 
 /*
  * Today's runners whose gallops are missing or older than refetchAfterHours
- * first; whatever capacity is left goes to the archive backfill.
+ * first, then tomorrow's (laterIds, for the D+1 model); whatever capacity
+ * is left goes to the archive backfill.
  */
-export async function refreshGallops(env: Env, today = turkeyDate()): Promise<{ fetched: number; failed: number }> {
+export async function refreshGallops(
+  env: Env, today = turkeyDate(), laterIds: number[] = []
+): Promise<{ fetched: number; failed: number }> {
   const cutoff = new Date(Date.now() - GALLOP_CONFIG.refetchAfterHours * 3_600_000).toISOString();
   const rows = await env.DB.prepare(`
     SELECT DISTINCT u.horse_id AS identity
@@ -163,6 +166,15 @@ export async function refreshGallops(env: Env, today = turkeyDate()): Promise<{ 
     LIMIT ?
   `).bind(today, new Date().toISOString(), cutoff, GALLOP_CONFIG.horsesPerTick).all<any>();
   const ids = (rows.results ?? []).map((r: any) => tjkNumericId(r.identity)).filter((x): x is number => x != null);
+  for (let i = 0; i < laterIds.length && ids.length < GALLOP_CONFIG.horsesPerTick; i += 90) {
+    const chunk = laterIds.slice(i, i + 90).filter(id => !ids.includes(id));
+    if (!chunk.length) continue;
+    const fresh = await env.DB.prepare(`
+      SELECT horse_id FROM horse_gallop_state WHERE horse_id IN (${chunk.map(() => "?").join(",")}) AND fetched_at >= ?
+    `).bind(...chunk, cutoff).all<any>();
+    const done = new Set((fresh.results ?? []).map((r: any) => Number(r.horse_id)));
+    ids.push(...chunk.filter(id => !done.has(id)).slice(0, GALLOP_CONFIG.horsesPerTick - ids.length));
+  }
   const result = await fetchAndStore(env, ids);
   await backfillGallops(env, GALLOP_CONFIG.horsesPerTick - ids.length, today);
   return result;

@@ -67,6 +67,8 @@ export interface NextDayRunner {
    * Absent on cards stored before 11 Oct 2026.
    */
   horse_profile_url?: string | null;
+  /* TJK jockey page (its JokeyId feeds tomorrow's model). Stored only, like horse_profile_url. */
+  jockey_profile_url?: string | null;
   /*
    * Early expert picks (src/experts/next-day-service.ts): distinct
    * sources with a positive pick, plus our own counts-only sentence.
@@ -172,7 +174,8 @@ export function toNextDayProgram(
           hp: runner.hp ?? null,
           recent_form_raw: runner.recentFormRaw ?? null,
           start_position: runner.startPosition ?? null,
-          horse_profile_url: runner.horseProfileUrl ?? null
+          horse_profile_url: runner.horseProfileUrl ?? null,
+          jockey_profile_url: runner.jockeyProfileUrl ?? null
         }))
       }))
     }))
@@ -203,7 +206,7 @@ export async function refreshNextDayProgramIfDue(
 
   const state = await getState(env, KEY);
   const stored = await env.DB.prepare(
-    "SELECT fetched_at, instr(program_json, '\"horse_profile_url\"') > 0 AS has_links FROM next_day_programs WHERE race_date=?"
+    "SELECT fetched_at, instr(program_json, '\"jockey_profile_url\"') > 0 AS has_links FROM next_day_programs WHERE race_date=?"
   ).bind(target).first<{ fetched_at: string; has_links: number }>();
 
   /*
@@ -314,7 +317,7 @@ export function stripNextDayLinks(
       ...meeting,
       races: meeting.races.map(({ performance_url, ...race }) => ({
         ...race,
-        runners: race.runners.map(({ horse_profile_url, ...runner }) => runner)
+        runners: race.runners.map(({ horse_profile_url, jockey_profile_url, ...runner }) => runner)
       }))
     }))
   };
