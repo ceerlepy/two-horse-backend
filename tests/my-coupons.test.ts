@@ -20,6 +20,9 @@ async function testEnv(): Promise<any> {
   await env.DB.prepare(
     "CREATE TABLE learning_runner_features (race_date TEXT, city TEXT, race_number INTEGER, horse_number INTEGER, finish_position INTEGER)"
   ).run();
+  await env.DB.prepare(
+    "CREATE TABLE races (race_date TEXT, city TEXT, race_number INTEGER, starts_at TEXT)"
+  ).run();
   return env;
 }
 
@@ -61,7 +64,12 @@ describe("Kuponlarım", () => {
 
     let mine = await listMyCoupons(env, "u1", NOW);
     expect(mine).toHaveLength(1);
-    expect(mine[0]).toMatchObject({ raceDate: "2026-10-05", city: "Bursa", pool: "fivefold", evaluated: false, hitLegs: null });
+    expect(mine[0]).toMatchObject({ raceDate: "2026-10-05", city: "Bursa", pool: "fivefold", evaluated: false, hitLegs: null, startsAt: null });
+
+    await env.DB.prepare("INSERT INTO races VALUES ('2026-10-05', 'Bursa', 4, '2026-10-05T12:30:00.000Z')").run();
+    await env.DB.prepare("INSERT INTO races VALUES ('2026-10-05', 'Bursa', 5, '2026-10-05T13:00:00.000Z')").run();
+    mine = await listMyCoupons(env, "u1", NOW);
+    expect(mine[0].startsAt).toBe("2026-10-05T12:30:00.000Z");
 
     // Four of five legs run: still waiting.
     await addWinner(env, 4, 2);
