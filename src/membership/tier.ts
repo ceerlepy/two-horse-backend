@@ -165,6 +165,8 @@ const RUNNER_PREMIUM_SIGNAL_KEYS =
     /* Tomorrow's card: early expert pick count + consensus sentence. */
     "expertPickCount",
     "expertPrimaryCount",
+    "expertRole",
+    "expertRoleCount",
     "expertSummary"
   ] as const;
 

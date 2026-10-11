@@ -579,10 +579,12 @@ export async function attachNextDayExperts(
             const count = new Set(list.filter(isPositive).map(r => r.source_key)).size;
             if (count <= 0) return runner;
             const consensus = aggregateExpertPredictions(list);
+            const role = nextDayExpertRole(consensus);
             return {
               ...runner,
               expertPickCount: count,
               ...(consensus.primaryCount > 0 ? { expertPrimaryCount: consensus.primaryCount } : {}),
+              ...(role ? { expertRole: role.role, expertRoleCount: role.count } : {}),
               ...(consensus.summary ? { expertSummary: consensus.summary } : {})
             };
           })
@@ -590,6 +592,21 @@ export async function attachNextDayExperts(
       })
     }))
   };
+}
+
+/*
+ * The strongest role sources gave a horse and how many gave it, so
+ * the card can say "1 uzman favori" instead of a bare "1 uzman"
+ * (a lone surprise pick wins less often than an unpicked horse).
+ */
+export function nextDayExpertRole(
+  consensus: ExpertConsensus
+): { role: "favorite" | "strong" | "second" | "surprise"; count: number } | null {
+  if (consensus.primaryCount > 0) return { role: "favorite", count: consensus.primaryCount };
+  if (consensus.strongOnlyCount > 0) return { role: "strong", count: consensus.strongOnlyCount };
+  if (consensus.secondaryCount > 0) return { role: "second", count: consensus.secondaryCount };
+  if (consensus.surpriseOnlyCount > 0) return { role: "surprise", count: consensus.surpriseOnlyCount };
+  return null;
 }
 
 /*
