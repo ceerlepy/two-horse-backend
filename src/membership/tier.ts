@@ -164,6 +164,7 @@ const RUNNER_PREMIUM_SIGNAL_KEYS =
     "valueModel",
     /* Tomorrow's card: early expert pick count + consensus sentence. */
     "expertPickCount",
+    "expertPrimaryCount",
     "expertSummary"
   ] as const;
 
@@ -173,7 +174,9 @@ const RACE_PREMIUM_SIGNAL_KEYS =
     "couponStrategy",
     "valueModelStatus",
     "expertSourceCount",
-    "surpriseNumber"
+    "surpriseNumber",
+    /* Tomorrow's card: no-AGF model favourite. */
+    "modelFavoriteNumber"
   ] as const;
 
 export function stripPremiumRunnerSignals(

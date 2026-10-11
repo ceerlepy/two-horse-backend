@@ -14,7 +14,8 @@ import { expertAdapterFor } from "./adapters/registry";
 import { externalTargetUrl, targetCitiesForUrl } from "./adapters/target-scope";
 import type { ExpertTargetResolution } from "./adapters/types";
 import { aggregateExpertPredictions } from "./aggregator";
-import type { ExpertPredictionRow } from "./aggregation-types";
+import type { ExpertConsensus, ExpertPredictionRow } from "./aggregation-types";
+import { scoreRace } from "../scoring/race-score";
 import { directPageDateEvidence } from "./discovery";
 import {
   acquireExpertDocument,
@@ -519,9 +520,11 @@ function isPositive(row: ExpertPredictionRow): boolean {
 }
 
 /*
- * Adds expertPickCount (distinct sources with a positive pick) and
- * expertSummary (our own counts-only sentence) to nextDay runners.
- * Free tier gets neither, like today's expertConsensus.
+ * Adds expertPickCount (distinct sources with a positive pick),
+ * expertPrimaryCount (sources calling the horse banko/favori/yıldız)
+ * and expertSummary (our own counts-only sentence) to nextDay runners,
+ * plus each race's modelFavoriteNumber. Free tier gets none of them,
+ * like today's expertConsensus and modelScore.
  */
 export async function attachNextDayExperts(
   env: Env,
@@ -545,10 +548,8 @@ export async function attachNextDayExperts(
     `).bind(program.date).all<any>();
     rows = result.results ?? [];
   } catch {
-    return program;
+    rows = [];
   }
-
-  if (!rows.length) return program;
 
   const byRunner = new Map<string, ExpertPredictionRow[]>();
   for (const row of rows) {
@@ -562,23 +563,66 @@ export async function attachNextDayExperts(
     ...program,
     meetings: program.meetings.map(meeting => ({
       ...meeting,
-      races: meeting.races.map(race => ({
-        ...race,
-        runners: race.runners.map(runner => {
-          const list = byRunner.get(runnerKey(meeting.city, race.race_number, runner.horse_number));
-          if (!list?.length) return runner;
-          const count = new Set(list.filter(isPositive).map(r => r.source_key)).size;
-          if (count <= 0) return runner;
-          const summary = aggregateExpertPredictions(list).summary;
-          return {
-            ...runner,
-            expertPickCount: count,
-            ...(summary ? { expertSummary: summary } : {})
-          };
-        })
-      }))
+      races: meeting.races.map(race => {
+        const consensusOf = (horseNumber: number) =>
+          aggregateExpertPredictions(
+            byRunner.get(runnerKey(meeting.city, race.race_number, horseNumber)) ?? []
+          );
+        const modelFavoriteNumber = nextDayModelFavorite(race.runners, consensusOf);
+
+        return {
+          ...race,
+          ...(modelFavoriteNumber !== null ? { modelFavoriteNumber } : {}),
+          runners: race.runners.map(runner => {
+            const list = byRunner.get(runnerKey(meeting.city, race.race_number, runner.horse_number));
+            if (!list?.length) return runner;
+            const count = new Set(list.filter(isPositive).map(r => r.source_key)).size;
+            if (count <= 0) return runner;
+            const consensus = aggregateExpertPredictions(list);
+            return {
+              ...runner,
+              expertPickCount: count,
+              ...(consensus.primaryCount > 0 ? { expertPrimaryCount: consensus.primaryCount } : {}),
+              ...(consensus.summary ? { expertSummary: consensus.summary } : {})
+            };
+          })
+        };
+      })
     }))
   };
+}
+
+/*
+ * Tomorrow's model favourite: the same no-AGF score the race screen
+ * shows on race morning before AGF opens (form, HP, weight and expert
+ * picks, pulled toward 50 by how much of it is populated). On 957
+ * frozen races (19 Aug - 11 Oct 2026) its top pick won 25.7% against
+ * 10.4% for a random runner and 23.3% for the horse most experts
+ * named (AGF's favourite, not available the evening before: 33.4%).
+ * Null when nothing separates the top two, e.g. no data at all.
+ */
+export function nextDayModelFavorite(
+  runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
+  consensusOf: (horseNumber: number) => ExpertConsensus
+): number | null {
+  if (runners.length < 2) return null;
+
+  const scored = scoreRace(
+    runners.map(runner => ({
+      horse_number: runner.horse_number,
+      agf_percent: null,
+      hp: runner.hp,
+      weight: runner.weight,
+      recent_form_raw: runner.recent_form_raw,
+      market_score: null,
+      field_score: null,
+      expertConsensus: consensusOf(runner.horse_number)
+    }))
+  );
+
+  const ordered = [...scored].sort((a, b) => b.modelScore.score - a.modelScore.score);
+  if (ordered[0].modelScore.score <= ordered[1].modelScore.score) return null;
+  return ordered[0].horse_number;
 }
 
 export function stripNextDayExperts(program: NextDayProgram): NextDayProgram {

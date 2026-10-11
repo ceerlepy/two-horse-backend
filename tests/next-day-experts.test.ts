@@ -303,7 +303,37 @@ describe("attachNextDayExperts", () => {
     const out = await attachNextDayExperts(await seeded(), CARD, "free");
     const json = JSON.stringify(out);
     expect(json).not.toContain("expertPickCount");
+    expect(json).not.toContain("expertPrimaryCount");
     expect(json).not.toContain("expertSummary");
+    expect(json).not.toContain("modelFavoriteNumber");
+  });
+
+  it("counts banko/favori sources and names the no-AGF model favourite", async () => {
+    const out = await attachNextDayExperts(await seeded(), CARD, "premium");
+    const race: any = out.meetings[0].races[0];
+    expect(race.runners[0].expertPrimaryCount).toBe(2);
+    expect(race.modelFavoriteNumber).toBe(3);
+    /* race 2 has no form, HP, weight or picks: nothing to pick from */
+    expect(out.meetings[0].races[1]).not.toHaveProperty("modelFavoriteNumber");
+  });
+
+  it("picks the model favourite from form, HP and weight when no expert has spoken", async () => {
+    const env = await testEnv();
+    const card: NextDayProgram = {
+      ...CARD,
+      meetings: [{
+        city: "Bursa",
+        races: [{
+          ...CARD.meetings[0].races[1],
+          runners: [
+            { horse_number: 1, horse_name: "KARA", jockey: null, weight: 58, hp: 40, recent_form_raw: "8765", start_position: null },
+            { horse_number: 2, horse_name: "BEYAZ", jockey: null, weight: 54, hp: 70, recent_form_raw: "1121", start_position: null }
+          ]
+        }]
+      }]
+    };
+    const out = await attachNextDayExperts(env, card, "gold");
+    expect((out.meetings[0].races[0] as any).modelFavoriteNumber).toBe(2);
   });
 });
 
