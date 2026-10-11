@@ -85,6 +85,10 @@ import {
 } from "./adapters/istinye-coupon";
 
 import {
+  parseGanyanComments
+} from "./adapters/ganyan-comments";
+
+import {
   parsePuanliBulten
 } from "./adapters/puanli-altili-bulten";
 
@@ -1221,11 +1225,11 @@ export async function extractExperts(
 
 
   /*
-   * HorseTurk and İstinye are read straight from their own pages,
-   * explicit choices only (see each parser). Every row carries the
-   * horse's name and is kept only when number AND name match that
-   * race's TJK runner, so a misread layout drops rows instead of
-   * landing on the wrong horse.
+   * HorseTurk, İstinye and Ganyan Canavarı are read straight from
+   * their own pages, explicit choices only (see each parser). Every
+   * row carries the horse's name and is kept only when number AND
+   * name match that race's TJK runner, so a misread layout drops
+   * rows instead of landing on the wrong horse.
    */
   const ownParser =
     sourceKey === "horseturk" &&
@@ -1254,7 +1258,17 @@ export async function extractExperts(
             raceDate,
             targetCities
           ).extraction
-        : null;
+
+        /*
+         * The adapter hands over one city's public comments block.
+         */
+        : sourceKey === "ganyan_canavari" &&
+          targetCities.length === 1
+          ? parseGanyanComments(
+              document.acquired.html,
+              targetCities[0]
+            )
+          : null;
 
 
   if (ownParser) {

@@ -88,7 +88,7 @@ interface RawLink {
 }
 
 
-interface LooseCandidate {
+export interface LooseCandidate {
   url:string;
   text:string;
   score:number;
@@ -1479,6 +1479,47 @@ function directLooseCandidate(
 }
 
 
+/*
+ * Discovery candidates still worth verifying, best first.
+ *
+ * Direct source URLs were already verified in step 1. Ranking them
+ * again (they score 100) re-fetches URLs that just failed and pushes
+ * what discovery actually found out of the maxCandidates window:
+ * three cities x two HorseTurk URL patterns filled all six slots,
+ * so a city published under a third pattern was never verified.
+ */
+export function discoveryCandidatesToVerify(
+  candidates:
+    LooseCandidate[],
+
+  alreadyTried:
+    Set<string>,
+
+  maxCandidates:
+    number
+):LooseCandidate[] {
+  return candidates
+    .filter(
+      candidate =>
+        !alreadyTried.has(
+          candidate.url
+        )
+    )
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        second.score -
+        first.score
+    )
+    .slice(
+      0,
+      maxCandidates
+    );
+}
+
+
 function coverage(
   candidates:
     VerifiedCandidate[],
@@ -2786,6 +2827,9 @@ export async function resolveVerifiedArticleTargets(
       VerifiedCandidate[] =
       [];
 
+    const triedDirectUrls =
+      new Set<string>();
+
     /*
      * 1. Deterministic direct source URLs.
      */
@@ -2814,6 +2858,10 @@ export async function resolveVerifiedArticleTargets(
       looseByUrl.set(
         candidate.url,
         candidate
+      );
+
+      triedDirectUrls.add(
+        candidate.url
       );
 
       const value =
@@ -2908,21 +2956,13 @@ export async function resolveVerifiedArticleTargets(
       }
 
       const ranked =
-        [
-          ...looseByUrl.values()
-        ]
-          .sort(
-            (
-              first,
-              second
-            ) =>
-              second.score -
-              first.score
-          )
-          .slice(
-            0,
-            maxCandidates
-          );
+        discoveryCandidatesToVerify(
+          [
+            ...looseByUrl.values()
+          ],
+          triedDirectUrls,
+          maxCandidates
+        );
 
       for (
         const candidate of
