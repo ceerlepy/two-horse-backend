@@ -15,7 +15,8 @@ import { externalTargetUrl, targetCitiesForUrl } from "./adapters/target-scope";
 import type { ExpertTargetResolution } from "./adapters/types";
 import { aggregateExpertPredictions } from "./aggregator";
 import type { ExpertConsensus, ExpertPredictionRow } from "./aggregation-types";
-import { scoreRace } from "../scoring/race-score";
+import { raceUncertainty, scoreRace } from "../scoring/race-score";
+import { recommendCouponStrategy } from "../coupon/strategy";
 import { directPageDateEvidence } from "./discovery";
 import {
   acquireExpertDocument,
@@ -570,6 +571,7 @@ export async function attachNextDayExperts(
           );
         const scores = scoreNextDayRace(race.runners, consensusOf);
         const modelFavoriteNumber = modelFavoriteOf(scores);
+        const analysis = nextDayRaceAnalysis(race.runners, consensusOf);
         const raceSources = new Set(
           rows
             .filter(row =>
@@ -588,6 +590,7 @@ export async function attachNextDayExperts(
            */
           race_date: program.date,
           agfPending: true,
+          ...(analysis ? analysis : {}),
           ...(raceSources > 0 ? { expertSourceCount: raceSources } : {}),
           ...(modelFavoriteNumber !== null ? { modelFavoriteNumber } : {}),
           runners: race.runners.map(stored => {
@@ -699,6 +702,31 @@ export function scoreNextDayRace(
     });
   }
   return out;
+}
+
+/*
+ * Race risk map for tomorrow (uncertainty level and coupon advice),
+ * from the same no-AGF scores, as today's races get before AGF opens.
+ */
+export function nextDayRaceAnalysis(
+  runners: NextDayProgram["meetings"][number]["races"][number]["runners"],
+  consensusOf: (horseNumber: number) => ExpertConsensus
+): { uncertainty: ReturnType<typeof raceUncertainty>; couponStrategy: ReturnType<typeof recommendCouponStrategy> } | null {
+  if (runners.length < 2) return null;
+  const scored = scoreRace(
+    runners.map(runner => ({
+      horse_number: runner.horse_number,
+      agf_percent: null,
+      hp: runner.hp,
+      weight: runner.weight,
+      recent_form_raw: runner.recent_form_raw,
+      market_score: null,
+      field_score: null,
+      expertConsensus: consensusOf(runner.horse_number)
+    }))
+  );
+  const uncertainty = raceUncertainty(scored);
+  return { uncertainty, couponStrategy: recommendCouponStrategy(scored as any, uncertainty) };
 }
 
 function modelFavoriteOf(
