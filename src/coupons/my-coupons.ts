@@ -56,6 +56,8 @@ export interface MyCouponEntry {
   legCount: number;
   hitLegs: number | null;
   allLegsHit: boolean | null;
+  /* First leg's off (ISO, UTC) when the race is on our domestic card; the app schedules its reminder from it. */
+  startsAt: string | null;
   legs: Array<MyCouponLeg & { winner: number | null }>;
 }
 
@@ -209,6 +211,15 @@ async function winnersFor(env: Env, raceDate: string, city: string): Promise<Map
   return winners;
 }
 
+async function startTimesFor(env: Env, raceDate: string, city: string): Promise<Map<number, string>> {
+  const rows = await env.DB.prepare(
+    `SELECT race_number, starts_at FROM races WHERE race_date = ? AND city = ? AND starts_at IS NOT NULL`
+  ).bind(raceDate, city).all<any>();
+  const starts = new Map<number, string>();
+  for (const row of rows.results ?? []) starts.set(Number(row.race_number), String(row.starts_at));
+  return starts;
+}
+
 export async function listMyCoupons(env: Env, userId: string, now = new Date()): Promise<MyCouponEntry[]> {
   const fromDate = addDays(turkeyDate(now), -(MY_COUPONS_CONFIG.listDays - 1));
 
@@ -220,6 +231,7 @@ export async function listMyCoupons(env: Env, userId: string, now = new Date()):
   ).bind(userId, fromDate, MY_COUPONS_CONFIG.maxRows).all<any>();
 
   const winnersByMeeting = new Map<string, Map<number, number>>();
+  const startsByMeeting = new Map<string, Map<number, string>>();
   const entries: MyCouponEntry[] = [];
 
   for (const row of rows.results ?? []) {
@@ -228,6 +240,11 @@ export async function listMyCoupons(env: Env, userId: string, now = new Date()):
     if (!winners) {
       winners = await winnersFor(env, row.race_date, row.city);
       winnersByMeeting.set(meetingKey, winners);
+    }
+    let starts = startsByMeeting.get(meetingKey);
+    if (!starts) {
+      starts = await startTimesFor(env, row.race_date, row.city);
+      startsByMeeting.set(meetingKey, starts);
     }
 
     const legs = parseLegs(row.selections_json).map(leg => ({
@@ -251,6 +268,7 @@ export async function listMyCoupons(env: Env, userId: string, now = new Date()):
       legCount: legs.length,
       hitLegs: evaluated ? hitLegs : null,
       allLegsHit: evaluated ? hitLegs === legs.length : null,
+      startsAt: legs.length ? starts.get(legs[0].raceNumber) ?? null : null,
       legs
     });
   }
