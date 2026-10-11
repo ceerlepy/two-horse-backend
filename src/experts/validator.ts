@@ -41,6 +41,15 @@ export function normalizeExpertHorseName(
       /\s*[(][0-9]+[)]\s*$/u,
       ""
     )
+    /*
+     * TJK writes a foreign-bred horse's country of origin after
+     * its name ("LOCO SUGAR (IRE) (1)"); sources write the bare
+     * name ("4 LOCO SUGAR banko").
+     */
+    .replace(
+      /\s*[(]\p{Lu}{2,3}[)]\s*$/u,
+      ""
+    )
     .replace(/\s+/g,"")
     .replace(
       /[’'`´".,()_\/\\-]/g,

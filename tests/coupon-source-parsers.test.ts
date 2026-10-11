@@ -170,3 +170,28 @@ describe("keepNameVerifiedSelections", () => {
     expect(result.rejected.map(value => value.horseNumber)).toEqual([4,12]);
   });
 });
+
+
+describe("keepNameVerifiedSelections with foreign-bred runners", () => {
+  /*
+   * Live 11.10.2026 İstanbul: HorseTurk wrote "6.AYAK: 4 LOCO SUGAR
+   * banko at"; TJK lists the runner as "LOCO SUGAR (IRE) (1)".
+   */
+  it("matches a bare name against a TJK name with country of origin", () => {
+    const result = keepNameVerifiedSelections({
+      races:[{
+        city:"İstanbul",
+        raceNumber:6,
+        numberGroups:[],
+        selections:[
+          { horseNumber:4, horseName:"LOCO SUGAR", labels:["banko"] }
+        ]
+      }]
+    }, [
+      { city:"İstanbul", raceNumber:6, horseNumber:4, horseName:"LOCO SUGAR (IRE) (1)" }
+    ]);
+
+    expect(result.rejected).toEqual([]);
+    expect(result.raw.races[0].selections.map(value => value.horseNumber)).toEqual([4]);
+  });
+});
