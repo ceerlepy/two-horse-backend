@@ -38,6 +38,7 @@ import {
 } from "./play-billing";
 
 import {
+  TIER_LIMITS,
   effectiveTier,
   PRODUCT_TIER_MAP,
   type UserRecord,
@@ -65,6 +66,10 @@ export interface PublicUser {
   subscriptionAutoRenew: boolean | null;
   /* Plan a scheduled switch moves to at the next renewal. */
   subscriptionPendingTier: MembershipTier | null;
+  /* "AI'ya sor" questions a day on this plan, so the app never hard-codes it. */
+  askAiPerDay: number;
+  /* The Premium figure, for the upgrade text shown to other plans. */
+  premiumAskAiPerDay: number;
 }
 
 export function toPublicUser(
@@ -91,7 +96,11 @@ export function toPublicUser(
         ? PRODUCT_TIER_MAP[
             user.subscriptionPendingProductId
           ] ?? null
-        : null
+        : null,
+    askAiPerDay:
+      TIER_LIMITS[tier].askAiPerDay,
+    premiumAskAiPerDay:
+      TIER_LIMITS.premium.askAiPerDay
   };
 }
 
