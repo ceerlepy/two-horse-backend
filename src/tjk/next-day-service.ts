@@ -67,6 +67,8 @@ export interface NextDayRunner {
    * Attached at read time, never stored here; absent for free tier.
    */
   expertPickCount?: number;
+  /* Of those, sources calling it banko/favori/yıldız. */
+  expertPrimaryCount?: number;
   expertSummary?: string;
 }
 
@@ -83,6 +85,11 @@ export interface NextDayRace {
    * before this field existed.
    */
   sixfold_start_numbers?: number[];
+  /*
+   * No-AGF model favourite (src/experts/next-day-service.ts),
+   * attached at read time for paid tiers, never stored.
+   */
+  modelFavoriteNumber?: number;
   runners: NextDayRunner[];
 }
 
