@@ -62,6 +62,12 @@ export interface NextDayRunner {
   recent_form_raw: string | null;
   start_position: number | null;
   /*
+   * TJK horse page, so tomorrow's race screen can show the same recent
+   * runs and videos as today's. Stored only, stripped from responses.
+   * Absent on cards stored before 11 Oct 2026.
+   */
+  horse_profile_url?: string | null;
+  /*
    * Early expert picks (src/experts/next-day-service.ts): distinct
    * sources with a positive pick, plus our own counts-only sentence.
    * Attached at read time, never stored here; absent for free tier.
@@ -88,6 +94,8 @@ export interface NextDayRace {
    * before this field existed.
    */
   sixfold_start_numbers?: number[];
+  /* TJK race comparison page (training gallops). Stored only. */
+  performance_url?: string | null;
   /*
    * No-AGF model favourite (src/experts/next-day-service.ts),
    * attached at read time for paid tiers, never stored.
@@ -135,7 +143,10 @@ function startsAtIso(
   return new Date(Date.UTC(y, m - 1, d, hh - 3, mm)).toISOString();
 }
 
-/* Compact, display-only projection: no profile URLs, no AGF. */
+/*
+ * Compact projection, no AGF. The TJK page links are kept for the
+ * race screen's recent runs, videos and gallops; the API strips them.
+ */
 export function toNextDayProgram(
   program: TjkProgramInput,
   date: string
@@ -152,6 +163,7 @@ export function toNextDayProgram(
         track: race.track ?? null,
         sixfold_start_numbers: (race.sixfoldStartNumbers ?? [])
           .filter(value => Number.isInteger(value) && value > 0),
+        performance_url: race.performanceUrl ?? null,
         runners: race.runners.map(runner => ({
           horse_number: runner.number,
           horse_name: runner.name,
@@ -159,7 +171,8 @@ export function toNextDayProgram(
           weight: runner.weight ?? null,
           hp: runner.hp ?? null,
           recent_form_raw: runner.recentFormRaw ?? null,
-          start_position: runner.startPosition ?? null
+          start_position: runner.startPosition ?? null,
+          horse_profile_url: runner.horseProfileUrl ?? null
         }))
       }))
     }))
@@ -190,15 +203,16 @@ export async function refreshNextDayProgramIfDue(
 
   const state = await getState(env, KEY);
   const stored = await env.DB.prepare(
-    "SELECT fetched_at FROM next_day_programs WHERE race_date=?"
-  ).bind(target).first<{ fetched_at: string }>();
+    "SELECT fetched_at, instr(program_json, '\"horse_profile_url\"') > 0 AS has_links FROM next_day_programs WHERE race_date=?"
+  ).bind(target).first<{ fetched_at: string; has_links: number }>();
 
   /*
    * A success for an earlier target date (yesterday's run) must not
-   * keep today's target waiting out the TTL.
+   * keep today's target waiting out the TTL, and neither must a card
+   * stored before the TJK page links were kept.
    */
   const effectiveState =
-    stored ? state : state && { ...state, last_success_at: null };
+    stored?.has_links ? state : state && { ...state, last_success_at: null };
 
   if (!isDue(effectiveState, NEXT_DAY_CONFIG.ttlMs)) {
     return { refreshed: false, reason: "fresh", date: target };
@@ -288,4 +302,38 @@ export async function nextDayForToday(
 ): Promise<NextDayProgram | null> {
   if (!isTodayOver(todayMeetings, now)) return null;
   return loadNextDayProgram(env, addDays(turkeyDate(now), 1));
+}
+
+/* Drops the stored TJK page links before a card leaves the API. */
+export function stripNextDayLinks(
+  program: NextDayProgram
+): NextDayProgram {
+  return {
+    ...program,
+    meetings: program.meetings.map(meeting => ({
+      ...meeting,
+      races: meeting.races.map(({ performance_url, ...race }) => ({
+        ...race,
+        runners: race.runners.map(({ horse_profile_url, ...runner }) => runner)
+      }))
+    }))
+  };
+}
+
+/*
+ * One race of a stored D+1 card, for the race screen's recent runs,
+ * videos and gallops endpoints when the date is not today's program.
+ */
+export async function findNextDayRace(
+  env: Env,
+  raceDate: string,
+  city: string,
+  raceNumber: number
+): Promise<NextDayRace | null> {
+  const program = await loadNextDayProgram(env, raceDate).catch(() => null);
+  const wanted = city.trim().toLocaleLowerCase("tr-TR");
+  const meeting = program?.meetings.find(
+    m => m.city.trim().toLocaleLowerCase("tr-TR") === wanted
+  );
+  return meeting?.races.find(r => r.race_number === raceNumber) ?? null;
 }

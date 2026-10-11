@@ -5,8 +5,8 @@ import { toPublicMeetings, toPublicHistory } from "./public-projection";
 import { markAgfPending } from "./agf-pending";
 import { toCompactMeetings } from "./compact-projection";
 import { refreshProgramIfDue } from "../tjk/program-service";
-import { isTodayOver, nextDayForToday, refreshNextDayProgramIfDue } from "../tjk/next-day-service";
-import { attachNextDayExperts } from "../experts/next-day-service";
+import { isTodayOver, nextDayForToday, refreshNextDayProgramIfDue, stripNextDayLinks } from "../tjk/next-day-service";
+import { attachNextDayExperts, stripNextDayExperts } from "../experts/next-day-service";
 import {
   refreshExpertsIfDue,
   refreshExpertSource
@@ -190,7 +190,7 @@ export async function route(request:Request,env:Env,ctx:ExecutionContext):Promis
   // Tomorrow's card (display only, no scores) once today's last race has started.
   // Early expert pick counts ride along (tier-gated like expertConsensus).
   const storedNextDay=await nextDayForToday(env,meetings).catch(()=>null);
-  const nextDay=storedNextDay?await attachNextDayExperts(env,storedNextDay,session.tier).catch(()=>storedNextDay):null;
+  const nextDay=storedNextDay?await attachNextDayExperts(env,storedNextDay,session.tier).catch(()=>stripNextDayLinks(stripNextDayExperts(storedNextDay))):null;
   if(isTodayOver(meetings)) ctx.waitUntil(refreshNextDayProgramIfDue(env).then(()=>undefined).catch(console.error));
   return json({date:turkeyDate(),meetings:url.searchParams.get("view")==="full"?publicMeetings:toCompactMeetings(publicMeetings),...(nextDay?{nextDay}:{}),servedFrom:"d1",refreshingInBackground:true});
  }

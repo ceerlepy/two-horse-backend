@@ -321,6 +321,24 @@ describe("attachNextDayExperts", () => {
     expect(out.meetings[0].races[1]).not.toHaveProperty("modelFavoriteNumber");
   });
 
+  it("serves tomorrow in today's race shape and never the TJK links", async () => {
+    const card: NextDayProgram = JSON.parse(JSON.stringify(CARD));
+    card.meetings[0].races[0].performance_url = "https://www.tjk.org/perf";
+    card.meetings[0].races[0].runners[0].horse_profile_url = "https://www.tjk.org/horse";
+    const out = await attachNextDayExperts(await seeded(), card, "gold");
+    const race: any = out.meetings[0].races[0];
+    expect(race.race_date).toBe("2026-10-06");
+    expect(race.agfPending).toBe(true);
+    expect(race.expertSourceCount).toBe(3);
+    expect(race.runners[0].modelScore.score).toBeGreaterThan(race.runners[1].modelScore.score);
+    expect(race.runners[0].expertConsensus.primaryCount).toBe(2);
+    expect(race.runners[0].expertConsensus).not.toHaveProperty("weightedSupport");
+    expect(race.runners[1]).not.toHaveProperty("expertConsensus");
+    expect(JSON.stringify(out)).not.toContain("tjk.org");
+    const free = await attachNextDayExperts(await seeded(), card, "free");
+    expect(JSON.stringify(free)).not.toMatch(/tjk\.org|modelScore|expertConsensus/);
+  });
+
   it("picks the model favourite from form, HP and weight when no expert has spoken", async () => {
     const env = await testEnv();
     const card: NextDayProgram = {

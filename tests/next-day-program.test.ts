@@ -14,6 +14,7 @@ import {
   addDays,
   isTodayOver,
   loadNextDayProgram,
+  stripNextDayLinks,
   nextDayForToday,
   refreshNextDayProgramIfDue
 } from "../src/tjk/next-day-service";
@@ -146,7 +147,11 @@ describe("refreshNextDayProgramIfDue", () => {
     expect(result.refreshed).toBe(true);
 
     const stored = await loadNextDayProgram(env, "2026-10-06");
-    expect(stored).toEqual({
+    /* TJK links are stored for the race screen, never served. */
+    expect(stored!.meetings[0].races[0].performance_url).toBe("https://www.tjk.org/perf");
+    expect(stored!.meetings[0].races[0].runners[0].horse_profile_url).toBe("https://www.tjk.org/horse");
+    const served = stripNextDayLinks(stored!);
+    expect(served).toEqual({
       date: "2026-10-06",
       meetings: [{
         city: "Bursa",
@@ -169,7 +174,7 @@ describe("refreshNextDayProgramIfDue", () => {
         }]
       }]
     });
-    expect(JSON.stringify(stored)).not.toMatch(/tjk\.org|agf/i);
+    expect(JSON.stringify(served)).not.toMatch(/tjk\.org|agf/i);
 
     for (const table of ["meetings", "races", "runners", "agf_snapshots"]) {
       const count = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first();
