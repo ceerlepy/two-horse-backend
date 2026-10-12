@@ -30,19 +30,21 @@ import type {
  * RISK_LOVER_BUDGET_RANGE_TL, at most RISK_LOVER_MAX_COUPONS of them.
  * With the 1.1x surprise (SURPRISE_CONFIG) 6/6 hits rose further:
  * 1000 TL 105, 1500 TL 135, 2000 TL 145 (estimated payout -4/-4/-13%).
+ * The 750-1000 band is the old 1000 TL tier (97 -> 105) and is offered;
+ * 500-750 is not, since the 500 TL tier lost hits (70 -> 65).
  */
 export const RISK_LOVER_SURPRISE_LEGS = 2;
 
 export const RISK_LOVER_BUDGET_RANGE_TL = {
-  min: 1000,
+  min: 750,
   max: 2000
 } as const;
 
-export const RISK_LOVER_MAX_COUPONS = 2;
+export const RISK_LOVER_MAX_COUPONS = 3;
 
 /*
  * Keeps the highest RISK_LOVER_MAX_COUPONS price bands that lie inside
- * RISK_LOVER_BUDGET_RANGE_TL (1000-1500 and 1500-2000), in their
+ * RISK_LOVER_BUDGET_RANGE_TL (750-1000, 1000-1500 and 1500-2000), in their
  * original (ascending) order.
  */
 export function riskLoverTiers<T extends { bandMinTl: number; targetBudgetTl: number }>(
