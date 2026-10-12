@@ -10,6 +10,10 @@ import {
 } from "cheerio";
 
 import {
+  publishedForRaceDay
+} from "../published-date";
+
+import {
   acquireCfContentHtml,
   acquireCfScrapeHtml
 } from "../../acquisition/cloudflare-html";
@@ -2436,10 +2440,26 @@ export async function resolveVerifiedArticleTargets(
               candidate.text
           );
 
+        /*
+         * A weekday-only title ("Pazartesi Bursa ...") is dated by
+         * the page's own publish time instead (published-date.ts).
+         */
+        const published =
+          evidence.hasDate
+            ? null
+            : publishedForRaceDay(
+                html,
+                heading,
+                context.raceDate
+              );
+
         const accepted =
           article.outputCharacters >=
             180 &&
-          evidence.hasDate &&
+          (
+            evidence.hasDate ||
+            published?.accepted === true
+          ) &&
           evidence.hasCity &&
           evidence
             .hasPredictionLanguage &&
@@ -2470,6 +2490,9 @@ export async function resolveVerifiedArticleTargets(
 
             hasDate:
               evidence.hasDate,
+
+            publishedDate:
+              published?.publishedDate ?? null,
 
             hasCity:
               evidence.hasCity,
