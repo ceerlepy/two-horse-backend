@@ -47,10 +47,11 @@ function leg(
 
 
 describe("buildCouponBands", () => {
-  it("cuts the max budget into 500 TL bands", () => {
+  it("cuts the max budget into 500 TL bands, 500-1000 split at 750", () => {
     expect(buildCouponBands(2000)).toEqual([
       { minTl: 0, maxTl: 500 },
-      { minTl: 500, maxTl: 1000 },
+      { minTl: 500, maxTl: 750 },
+      { minTl: 750, maxTl: 1000 },
       { minTl: 1000, maxTl: 1500 },
       { minTl: 1500, maxTl: 2000 }
     ]);
@@ -59,11 +60,16 @@ describe("buildCouponBands", () => {
   it("ends the last band at an uneven max", () => {
     expect(buildCouponBands(1200).at(-1)).toEqual({ minTl: 1000, maxTl: 1200 });
     expect(buildCouponBands(300)).toEqual([{ minTl: 0, maxTl: 300 }]);
+    expect(buildCouponBands(500)).toEqual([{ minTl: 0, maxTl: 500 }]);
+    expect(buildCouponBands(700)).toEqual([
+      { minTl: 0, maxTl: 500 },
+      { minTl: 500, maxTl: 700 }
+    ]);
   });
 
-  it("gives Gold's 1500 TL three coupons and 5000 TL ten", () => {
-    expect(buildCouponBands(1500)).toHaveLength(3);
-    expect(buildCouponBands(5000)).toHaveLength(10);
+  it("gives Gold's 1500 TL four coupons and 5000 TL eleven", () => {
+    expect(buildCouponBands(1500)).toHaveLength(4);
+    expect(buildCouponBands(5000)).toHaveLength(11);
   });
 
   it("matches the configured rules", () => {
@@ -132,9 +138,10 @@ describe(
               1.25
           });
 
+        /* 0-500, 500-750, 750-1000, then 500 TL bands up to 3000. */
         expect(
           coupons
-        ).toHaveLength(6);
+        ).toHaveLength(7);
 
         for (
           const coupon of coupons

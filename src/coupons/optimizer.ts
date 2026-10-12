@@ -116,7 +116,8 @@ interface PreparedLeg {
 
 /*
  * A user's budget field is the CEILING they're willing to spend. It is
- * cut into price bands (0-500, 500-1000, ... up to the ceiling) and
+ * cut into price bands (0-500, 500-750, 750-1000, 1000-1500, ... up to
+ * the ceiling) and
  * each band gets one coupon: the cheapest one in the band whose chance
  * is within stopTolerance of the best the band can buy. So a coupon
  * does not stretch to a round number; it stops where more horses stop
@@ -138,8 +139,13 @@ interface PreparedLeg {
  *
  * minTicketTl: TJK's minimum stake per ticket.
  */
+/*
+ * 500-1000 is split at 750 (owner, 12 Oct): one coupon near 500 and
+ * one near 1000 instead of a single one for the whole range.
+ */
 export const COUPON_BAND_CONFIG = {
   stepTl: 500,
+  extraEdgesTl: [750],
   nestedUpToTl: 1500,
   stopTolerance: 0.05,
   minTicketTl: 20
@@ -155,16 +161,25 @@ export function buildCouponBands(
 ): CouponBand[] {
   const bands: CouponBand[] = [];
 
+  const edges = new Set<number>(COUPON_BAND_CONFIG.extraEdgesTl);
+
   for (
-    let minTl = 0;
-    minTl < maxBudgetTl - 1e-9;
-    minTl += COUPON_BAND_CONFIG.stepTl
+    let edge = COUPON_BAND_CONFIG.stepTl;
+    edge < maxBudgetTl - 1e-9;
+    edge += COUPON_BAND_CONFIG.stepTl
   ) {
-    bands.push({
-      minTl,
-      maxTl: Math.min(minTl + COUPON_BAND_CONFIG.stepTl, maxBudgetTl)
-    });
+    edges.add(edge);
   }
+
+  let minTl = 0;
+
+  for (const edge of [...edges].sort((a, b) => a - b)) {
+    if (edge >= maxBudgetTl - 1e-9) break;
+    bands.push({ minTl, maxTl: edge });
+    minTl = edge;
+  }
+
+  bands.push({ minTl, maxTl: maxBudgetTl });
 
   return bands;
 }
