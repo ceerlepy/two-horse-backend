@@ -3,6 +3,8 @@ import type { TjkProgramInput } from "../types/models";
 import { turkeyDate, turkeyDateTime } from "../shared";
 import { aggregateExpertPredictions } from "../experts/aggregator";
 import { scoreRace, raceUncertainty } from "../scoring/race-score";
+import { loadActiveWinModel } from "../win-model/registry";
+import type { WinModelStrategy } from "../win-model/strategy";
 import { applyNoAgfModel, loadNextDayUtilities, nextDayRaceKey } from "../value-model/next-day-model";
 
 import {
@@ -290,8 +292,10 @@ export async function upsertProgram(env: Env, program: TjkProgramInput, sourceHa
   for (let i=0; i<statements.length; i+=75) await env.DB.batch(statements.slice(i, i+75));
 }
 
-export async function getToday(env: Env): Promise<any> {
+export async function getToday(env: Env, winModel?: WinModelStrategy): Promise<any> {
   const date = turkeyDate();
+  /* The model that prices the races (src/win-model); callers pass it to share one read. */
+  const model = winModel ?? await loadActiveWinModel(env);
   const meetings = await env.DB.prepare("SELECT city,updated_at FROM meetings WHERE race_date=? ORDER BY city").bind(date).all<any>();
   const races = await env.DB.prepare("SELECT * FROM races WHERE race_date=? ORDER BY city,race_number").bind(date).all<any>();
   const runners = await env.DB.prepare("SELECT * FROM runners WHERE race_date=? ORDER BY city,race_number,horse_number").bind(date).all<any>();
@@ -701,7 +705,9 @@ export async function getToday(env: Env): Promise<any> {
                         race.race_number
                       )
                     )
-                  )
+                  ),
+
+                  model.scoreCoefficients
                 ),
 
                 noAgfUtilities.get(

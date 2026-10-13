@@ -19,9 +19,13 @@ import {
 } from "../storage/program-repository";
 
 import {
-  attachValues,
-  loadTodayValues
+  attachValues
 } from "../value-model/service";
+
+import {
+  loadActiveWinModel,
+  loadValuesWithFallback
+} from "../win-model/registry";
 
 import {
   cachedAiRun
@@ -493,10 +497,12 @@ export async function askAi(
       context = foreignRaceContext(found, found.race);
     }
   } else {
+    const winModel = await loadActiveWinModel(env);
+    const scored = await getToday(env, winModel);
     const meetings =
       attachValues(
-        await getToday(env),
-        await loadTodayValues(env, date)
+        scored,
+        await loadValuesWithFallback(env, winModel, date, scored)
           .catch(() => ({ status: "unavailable", byRunner: new Map() }))
       );
 

@@ -3,10 +3,14 @@ import type {
 } from "../env";
 
 import {
-  loadTodayValues,
   valueSurpriseNumber,
   type RunnerValue
 } from "../value-model/service";
+
+import {
+  loadActiveWinModel,
+  loadValuesWithFallback
+} from "../win-model/registry";
 
 import type {
   CouponLegInput
@@ -14,10 +18,11 @@ import type {
 
 /*
  * "Risk sever" coupon: same price tiers as our normal coupons, built
- * on the value model's chances instead of the model score, with the
- * value-model surprise forced into the RISK_LOVER_SURPRISE_LEGS legs
- * whose surprise is strongest. Normal coupons, cards and model scores
- * are untouched; the value model only enters this extra coupon.
+ * on the active win model's AGF view (src/win-model) with its surprise
+ * forced into the RISK_LOVER_SURPRISE_LEGS legs whose surprise is
+ * strongest. Under the legacy model that view is the separate value
+ * model; under the single model it is the card's own chance, so this
+ * coupon differs from the normal one only by the forced surprises.
  *
  * Backtest (579 past altılı, value model walk-forward, 2025-10..2026-10;
  * /mnt/project-files/analysis/kupon-surpriz-testi-2026-10-10): 6/6 hits
@@ -66,8 +71,9 @@ export async function riskLoverLegs(
   races: any[],
   legs: CouponLegInput[]
 ): Promise<CouponLegInput[] | null> {
+  /* The active win model's AGF view (src/win-model): its chances and its Sürpriz. */
   const values =
-    await loadTodayValues(env, raceDate)
+    await loadValuesWithFallback(env, await loadActiveWinModel(env), raceDate, [{ city, races }])
       .catch(() => null);
 
   if (!values || values.status !== "active" || values.byRunner.size === 0) {

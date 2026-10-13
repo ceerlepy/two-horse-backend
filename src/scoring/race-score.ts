@@ -16,7 +16,8 @@ import {
 import {
   displayScore,
   learnedWinProbabilities,
-  type LearnedFeatures
+  type LearnedFeatures,
+  type LearnedScoreCoefficients
 } from "./learned-score";
 
 /*
@@ -76,7 +77,10 @@ export function scoreRace<
 >(
   runners: T[],
   learnedFeatures?:
-    RaceLearnedFeatures | null
+    RaceLearnedFeatures | null,
+  /* the active win model's coefficients (src/win-model); default: legacy score */
+  coefficients?:
+    LearnedScoreCoefficients
 ): Array<
   T & {
     modelScore:
@@ -114,7 +118,7 @@ export function scoreRace<
         })
       ),
 
-      undefined,
+      coefficients,
 
       runners.map(
         runner =>

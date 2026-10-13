@@ -1,0 +1,183 @@
+{
+ "anchor": "lp_agf",
+ "anchorCoef": 0.908242,
+ "features": [
+  {
+   "name": "expert_score",
+   "mean": 64.512,
+   "sd": 6.74931,
+   "coef": 0.0,
+   "naCoef": 0.166167
+  },
+  {
+   "name": "form_score",
+   "mean": 52.7483,
+   "sd": 19.7154,
+   "coef": 0.0,
+   "naCoef": -0.127846
+  },
+  {
+   "name": "market_score",
+   "mean": 50.2847,
+   "sd": 4.512,
+   "coef": 0.091044,
+   "naCoef": 0.0
+  },
+  {
+   "name": "hp_score",
+   "mean": 51.1608,
+   "sd": 23.4267,
+   "coef": 0.0,
+   "naCoef": -0.129919
+  },
+  {
+   "name": "weight_score",
+   "mean": 56.4915,
+   "sd": 2.65963,
+   "coef": 0.0,
+   "naCoef": 0.0
+  },
+  {
+   "name": "field_score",
+   "mean": 58.1857,
+   "sd": 14.3853,
+   "coef": 0.0113739,
+   "naCoef": -0.0129788
+  },
+  {
+   "name": "fig_best3_rel",
+   "mean": 0.0,
+   "sd": 23.3352,
+   "coef": 0.129776,
+   "naCoef": 0.0247046
+  },
+  {
+   "name": "spec_best_rel",
+   "mean": 0.0,
+   "sd": 25.0438,
+   "coef": 0.150522,
+   "naCoef": 0.0530957
+  },
+  {
+   "name": "idm_best400_z30_rel",
+   "mean": 0.0,
+   "sd": 0.56175,
+   "coef": 0.0694026,
+   "naCoef": -0.128717
+  },
+  {
+   "name": "draw_ae_rel",
+   "mean": 0.0,
+   "sd": 0.0855355,
+   "coef": 0.077946,
+   "naCoef": 0.0
+  },
+  {
+   "name": "agf_gny_ratio",
+   "mean": 0.19518,
+   "sd": 0.508887,
+   "coef": 0.151041,
+   "naCoef": 0.0
+  },
+  {
+   "name": "jockey_ae",
+   "mean": 0.990463,
+   "sd": 0.195434,
+   "coef": 0.0608037,
+   "naCoef": 0.0
+  },
+  {
+   "name": "fig_last_rel",
+   "mean": 0.0,
+   "sd": 40.4258,
+   "coef": 0.0274373,
+   "naCoef": 0.0465421
+  },
+  {
+   "name": "n_prev",
+   "mean": 14.2089,
+   "sd": 12.1967,
+   "coef": -0.117441,
+   "naCoef": 0.0
+  },
+  {
+   "name": "jockey_upg",
+   "mean": -0.00134546,
+   "sd": 0.0532432,
+   "coef": 0.0147981,
+   "naCoef": -0.0494597
+  },
+  {
+   "name": "horse_ae",
+   "mean": 1.0112,
+   "sd": 0.386679,
+   "coef": 0.0371319,
+   "naCoef": -0.0494597
+  },
+  {
+   "name": "days_off",
+   "mean": 26.1505,
+   "sd": 38.9363,
+   "coef": -0.0931848,
+   "naCoef": -0.0494597
+  },
+  {
+   "name": "dist_chg",
+   "mean": 19.4238,
+   "sd": 329.445,
+   "coef": -0.0169047,
+   "naCoef": -0.0494597
+  },
+  {
+   "name": "surf_chg",
+   "mean": 0.27705,
+   "sd": 0.447547,
+   "coef": 0.00751063,
+   "naCoef": -0.0494597
+  },
+  {
+   "name": "wt_chg",
+   "mean": -0.00391313,
+   "sd": 3.10545,
+   "coef": -0.0775208,
+   "naCoef": -0.0494597
+  },
+  {
+   "name": "idm_best800_z30_rel",
+   "mean": 0.0,
+   "sd": 0.605983,
+   "coef": 0.0307627,
+   "naCoef": -0.0124027
+  },
+  {
+   "name": "idm_last_z_rel",
+   "mean": 0.0,
+   "sd": 0.460041,
+   "coef": 0.0140636,
+   "naCoef": -0.00616364
+  },
+  {
+   "name": "idm_n30",
+   "mean": 3.79179,
+   "sd": 1.86962,
+   "coef": 0.0607567,
+   "naCoef": 0.0
+  },
+  {
+   "name": "idm_days_last",
+   "mean": 10.5454,
+   "sd": 50.7124,
+   "coef": 0.010837,
+   "naCoef": -0.026435
+  }
+ ],
+ "races": 4436,
+ "_meta": {
+  "version": "unified-v1-2026-10-13",
+  "trainedFrom": "20251005",
+  "trainedTo": "20261004",
+  "races": 4436,
+  "liveRaces": 821,
+  "archiveRaces": 3615
+ }
+}

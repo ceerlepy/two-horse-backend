@@ -1,33 +1,23 @@
 import type { Env } from "../env";
 import { VALUE_MODEL_FEATURES } from "../value-model/features";
-import {
-  LEARNED_SCORE_FEATURES,
-  type LearnedFeatureName,
-  type LearnedFeatures
+import type {
+  LearnedFeatureName,
+  LearnedFeatures
 } from "./learned-score";
 import type { RaceLearnedFeatures } from "./race-score";
 
 /*
- * The learned score needs a few signals AGF does not price (adjusted speed
+ * The learned score needs signals AGF does not price (adjusted speed
  * figure, same-trip specialist figure, gallop tempo, draw bias, the
- * AGF/ganyan disagreement, jockey record). The value model already computes
- * and stores exactly those per runner, so they are read from its feature
- * store rather than computed a second time. Nothing here writes to it.
+ * AGF/ganyan disagreement, jockey record, layoff, weight change...). The
+ * value model already computes and stores them per runner, so they are read
+ * from its feature store rather than computed a second time. All of them are
+ * loaded; each score model's coefficients decide which ones it uses. Nothing
+ * here writes to it.
  *
  * A race with no stored row simply scores without them: the model carries a
  * missing-value coefficient for every feature.
  */
-
-const BORROWED:
-  ReadonlySet<string> =
-  new Set(
-    LEARNED_SCORE_FEATURES.filter(
-      name =>
-        (
-          VALUE_MODEL_FEATURES as readonly string[]
-        ).includes(name)
-    )
-  );
 
 export type ProgramLearnedFeatures =
   Map<string, RaceLearnedFeatures>;
@@ -82,10 +72,6 @@ export async function loadLearnedFeatures(
 
     VALUE_MODEL_FEATURES.forEach(
       (name, index) => {
-        if (!BORROWED.has(name)) {
-          return;
-        }
-
         const value =
           values[index];
 

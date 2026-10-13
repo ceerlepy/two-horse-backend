@@ -137,15 +137,21 @@ export function attachValues(meetings: any[], values: { status: string; byRunner
  * (579 altılı: 1000 TL 102 -> 105, 1500 TL 125 -> 135, 2000 TL 136 ->
  * 145; /mnt/project-files/analysis/kupon-surpriz-testi-2026-10-10).
  * The label itself stays at 1.2x.
+ * 2026-10-12 (owner's call): 1.05x. On 3,673 archive races the surprise
+ * beat its AGF equally at 1.05x / 1.1x / 1.2x (A/E 1.17 / 1.15 / 1.19,
+ * +-0.15) while a real surprise exists in 75% of races instead of 63%,
+ * so fewer cards fall back to the weaker best-score rule (A/E 1.09).
+ * Sürprizli coupons at 1.05x: 750-2000 TL 90/104/132/145 vs 94/105/135/145
+ * (noise). /mnt/project-files/analysis/surpriz-esik-testi-2026-10-12
  */
 export const SURPRISE_CONFIG = {
-  minRatio: 1.1,
+  minRatio: 1.05,
   minProbability: 0.04
 } as const;
 
 /*
  * The card's "Sürpriz": a horse the crowd does not rate (outside the AGF
- * top three) that the value model rates at least SURPRISE_CONFIG.minRatio
+ * top three) that the active win model (src/win-model) rates at least SURPRISE_CONFIG.minRatio
  * above its AGF share, the strongest of
  * them by the model's chance. Owner's definition, 2026-10-10: "AGF'de 6.
  * 7. sırada ama model onu kuvvetlendiriyorsa o sürprizdir". Underrated
