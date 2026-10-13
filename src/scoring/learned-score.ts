@@ -1,4 +1,5 @@
 import coefficients from "./data/score-coefficients.json";
+import type { FeatureName } from "../value-model/features";
 
 /*
  * Learned model score. The hand-set 0-100 weights (SCORING_WEIGHTS) were
@@ -35,8 +36,13 @@ export const LEARNED_SCORE_FEATURES = [
   "jockey_ae"
 ] as const;
 
+/*
+ * Any value-model feature can carry a coefficient: the single model
+ * (src/win-model) reads all of them, the legacy score only the six above.
+ */
 export type LearnedFeatureName =
-  typeof LEARNED_SCORE_FEATURES[number];
+  | typeof LEARNED_SCORE_FEATURES[number]
+  | FeatureName;
 
 export type LearnedFeatures =
   Partial<

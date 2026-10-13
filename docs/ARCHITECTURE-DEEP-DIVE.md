@@ -2884,3 +2884,30 @@ yarışın toplamı yine 100. 7 Ekim'de günün 17 yarışından 3'ü (Elazığ 
 sessizce eski puana düşüyordu. Offline uyum bu sıfırları 1e-6'ya tabanlamıştı, yani
 canlı kod ölçülenden katıydı. `canScoreLearned` artık boş/negatif/sonsuz payı reddedip
 yayınlanmış 0'ı var sayıyor; çıpa onu 1e-6 tabanıyla en düşük şansa oturtuyor.
+
+## 73. Tek model ve model anahtarı (2026-10-13)
+
+Kartı, model puanını, "AGF farkı" etiketini, Sürpriz'i ve iki kupon türünü artık tek bir
+model fiyatlıyor. Hangi modelin yayında olduğu bir strateji deseniyle seçiliyor
+(`src/win-model/`):
+
+- `strategy.ts`: `WinModelStrategy` arayüzü. Her model iki şey verir: kart puanının
+  katsayıları (`scoreCoefficients`) ve at başına AGF görünümü (`loadValues`).
+- `legacy.ts`: eski sistem, model puanı (`score-coefficients.json`) + ayrı değer modeli
+  (`src/value-model`). Olduğu gibi duruyor, geri dönüş yolu.
+- `unified.ts`: tek model (`unified-coefficients.json`). Son 1 yıllık arşiv + canlı yarışlarla,
+  değer modelinin 18 bilgisi ve canlı bileşenler (uzman, para hareketi) birlikte, AGF'ye çapalı
+  koşullu logit. AGF görünümü bu modelin şansı ile AGF payının karşılaştırması.
+- `registry.ts`: `WIN_MODELS` kaydı, `win_model_state` tablosundaki tek satırdan aktif modeli
+  okur (migration 0055). Bilinmeyen değer ya da okuma hatası `legacy`'ye düşer; aktif modelin AGF
+  görünümü hata verirse `legacy`'ninki kullanılır. Kodun geri kalanı modeli bilmez.
+
+Anahtar bir veri değişikliği, deploy gerekmez: `UPDATE win_model_state SET active_model=...`
+ya da `POST /api/admin/win-model {"model":"legacy","reason":"..."}`. Durum:
+`GET /api/debug/win-model`. Önceki model `previous_model`'da saklanır.
+
+Ölçüm (`/mnt/project-files/analysis/tek-model-testi-2026-10-13/`): canlı 493 yarış, haftalık ileri
+test, log-loss 1,8547 vs eski puan 1,8685 (+0,0138, %95 +0,0021..+0,0260); 1. seçim %33,3 vs
+%33,9 (12'ye 15, p 0,70), ilk 3 %66,3 ikisi de. Arşivde (4.233 yarış) değer modeliyle eşit;
+579 altılıda sürprizli kupon 365 vs 385 (gürültü). Değer modelinin cron'u çalışmaya devam eder:
+özellik deposunu (`value_model_predictions.features_json`) o doldurur ve `legacy` ona dayanır.

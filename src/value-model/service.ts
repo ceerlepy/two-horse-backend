@@ -151,7 +151,7 @@ export const SURPRISE_CONFIG = {
 
 /*
  * The card's "Sürpriz": a horse the crowd does not rate (outside the AGF
- * top three) that the value model rates at least SURPRISE_CONFIG.minRatio
+ * top three) that the active win model (src/win-model) rates at least SURPRISE_CONFIG.minRatio
  * above its AGF share, the strongest of
  * them by the model's chance. Owner's definition, 2026-10-10: "AGF'de 6.
  * 7. sırada ama model onu kuvvetlendiriyorsa o sürprizdir". Underrated
